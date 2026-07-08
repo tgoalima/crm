@@ -1,0 +1,130 @@
+/* Custom Styles for Commercial Proposal Generator */
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', sans-serif;
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-card {
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: rgba(30, 41, 59, 0.6);
+  border-color: rgba(99, 102, 241, 0.2);
+  transform: translateY(-2px);
+}
+
+.glass-input {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+  transition: all 0.2s ease;
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  background: rgba(15, 23, 42, 0.80);
+}
+
+/* Timeline Custom Connectors */
+.timeline-line {
+  position: absolute;
+  left: 19px;
+  top: 32px;
+  bottom: -32px;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.5) 0%, rgba(30, 41, 59, 0.2) 100%);
+}
+
+.timeline-item:last-child .timeline-line {
+  display: none;
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(99, 102, 241, 0.2), 0 0 10px rgba(99, 102, 241, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.5), 0 0 25px rgba(99, 102, 241, 0.3);
+  }
+}
+
+.active-glow {
+  animation: pulse-glow 3s infinite;
+  border-color: rgba(99, 102, 241, 0.5) !important;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
+
+/* Fade in Animation */
+.fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading Spinner Accent */
+.spinner-accent {
+  border-top-color: #6366f1;
+}
+
+/* Pulse animation for read-only badge */
+.pulse-badge {
+  animation: pulse-slow 2s infinite;
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
