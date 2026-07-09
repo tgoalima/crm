@@ -231,13 +231,7 @@ function App() {
 
       let clickupName = '';
       try {
-        const clickupHeaders = {
-          "Authorization": API_KEY,
-          "Content-Type": "application/json"
-        };
-        const taskRes = await fetch(`https://api.clickup.com/api/v2/task/${idWithoutHash}`, {
-          headers: clickupHeaders
-        });
+        const taskRes = await fetch(`/clickup-api/task/${idWithoutHash}`);
         if (taskRes.ok) {
           const taskData = await taskRes.json();
           if (taskData.list && taskData.list.id) {
@@ -248,7 +242,7 @@ function App() {
           }
         }
       } catch (clickupErr) {
-        console.error("Erro ao obter detalhes da tarefa no ClickUp:", clickupErr);
+        console.error("Erro ao obter detalhes da tarefa no ClickUp via proxy local:", clickupErr);
       }
 
       const params = new URLSearchParams(window.location.search);
