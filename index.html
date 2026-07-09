@@ -5,28 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gerador de Propostas Comerciais - Suprimática</title>
   
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            heading: ['Outfit', 'sans-serif'],
-          },
-          colors: {
-            slate: {
-              950: '#030712',
-            }
-          }
-        }
-      }
-    }
-  </script>
-  
-  <!-- CSS customizado -->
-  <link rel="stylesheet" href="styles.css">
+  <!-- Estilos de Produção (Tailwind v4 + Custom CSS compilados) -->
+  <link rel="stylesheet" href="/dist/styles.css?v=1.6">
   
   <!-- Supabase JS Client CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -34,9 +14,6 @@
   <!-- React & ReactDOM CDN -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <!-- Babel Standalone CDN para compilar JSX no navegador -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -51,7 +28,7 @@
     </div>
   </div>
 
-  <!-- Script principal do App -->
-  <script type="text/babel" data-type="module" src="app.js?v=1.2"></script>
+  <!-- Script principal do App (Compilado para Produção) -->
+  <script type="module" src="/dist/app.js?v=1.6"></script>
 </body>
 </html>

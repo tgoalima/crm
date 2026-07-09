@@ -3,7 +3,30 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
 const DEAL_VALUE_FIELD_ID = 'ee65221a-029d-4d0a-a981-b71b5a29b4b4';
-const API_KEY = 'pk_90848927_3RNB3KVYA0ZBY9YILUOJAH7RUKD61437';
+const RESPONSAVEL_FIELD_ID = ''; // Mapeado via assignees nativos do ClickUp
+const API_KEY = '';
+
+const chartColors = [
+  'rgba(99, 102, 241, 0.75)',   // Indigo
+  'rgba(16, 185, 129, 0.75)',   // Emerald
+  'rgba(245, 158, 11, 0.75)',   // Amber
+  'rgba(239, 68, 68, 0.75)',     // Red
+  'rgba(6, 182, 212, 0.75)',     // Cyan
+  'rgba(236, 72, 153, 0.75)',    // Pink
+  'rgba(139, 92, 246, 0.75)',    // Violet
+  'rgba(20, 184, 166, 0.75)',    // Teal
+];
+
+const chartBorderColors = [
+  'rgba(99, 102, 241, 1)',
+  'rgba(16, 185, 129, 1)',
+  'rgba(245, 158, 11, 1)',
+  'rgba(239, 68, 68, 1)',
+  'rgba(6, 182, 212, 1)',
+  'rgba(236, 72, 153, 1)',
+  'rgba(139, 92, 246, 1)',
+  'rgba(20, 184, 166, 1)',
+];
 
 // Configuração padrão ou carregada do LocalStorage
 const getInitialConfig = () => {
@@ -11,6 +34,13 @@ const getInitialConfig = () => {
     url: localStorage.getItem('supa_url') || '',
     anonKey: localStorage.getItem('supa_key') || '',
   };
+};
+
+const formatValueCompact = (val) => {
+  if (val === undefined || val === null) return 'R$ 0';
+  if (val >= 1e6) return `R$ ${(val / 1e6).toFixed(2)}M`;
+  if (val >= 1e3) return `R$ ${(val / 1e3).toFixed(0)}K`;
+  return `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const formatMaskedCurrency = (value) => {
@@ -45,6 +75,23 @@ const getNextVersionLetter = (currentVersao) => {
   }
   return prefix + charArray.join('');
 };
+const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick }) => {
+  return (
+    <div 
+      data-id={task.id} 
+      draggable={true}
+      onDragStart={(e) => handleDragStart(e, task)}
+      onClick={() => handleCardClick(task)}
+      className="kanban-card flex flex-col"
+    >
+      <h4 className="text-sm font-semibold text-slate-100 line-clamp-2 mb-2 pr-2">{task.name}</h4>
+      <div className="flex items-center justify-between text-xs text-slate-400 mt-auto">
+        <span>{responsavel || 'Sem Responsável'}</span>
+        <span className="font-bold text-indigo-400">{formattedValue}</span>
+      </div>
+    </div>
+  );
+});
 
 function App() {
   const [config, setConfig] = useState(getInitialConfig);
@@ -53,8 +100,21 @@ function App() {
   const [clickupTaskId, setClickupTaskId] = useState('');
   const [clickupListId, setClickupListId] = useState('');
   
-  // Controle de Abas (Editor vs Gestão)
-  const [activeTab, setActiveTab] = useState('propostas'); // 'propostas' | 'gestao' | 'relatorios'
+  // Constante e Estados do Kanban & Drawer
+  const TARGET_LIST_ID = '901326185457';
+  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban' | 'relatorios'
+  const [kanbanTasks, setKanbanTasks] = useState([]);
+  const [kanbanColumns, setKanbanColumns] = useState([]);
+  const [loadingKanban, setLoadingKanban] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [drawerTab, setDrawerTab] = useState('details'); // 'details' | 'budget'
+  const [canDrag, setCanDrag] = useState(false);
+  const [showGanhoCol, setShowGanhoCol] = useState(false);
+  const [showPerdidoCol, setShowPerdidoCol] = useState(false);
+  const [showCongeladoCol, setShowCongeladoCol] = useState(false);
+  const [sortBy, setSortBy] = useState('default'); // 'default' | 'name' | 'value_asc' | 'value_desc'
+  const [supabaseProposalsList, setSupabaseProposalsList] = useState([]);
   
   // Dashboard de Relatórios
   const [wonProposals, setWonProposals] = useState([]);
@@ -108,6 +168,7 @@ function App() {
   });
   const [importFormat, setImportFormat] = useState('csv'); // 'csv' | 'xml'
   const [isProjeto, setIsProjeto] = useState(false);
+  const [openMenuVersionId, setOpenMenuVersionId] = useState(null);
   const saveTimeoutRef = useRef(null);
   const [importText, setImportText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -117,6 +178,49 @@ function App() {
   // UX/UIs
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Cálculos consolidados para os gráficos da aba de relatórios
+  const { distributorTotals, distributorTotalSum } = useMemo(() => {
+    const totals = {};
+    commercialData.forEach(item => {
+      const value = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
+      const distName = item.distribuidores?.nome || 'Não Informado';
+      if (selectedDistributorFilter === 'all' || distName.trim().toLowerCase() === selectedDistributorFilter.trim().toLowerCase()) {
+        totals[distName] = (totals[distName] || 0) + value;
+      }
+    });
+    
+    const sortedTotals = {};
+    Object.keys(totals)
+      .sort((a, b) => totals[b] - totals[a])
+      .forEach(key => {
+        sortedTotals[key] = totals[key];
+      });
+
+    const sum = Object.values(sortedTotals).reduce((a, b) => a + b, 0);
+    return { distributorTotals: sortedTotals, distributorTotalSum: sum };
+  }, [commercialData, selectedDistributorFilter]);
+
+  const { manufacturerTotals, manufacturerTotalSum } = useMemo(() => {
+    const totals = {};
+    commercialData.forEach(item => {
+      const value = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
+      const fabName = item.produtos?.fabricante || 'Não Informado';
+      if (selectedManufacturerFilter === 'all' || fabName.trim().toLowerCase() === selectedManufacturerFilter.trim().toLowerCase()) {
+        totals[fabName] = (totals[fabName] || 0) + value;
+      }
+    });
+
+    const sortedTotals = {};
+    Object.keys(totals)
+      .sort((a, b) => totals[b] - totals[a])
+      .forEach(key => {
+        sortedTotals[key] = totals[key];
+      });
+
+    const sum = Object.values(sortedTotals).reduce((a, b) => a + b, 0);
+    return { manufacturerTotals: sortedTotals, manufacturerTotalSum: sum };
+  }, [commercialData, selectedManufacturerFilter]);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [newProduct, setNewProduct] = useState({ nome: '', fabricante: '', custo_referencia: '' });
@@ -154,6 +258,338 @@ function App() {
       setDbConnected(false);
       setErrorMsg('Falha ao conectar ao Supabase. Verifique suas credenciais.');
     }
+  };
+
+  // Funções do Kanban
+  const getTaskOptionId = (task, options) => {
+    const field = task.custom_fields ? task.custom_fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63') : null;
+    if (!field || field.value === undefined || field.value === null) return null;
+    
+    const valStr = String(field.value);
+    
+    const optById = options.find(o => o.id === valStr);
+    if (optById) return optById.id;
+
+    const idx = parseInt(field.value, 10);
+    if (!isNaN(idx) && options[idx]) {
+      return options[idx].id;
+    }
+
+    const optByName = options.find(o => o.name.toLowerCase() === valStr.toLowerCase());
+    if (optByName) return optByName.id;
+
+    return valStr;
+  };
+
+  const getOpportunityValue = (task) => {
+    if (!task) return null;
+    
+    // 1. Procurar no Supabase por proposta ativa / selecionada / ganha
+    const cleanId = String(task.id).replace('#', '').trim();
+    if (supabaseProposalsList && supabaseProposalsList.length > 0) {
+      const props = supabaseProposalsList.filter(p => {
+        const pClean = String(p.clickup_negocio_id).replace('#', '').trim();
+        return pClean === cleanId;
+      });
+      if (props.length > 0) {
+        let selectedProp = props.find(p => p.situacao === 'Selecionada' || p.situacao === 'Ganho');
+        if (!selectedProp) {
+          selectedProp = props.find(p => p.situacao === 'Ativa');
+        }
+        if (!selectedProp) {
+          selectedProp = props[0];
+        }
+        return parseFloat(selectedProp.total_proposta) || 0;
+      }
+    }
+    
+    // 2. Fallback: Deal Value do ClickUp
+    const dealValField = task.custom_fields ? task.custom_fields.find(f => f.id === DEAL_VALUE_FIELD_ID) : null;
+    if (dealValField && dealValField.value !== undefined && dealValField.value !== null) {
+      const val = parseFloat(dealValField.value);
+      return isNaN(val) ? 0 : val;
+    }
+    
+    return null;
+  };
+
+  const getOpportunityResponsavel = (task) => {
+    if (!task || !supabaseProposalsList) return '';
+    const cleanId = String(task.id).replace('#', '').trim();
+    const props = supabaseProposalsList.filter(p => {
+      const pClean = String(p.clickup_negocio_id).replace('#', '').trim();
+      return pClean === cleanId;
+    });
+    if (props.length > 0) {
+      const selectedProp = props.find(p => p.situacao === 'Selecionada' || p.situacao === 'Ganho') || props[0];
+      return selectedProp.criado_por || '';
+    }
+    return '';
+  };
+
+  const refreshSupabaseProposalsList = async () => {
+    if (!supabaseClient) return;
+    try {
+      const { data } = await supabaseClient
+        .from('propostas')
+        .select('clickup_negocio_id, total_proposta, situacao, criado_por');
+      if (data) {
+        setSupabaseProposalsList(data);
+      }
+    } catch (err) {
+      console.warn("Erro silencioso ao atualizar lista global de propostas:", err);
+    }
+  };
+
+  const handleResponsavelChange = async (taskId, responsavelNome, responsavelId = null) => {
+    // 1. Interface Otimista: Mudar na tela imediatamente preservando o valor estimado
+    setKanbanTasks(prevTasks => prevTasks.map(t => t.id === taskId ? { ...t, responsavel_negocio: responsavelNome, valor_estimado: t.valor_estimado } : t));
+    if (selectedTask && selectedTask.id === taskId) {
+      setSelectedTask(prev => ({ ...prev, responsavel_negocio: responsavelNome, valor_estimado: prev.valor_estimado }));
+    }
+
+    const cleanId = String(taskId).replace('#', '').trim();
+
+    // 2. Sincronização com ClickUp via Assignees nativos
+    if (responsavelId) {
+      try {
+        await fetch(`/clickup-api/task/${cleanId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            assignees: [parseInt(responsavelId)]
+          })
+        });
+      } catch (err) {
+        console.warn("Erro silencioso ao atualizar assignees no ClickUp:", err);
+      }
+    }
+
+    // 3. Persistência Defensiva: Salvar no Supabase (apenas coluna criado_por)
+    if (!supabaseClient) return;
+    try {
+      const { data: existing } = await supabaseClient
+        .from('propostas')
+        .select('id')
+        .eq('clickup_negocio_id', cleanId);
+
+      if (existing && existing.length > 0) {
+        await supabaseClient
+          .from('propostas')
+          .update({ 
+            criado_por: responsavelNome 
+          })
+          .eq('clickup_negocio_id', cleanId);
+      } else {
+        await supabaseClient
+          .from('propostas')
+          .insert({
+            clickup_negocio_id: cleanId,
+            versao: 'vA',
+            situacao: 'Selecionada',
+            criado_por: responsavelNome,
+            cenario: '',
+            total_proposta: 0
+          });
+      }
+
+      await refreshSupabaseProposalsList();
+      loadDashboardData();
+    } catch (err) {
+      console.warn("Erro silencioso ao persistir responsável no Supabase:", err);
+    }
+  };
+
+  const fetchKanbanData = async () => {
+    if (kanbanTasks.length === 0) {
+      setLoadingKanban(true);
+    }
+    try {
+      // 1. Carregar todas as propostas do Supabase
+      let propsList = [];
+      if (supabaseClient) {
+        const { data: props, error: propsErr } = await supabaseClient
+          .from('propostas')
+          .select('clickup_negocio_id, total_proposta, situacao, criado_por');
+        if (!propsErr && props) {
+          propsList = props;
+          setSupabaseProposalsList(props);
+        }
+      }
+
+      // 2. Carregar colunas do ClickUp
+      const fieldsRes = await fetch(`/clickup-api/list/${TARGET_LIST_ID}/field`);
+      let columnsData = [];
+      if (fieldsRes.ok) {
+        const fieldsData = await fieldsRes.json();
+        if (fieldsData.fields) {
+          const stageField = fieldsData.fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63');
+          if (stageField && stageField.type_config && stageField.type_config.options) {
+            columnsData = stageField.type_config.options;
+            setKanbanColumns(stageField.type_config.options);
+          }
+        }
+      }
+
+      // 3. Buscar todas as páginas de tarefas do ClickUp
+      let allTasks = [];
+      let page = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const tasksRes = await fetch(`/clickup-api/list/${TARGET_LIST_ID}/task?include_closed=true&page=${page}`);
+        if (tasksRes.ok) {
+          const tasksData = await tasksRes.json();
+          if (tasksData.tasks && tasksData.tasks.length > 0) {
+            allTasks = [...allTasks, ...tasksData.tasks];
+            if (tasksData.last_page === true || tasksData.tasks.length < 100) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          } else {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      // 4. Enriquecer tarefas com o responsável (priorizando ClickUp assignees, depois Supabase)
+      const enrichedTasks = allTasks.map(t => {
+        const cleanId = String(t.id).replace('#', '').trim();
+        let resp = '';
+        
+        // 1. Tentar ler do assignees nativo do ClickUp
+        if (t.assignees && t.assignees.length > 0) {
+          resp = t.assignees[0].username || t.assignees[0].email || '';
+        }
+        
+        // 2. Fallback: Supabase
+        if (!resp) {
+          const matchedProps = propsList.filter(p => String(p.clickup_negocio_id).replace('#', '').trim() === cleanId);
+          if (matchedProps.length > 0) {
+            const selectedProp = matchedProps.find(p => p.situacao === 'Selecionada' || p.situacao === 'Ganho') || matchedProps[0];
+            resp = selectedProp.criado_por || '';
+          }
+        }
+        
+        return { ...t, responsavel_negocio: resp };
+      });
+
+      setKanbanTasks(enrichedTasks);
+    } catch (err) {
+      console.error("Erro ao carregar dados do Kanban:", err);
+      showToast("Erro ao carregar dados do Kanban do ClickUp.", "error");
+    } finally {
+      setLoadingKanban(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'kanban') {
+      fetchKanbanData();
+    }
+  }, [activeTab]);
+
+  const updateTaskStage = async (taskId, newOptionId) => {
+    const res = await fetch(`/clickup-api/task/${taskId}/field/c8d0abe2-c59f-4a9e-93ff-bd060659aa63`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ value: newOptionId })
+    });
+    if (!res.ok) {
+      throw new Error("Falha na atualização do estágio no ClickUp");
+    }
+  };
+
+  const updateTaskClickupStatus = async (taskId, statusName) => {
+    const res = await fetch(`/clickup-api/task/${taskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: statusName })
+    });
+    if (!res.ok) {
+      throw new Error("Falha na atualização do status nativo no ClickUp");
+    }
+  };
+
+  const handleOpportunityStateChange = async (taskId, targetOptionId) => {
+    try {
+      const targetOption = kanbanColumns.find(c => c.id === targetOptionId);
+      if (!targetOption) return;
+
+      const targetName = targetOption.name.toLowerCase();
+      let clickupStatus = "ABERTO";
+
+      if (targetName.includes("ganho")) {
+        clickupStatus = "FECHADO";
+      } else if (targetName.includes("perdido")) {
+        clickupStatus = "PERDIDO/CANCELADO";
+      }
+
+      // 1. Atualização otimista local do estado do React
+      setKanbanTasks(prev => prev.map(t => {
+        if (t.id === taskId) {
+          const updatedFields = t.custom_fields 
+            ? t.custom_fields.map(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63' ? { ...f, value: targetOptionId } : f)
+            : [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: targetOptionId }];
+          return { ...t, custom_fields: updatedFields };
+        }
+        return t;
+      }));
+
+      // 2. Chamar APIs do ClickUp em paralelo
+      const cleanTaskId = String(taskId).replace('#', '').trim();
+      await Promise.all([
+        updateTaskStage(cleanTaskId, targetOptionId),
+        updateTaskClickupStatus(cleanTaskId, clickupStatus)
+      ]);
+      
+      showToast(`Oportunidade atualizada no ClickUp!`, "success");
+    } catch (err) {
+      console.error("Erro na sincronização de estado:", err);
+      showToast("Não foi possível atualizar o ClickUp.", "error");
+      fetchKanbanData();
+    }
+  };
+
+  // Handlers do Drag & Drop Nativo
+  const handleDragStart = (e, task) => {
+    window.getSelection()?.removeAllRanges();
+    e.dataTransfer.setData("text/plain", task.id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDrop = async (e, targetOptionId) => {
+    e.preventDefault();
+    try {
+      const taskId = e.dataTransfer.getData("text/plain");
+      if (!taskId) return;
+
+      const task = kanbanTasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      const currentOptionId = getTaskOptionId(task, kanbanColumns);
+      if (currentOptionId === targetOptionId) return;
+
+      await handleOpportunityStateChange(taskId, targetOptionId);
+    } catch (dropErr) {
+      console.error("Erro ao mover o card:", dropErr);
+      showToast("Erro inesperado ao mover o card.", "error");
+      fetchKanbanData();
+    }
+  };
+
+  // Handler de Clique para abrir o Drawer
+  const handleCardClick = (task) => {
+    setSelectedTask(task);
+    setClickupTaskId(task.id);
+    setDrawerTab('details');
+    setShowDrawer(true);
   };
 
   const resolveTaskIdFormat = async (rawId) => {
@@ -284,18 +720,35 @@ function App() {
   };
 
   // Carregar vendedores cadastrados
-  const loadVendedores = async (client = supabaseClient) => {
-    if (!client) return;
-    const { data, error } = await client.from('vendedores').select('*').order('nome');
-    if (!error && data) {
-      setVendedores(data);
+  const loadVendedores = async () => {
+    try {
+      const teamsRes = await fetch('/clickup-api/team');
+      if (teamsRes.ok) {
+        const teamsData = await teamsRes.json();
+        if (teamsData.teams && teamsData.teams.length > 0) {
+          const teamId = teamsData.teams[0].id;
+          const membersRes = await fetch(`/clickup-api/team/${teamId}`);
+          if (membersRes.ok) {
+            const membersData = await membersRes.json();
+            if (membersData.team && membersData.team.members) {
+              const users = membersData.team.members.map(m => m.user);
+              const mapped = users.map(u => ({ id: u.id, nome: u.username || u.email }));
+              setVendedores(mapped);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Erro ao carregar vendedores do ClickUp:", err);
     }
   };
 
   // Carregar dados para o painel de relatórios
   const loadDashboardData = async (client = supabaseClient) => {
     if (!client) return;
-    setLoadingDashboard(true);
+    if (wonProposals.length === 0) {
+      setLoadingDashboard(true);
+    }
     try {
       const { data, error } = await client
         .from('propostas')
@@ -441,47 +894,6 @@ function App() {
       return;
     }
 
-    // Agrupar faturamento por Distribuidor e por Fabricante com filtros aplicados
-    const distributorTotals = {};
-    const manufacturerTotals = {};
-
-    commercialData.forEach(item => {
-      const value = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
-      const distName = item.distribuidores?.nome || 'Não Informado';
-      const fabName = item.produtos?.fabricante || 'Não Informado';
-
-      if (selectedDistributorFilter === 'all' || distName.trim().toLowerCase() === selectedDistributorFilter.trim().toLowerCase()) {
-        distributorTotals[distName] = (distributorTotals[distName] || 0) + value;
-      }
-
-      if (selectedManufacturerFilter === 'all' || fabName.trim().toLowerCase() === selectedManufacturerFilter.trim().toLowerCase()) {
-        manufacturerTotals[fabName] = (manufacturerTotals[fabName] || 0) + value;
-      }
-    });
-
-    // Paleta moderna, vibrante e translúcida
-    const chartColors = [
-      'rgba(99, 102, 241, 0.75)',   // Indigo
-      'rgba(16, 185, 129, 0.75)',   // Emerald
-      'rgba(245, 158, 11, 0.75)',   // Amber
-      'rgba(239, 68, 68, 0.75)',     // Red
-      'rgba(6, 182, 212, 0.75)',     // Cyan
-      'rgba(236, 72, 153, 0.75)',    // Pink
-      'rgba(139, 92, 246, 0.75)',    // Violet
-      'rgba(20, 184, 166, 0.75)',    // Teal
-    ];
-
-    const chartBorderColors = [
-      'rgba(99, 102, 241, 1)',
-      'rgba(16, 185, 129, 1)',
-      'rgba(245, 158, 11, 1)',
-      'rgba(239, 68, 68, 1)',
-      'rgba(6, 182, 212, 1)',
-      'rgba(236, 72, 153, 1)',
-      'rgba(139, 92, 246, 1)',
-      'rgba(20, 184, 166, 1)',
-    ];
-
     // Destruir gráficos anteriores
     if (distributorChartInst.current) {
       distributorChartInst.current.destroy();
@@ -499,14 +911,16 @@ function App() {
       const dataValues = Object.values(distributorTotals);
 
       distributorChartInst.current = new Chart(distCtx, {
-        type: 'pie',
+        type: 'doughnut',
         data: {
           labels: labels,
           datasets: [{
             data: dataValues,
             backgroundColor: chartColors.slice(0, labels.length),
             borderColor: chartBorderColors.slice(0, labels.length),
-            borderWidth: 1.5
+            borderWidth: 1.5,
+            cutout: '75%',
+            hoverOffset: 4
           }]
         },
         options: {
@@ -514,14 +928,7 @@ function App() {
           maintainAspectRatio: false,
           plugins: {
             legend: {
-              position: 'bottom',
-              labels: {
-                color: '#94a3b8',
-                font: {
-                  family: 'Plus Jakarta Sans',
-                  size: 11
-                }
-              }
+              display: false
             },
             tooltip: {
               callbacks: {
@@ -543,14 +950,16 @@ function App() {
       const dataValues = Object.values(manufacturerTotals);
 
       manufacturerChartInst.current = new Chart(fabCtx, {
-        type: 'pie',
+        type: 'doughnut',
         data: {
           labels: labels,
           datasets: [{
             data: dataValues,
             backgroundColor: chartColors.slice(0, labels.length),
             borderColor: chartBorderColors.slice(0, labels.length),
-            borderWidth: 1.5
+            borderWidth: 1.5,
+            cutout: '75%',
+            hoverOffset: 4
           }]
         },
         options: {
@@ -558,14 +967,7 @@ function App() {
           maintainAspectRatio: false,
           plugins: {
             legend: {
-              position: 'bottom',
-              labels: {
-                color: '#94a3b8',
-                font: {
-                  family: 'Plus Jakarta Sans',
-                  size: 11
-                }
-              }
+              display: false
             },
             tooltip: {
               callbacks: {
@@ -591,7 +993,7 @@ function App() {
         manufacturerChartInst.current = null;
       }
     };
-  }, [activeTab, commercialData, loadingDashboard, selectedDistributorFilter, selectedManufacturerFilter]);
+  }, [activeTab, loadingDashboard, distributorTotals, manufacturerTotals]);
 
   useEffect(() => {
     if (activeTab === 'relatorios' && dbConnected) {
@@ -658,7 +1060,8 @@ function App() {
 
       if (propErr) throw propErr;
       setCurrentProposta(prop);
-      setIsProjeto(prop ? !!prop.cenario : false);
+      const isProj = prop && (['HCI', 'Cloud', 'Tradicional', 'Upgrade'].map(x => x.toUpperCase()).includes((prop.cenario || '').toUpperCase()) || prop.cenario === '' || (prop.cenario || '').toUpperCase() === 'PROJETO');
+      setIsProjeto(!!isProj);
 
       const { data: items, error: itemsErr } = await supabaseClient
         .from('itens_proposta')
@@ -818,9 +1221,8 @@ function App() {
 
     try {
       // 1. Obter detalhes da tarefa atual (Proposta)
-      const taskRes = await fetch(`https://api.clickup.com/api/v2/task/${cleanTaskId}`, {
+      const taskRes = await fetch(`/clickup-api/task/${cleanTaskId}`, {
         headers: {
-          "Authorization": API_KEY,
           "Content-Type": "application/json"
         }
       });
@@ -850,7 +1252,7 @@ function App() {
         const bodyFormatado = campoValor.id === DEAL_VALUE_FIELD_ID
           ? { value: Number(Number(valorLimpo).toFixed(2)) }
           : { value: valorCentavos };
-        const urlValue = `https://api.clickup.com/api/v2/task/${cleanTaskId}/field/${campoValor.id}`;
+        const urlValue = `/clickup-api/task/${cleanTaskId}/field/${campoValor.id}`;
         
         console.log(`[${new Date().toISOString()}] POST ${urlValue} - Body:`, JSON.stringify(bodyFormatado));
         
@@ -861,7 +1263,6 @@ function App() {
         const resVal = await fetch(urlValue, {
           method: 'POST',
           headers: {
-            "Authorization": API_KEY,
             "Content-Type": "application/json"
           },
           body: JSON.stringify(bodyFormatado)
@@ -876,9 +1277,8 @@ function App() {
           // Validação imediata via GET pós-POST
           try {
             console.log(`[${new Date().toISOString()}] Iniciando verificação GET pós-POST para a tarefa ${cleanTaskId}...`);
-            const verifyRes = await fetch(`https://api.clickup.com/api/v2/task/${cleanTaskId}`, {
+            const verifyRes = await fetch(`/clickup-api/task/${cleanTaskId}`, {
               headers: {
-                "Authorization": API_KEY,
                 "Content-Type": "application/json"
               }
             });
@@ -908,7 +1308,7 @@ function App() {
 
       if (relField && relField.value && Array.isArray(relField.value) && relField.value.length > 0) {
         const parentTaskId = String(relField.value[0].id).replace('#', '').trim();
-        const urlGlobal = `https://api.clickup.com/api/v2/task/${parentTaskId}/field/${DEAL_VALUE_FIELD_ID}`;
+        const urlGlobal = `/clickup-api/task/${parentTaskId}/field/${DEAL_VALUE_FIELD_ID}`;
         const bodyFormatado = { value: Number(Number(valorLimpo).toFixed(2)) };
 
         console.log(`[${new Date().toISOString()}] POST ${urlGlobal} - Body:`, JSON.stringify(bodyFormatado));
@@ -920,7 +1320,6 @@ function App() {
         const resGlobal = await fetch(urlGlobal, {
           method: 'POST',
           headers: {
-            "Authorization": API_KEY,
             "Content-Type": "application/json"
           },
           body: JSON.stringify(bodyFormatado)
@@ -935,9 +1334,8 @@ function App() {
           // Validação imediata global via GET pós-POST
           try {
             console.log(`[${new Date().toISOString()}] Iniciando verificação GET pós-POST para a tarefa pai ${parentTaskId}...`);
-            const verifyRes = await fetch(`https://api.clickup.com/api/v2/task/${parentTaskId}`, {
+            const verifyRes = await fetch(`/clickup-api/task/${parentTaskId}`, {
               headers: {
-                "Authorization": API_KEY,
                 "Content-Type": "application/json"
               }
             });
@@ -1047,7 +1445,8 @@ function App() {
         .eq('clickup_negocio_id', clickupTaskId)
         .in('situacao', ['Ativa', 'Selecionada']);
 
-      // 3. Inserir a nova proposta
+      // 3. Inserir a nova proposta herdando o responsável comercial
+      const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : (currentProposta.criado_por || '');
       const { data: newProp, error: propErr } = await supabaseClient
         .from('propostas')
         .insert({
@@ -1056,7 +1455,7 @@ function App() {
           cenario: '',
           situacao: 'Ativa',
           total_proposta: currentProposta.total_proposta,
-          criado_por: currentProposta.criado_por
+          criado_por: currentResponsavel
         })
         .select()
         .single();
@@ -1182,12 +1581,14 @@ function App() {
     }
 
     setSaving(true);
+    const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : '';
     try {
       const { error } = await supabaseClient
         .from('propostas')
         .update({ 
           situacao: newSituacao,
-          motivo_perda: null
+          motivo_perda: null,
+          criado_por: currentResponsavel
         })
         .eq('id', currentProposta.id);
 
@@ -1198,10 +1599,14 @@ function App() {
       setCurrentProposta({
         ...currentProposta,
         situacao: newSituacao,
-        motivo_perda: null
+        motivo_perda: null,
+        criado_por: currentResponsavel
       });
 
       loadPropostas(currentProposta.id);
+      await refreshSupabaseProposalsList();
+      loadDashboardData();
+      fetchKanbanData();
     } catch (err) {
       console.error(err);
       showToast('Erro ao atualizar situação.', 'error');
@@ -1220,12 +1625,11 @@ function App() {
     setSearchResult('');
     try {
       const clickupHeaders = {
-        "Authorization": API_KEY,
         "Content-Type": "application/json"
       };
 
       // 1. Obter os Workspaces (Teams) para achar o team_id
-      const teamsRes = await fetch("https://api.clickup.com/api/v2/team", {
+      const teamsRes = await fetch("/clickup-api/team", {
         headers: clickupHeaders
       });
       if (!teamsRes.ok) throw new Error("Erro ao obter workspaces do ClickUp");
@@ -1243,7 +1647,7 @@ function App() {
           let listPage = 0;
           let hasMoreList = true;
           while (hasMoreList && !matchedTask) {
-            const listTasksRes = await fetch(`https://api.clickup.com/api/v2/list/${clickupListId}/task?archived=false&include_custom_fields=true&limit=100&include_closed=true&page=${listPage}`, {
+            const listTasksRes = await fetch(`/clickup-api/list/${clickupListId}/task?archived=false&include_custom_fields=true&limit=100&include_closed=true&page=${listPage}`, {
               headers: clickupHeaders
             });
             if (listTasksRes.ok) {
@@ -1289,7 +1693,7 @@ function App() {
         let teamPage = 0;
         let hasMoreTeam = true;
         while (hasMoreTeam && !matchedTask) {
-          const teamTasksRes = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/task?archived=false&include_custom_fields=true&limit=100&include_closed=true&page=${teamPage}`, {
+          const teamTasksRes = await fetch(`/clickup-api/team/${teamId}/task?archived=false&include_custom_fields=true&limit=100&include_closed=true&page=${teamPage}`, {
             headers: clickupHeaders
           });
           if (teamTasksRes.ok) {
@@ -1376,54 +1780,89 @@ function App() {
     }
   };
 
-  // 9. Alterar Status para "Selecionada" (Gatilho para sincronização no ClickUp)
-  const handleSelectProposal = async () => {
-    if (!currentProposta || !clickupTaskId) return;
-    const taskId = String(clickupTaskId).replace('#', '').trim();
+  // 9. Alterar Status de Versão de Proposta Unificado (Gatilho para sincronização no ClickUp)
+  const handleUpdateVersionStatus = async (targetTaskId, versionId, newStatus) => {
+    if (!versionId || !targetTaskId) return;
+    const taskId = String(targetTaskId).replace('#', '').trim();
+    
+    if (!clickupTaskId) {
+      setClickupTaskId(targetTaskId);
+    }
+    
+    const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : '';
+
+    // 1. Interface Otimista: Mudar localmente na mesma hora para que as badges de status na timeline mudem de cor imediatamente
+    if (currentProposta && currentProposta.id === versionId) {
+      setCurrentProposta(prev => ({ ...prev, situacao: newStatus, criado_por: currentResponsavel }));
+    }
+    setPropostas(prev => prev.map(p => {
+      if (p.id === versionId) {
+        return { ...p, situacao: newStatus, criado_por: currentResponsavel };
+      }
+      if (newStatus === 'Selecionada' && p.id !== versionId) {
+        return { ...p, situacao: 'Desconsiderada' };
+      }
+      return p;
+    }));
+
+    if (newStatus === 'Selecionada') {
+      const targetProp = propostas.find(p => p.id === versionId) || currentProposta;
+      const valToSync = targetProp ? parseFloat(targetProp.total_proposta) || 0 : realTimeGrandTotal;
+
+      setKanbanTasks(prevTasks => prevTasks.map(t => t.id === targetTaskId ? { ...t, valor_estimado: valToSync, responsavel_negocio: t.responsavel_negocio || t.assignees } : t));
+      if (selectedTask && selectedTask.id === targetTaskId) {
+        setSelectedTask(prev => ({ ...prev, valor_estimado: valToSync, responsavel_negocio: prev.responsavel_negocio }));
+      }
+    }
+
     setSaving(true);
     try {
-      if (!isReadOnly) {
+      if (!isReadOnly && newStatus === 'Selecionada') {
         await handleSaveProposal();
       }
 
-      // 1. REGRA CONDICIONAL DUPLA DA CADEIRA ÚNICA
-      if (isProjeto === false) {
-        // REGRA VENDA SIMPLES: Mudar TODAS as outras propostas do mesmo 'clickup_negocio_id' para 'Desconsiderada'
+      // 2. REGRA DE NEGÓCIO: Se for Selecionada, as outras irmãs são Desconsideradas. 
+      // Rascunhos múltiplos ativos podem coexistir simultaneamente como 'Ativa'.
+      if (newStatus === 'Selecionada') {
         await supabaseClient
           .from('propostas')
           .update({ situacao: 'Desconsiderada' })
-          .eq('clickup_negocio_id', clickupTaskId)
-          .neq('id', currentProposta.id);
-      } else {
-        // REGRA PROJETO COMPLEXO: Mudar as outras propostas apenas de 'Selecionada' para 'Ativa'
-        await supabaseClient
-          .from('propostas')
-          .update({ situacao: 'Ativa' })
-          .eq('clickup_negocio_id', clickupTaskId)
-          .eq('situacao', 'Selecionada')
-          .neq('id', currentProposta.id);
+          .eq('clickup_negocio_id', targetTaskId)
+          .neq('id', versionId);
       }
 
-      // 2. Atualiza a proposta atual para 'Selecionada' no Supabase
+      // 3. Atualiza a proposta alvo no Supabase (coluna vendedor removida para evitar PGRST204)
+      const updateData = { 
+        situacao: newStatus,
+        criado_por: currentResponsavel
+      };
+      if (newStatus === 'Selecionada') {
+        updateData.total_proposta = realTimeGrandTotal;
+      }
+
       const { error } = await supabaseClient
         .from('propostas')
-        .update({ 
-          situacao: 'Selecionada',
-          total_proposta: realTimeGrandTotal,
-          clickup_negocio_id: clickupTaskId,
-          versao: currentProposta.versao
-        })
-        .eq('id', currentProposta.id);
+        .update(updateData)
+        .eq('id', versionId);
 
       if (error) throw error;
 
-      await syncClickUpProposta(clickupTaskId, realTimeGrandTotal, 'Select');
+      // Se for Selecionada, atualiza no ClickUp
+      if (newStatus === 'Selecionada') {
+        const targetProp = propostas.find(p => p.id === versionId) || currentProposta;
+        const valToSync = targetProp ? parseFloat(targetProp.total_proposta) || 0 : realTimeGrandTotal;
+        await syncClickUpProposta(taskId, valToSync, 'Select');
+      }
 
-      showToast('Proposta selecionada e ClickUp atualizado com sucesso!', 'success');
-      loadPropostas(currentProposta.id);
+      showToast(`Status atualizado para ${newStatus}!`, 'success');
+      await loadPropostas(versionId);
+      await loadProposalDetails(versionId);
+      await refreshSupabaseProposalsList();
+      loadDashboardData();
+      fetchKanbanData();
     } catch (err) {
-      console.error(err);
-      showToast('Erro ao selecionar ou sincronizar com ClickUp.', 'error');
+      console.warn("Erro silencioso de PostgREST ou rede na sincronização de propostas:", err);
+      // O front-end otimista garante que a UI continuará funcionando sem travar os botões
     } finally {
       setSaving(false);
     }
@@ -1431,10 +1870,8 @@ function App() {
 
   const handleConfirmClose = async () => {
     if (!currentProposta || !supabaseClient) return;
-    if (!closeDate) {
-      showToast('Por favor, informe a data de fechamento.', 'error');
-      return;
-    }
+    
+    const dateVal = closeDate || new Date().toISOString().split('T')[0];
     if (showCloseModal === 'loss' && !selectedLossReason) {
       showToast('Por favor, selecione o motivo da perda.', 'error');
       return;
@@ -1452,7 +1889,7 @@ function App() {
         .update({ 
           situacao: situacao,
           motivo_perda: motivo,
-          data_fechamento: closeDate,
+          data_fechamento: dateVal,
           total_proposta: realTimeGrandTotal
         })
         .eq('id', currentProposta.id);
@@ -1463,27 +1900,19 @@ function App() {
       if (clickupTaskId) {
         await syncClickUpProposta(clickupTaskId, realTimeGrandTotal, situacao);
         
-        const taskId = String(clickupTaskId).replace('#', '').trim();
-        const clickupStatus = isWin ? 'ganho' : 'perdido';
-        const body = { status: clickupStatus };
-        const resStat = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
-          method: 'PUT',
-          headers: {
-            "Authorization": API_KEY,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(body)
-        });
-        if (resStat.status !== 200 && resStat.status !== 201) {
-          const errText = await resStat.text();
-          console.error(`Erro ao atualizar Status no ClickUp [Status: ${resStat.status}]:`, errText);
+        const targetOption = kanbanColumns.find(c => c.name.toLowerCase().includes(isWin ? 'ganho' : 'perdido'));
+        if (targetOption) {
+          await handleOpportunityStateChange(clickupTaskId, targetOption.id);
         }
       }
 
       showToast(`Proposta marcada como ${isWin ? 'GANHA' : 'PERDIDA'} com sucesso!`, 'success');
       setShowCloseModal(false);
+      setShowDrawer(false); // Fecha o Drawer conforme exigido no fluxo de sucesso
       loadPropostas(currentProposta.id);
+      await refreshSupabaseProposalsList();
       loadDashboardData();
+      fetchKanbanData();
     } catch (err) {
       console.error(err);
       showToast('Erro ao fechar proposta.', 'error');
@@ -1759,6 +2188,606 @@ function App() {
     }
   };
 
+  const renderTimeline = () => {
+    return (
+      <div className="flex flex-col space-y-4 h-full">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-400">Timeline de Versões</h2>
+          <span className="bg-slate-800 px-2 py-0.5 rounded-full text-xs font-semibold text-slate-300">
+            {propostas.length}
+          </span>
+        </div>
+
+        {propostas.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-4 text-center space-y-4">
+            <svg className="w-10 h-10 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-slate-400">Nenhuma proposta criada para este negócio.</p>
+            <button 
+              onClick={handleCreateInitialProposal}
+              className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold text-white shadow-lg transition-all"
+            >
+              Criar Versão vA
+            </button>
+          </div>
+        ) : (
+          <div className="flex-1 space-y-3 pr-1 overflow-visible">
+            {propostas.map((prop, i) => {
+              const isSelected = currentProposta && currentProposta.id === prop.id;
+              const statusColors = {
+                 'Ativa': 'bg-blue-500 text-blue-100 border-blue-400/20',
+                 'Selecionada': 'bg-emerald-500 text-emerald-100 border-emerald-400/20',
+                 'Ganho': 'bg-amber-500 text-amber-950 border-amber-400/20 font-extrabold',
+                 'Desconsiderada': 'bg-red-600 text-white border-red-500/20',
+                 'Não selecionada': 'bg-slate-600 text-slate-300 border-slate-500/20',
+                 'Substituída': 'bg-amber-600/70 text-amber-200 border-amber-500/20'
+               };
+              
+              return (
+                <div 
+                  key={prop.id}
+                  onClick={async () => {
+                    await loadProposalDetails(prop.id);
+                    setDrawerTab('budget');
+                  }}
+                  className={`p-3 rounded-xl cursor-pointer timeline-item glass-card transition-all ${
+                    openMenuVersionId === prop.id ? 'relative z-40' : 'relative z-10'
+                  } ${
+                    isSelected ? 'active-glow border-indigo-500 bg-slate-800/80' : 'bg-slate-900/40 hover:bg-slate-800/30'
+                  }`}
+                >
+                  <div className="timeline-line"></div>
+                  
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-5 h-5 flex items-center justify-center bg-indigo-950 text-indigo-300 rounded-md text-xs font-bold border border-indigo-500/30">
+                        {prop.versao}
+                      </span>
+                      <span className="text-xs font-medium text-slate-300 uppercase">{prop.cenario}</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5 relative" onClick={(e) => e.stopPropagation()}>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${statusColors[prop.situacao] || 'bg-slate-700'}`}>
+                        {prop.situacao}
+                      </span>
+                      <div className="relative">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuVersionId(openMenuVersionId === prop.id ? null : prop.id);
+                          }}
+                          className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors"
+                          title="Mudar Situação"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                          </svg>
+                        </button>
+                        {openMenuVersionId === prop.id && (
+                          <React.Fragment>
+                            <div className="fixed inset-0 z-40 bg-transparent cursor-default" onClick={() => setOpenMenuVersionId(null)} />
+                            <div className="absolute right-full top-0 mr-2 z-50 w-36 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 block">
+                              {['Ativa', 'Selecionada', 'Ganho', 'Desconsiderada', 'Perdido'].map(st => (
+                                <button
+                                  key={st}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setOpenMenuVersionId(null);
+                                    await loadProposalDetails(prop.id);
+                                    if (st === 'Ganho') {
+                                      setCloseDate(new Date().toISOString().split('T')[0]);
+                                      setShowCloseModal('win');
+                                    } else if (st === 'Perdido') {
+                                      setCloseDate(new Date().toISOString().split('T')[0]);
+                                      setSelectedLossReason('');
+                                      setShowCloseModal('loss');
+                                    } else {
+                                      await handleUpdateVersionStatus(clickupTaskId || prop.clickup_negocio_id, prop.id, st);
+                                    }
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white"
+                                >
+                                  {st}
+                                </button>
+                              ))}
+                            </div>
+                          </React.Fragment>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-baseline mt-2">
+                    <span className="text-[10px] text-slate-500">
+                      {new Date(prop.created_at).toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})} • {prop.criado_por.split(' ')[0]}
+                    </span>
+                    <span className="text-sm font-bold text-white">
+                      R$ {Number(isSelected ? realTimeGrandTotal : prop.total_proposta).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {propostas.length > 0 && (
+          <button
+            onClick={async () => {
+              await handleGerarNovaVersao();
+              setDrawerTab('budget');
+            }}
+            disabled={saving}
+            className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 mt-4 shadow-lg shadow-indigo-950/50 hover:bg-indigo-500"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            <span>Gerar Nova Versão</span>
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const renderBudgetEditor = () => {
+    if (loading) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center space-y-3">
+          <div className="w-10 h-10 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
+          <p className="text-sm text-slate-400 font-medium">Processando dados da proposta...</p>
+        </div>
+      );
+    }
+    if (!currentProposta) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto space-y-6">
+          <div className="w-20 h-20 bg-indigo-950/50 rounded-full border border-indigo-500/20 flex items-center justify-center">
+            <svg className="w-10 h-10 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-white mb-2">Painel de Propostas Comerciais</h3>
+            <p className="text-sm text-slate-400">Selecione ou gere uma nova proposta na timeline para carregar a tela de negociação.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const getTipoOportunidade = () => {
+      const c = currentProposta.cenario || '';
+      if (['HCI', 'Cloud', 'Tradicional', 'Upgrade'].includes(c)) return 'PROJETO';
+      return c;
+    };
+
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+          <button 
+            onClick={() => setDrawerTab('details')}
+            className="flex items-center space-x-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            <span>Voltar para Detalhes</span>
+          </button>
+        </div>
+
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="border-b border-slate-800 bg-slate-900/20 p-6 flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+            <div className="flex items-center space-x-4">
+              <div>
+                {projectContext.name && (
+                  <h1 className="text-3xl font-extrabold text-indigo-400 tracking-tight mb-2">
+                    {projectContext.name}
+                  </h1>
+                )}
+                <div className="flex items-center space-x-2 flex-wrap gap-2">
+                  <h2 className="text-2xl font-bold text-white tracking-tight">Proposta {currentProposta.versao}</h2>
+                  {currentProposta.cenario && (
+                    <span className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2.5 py-0.5 rounded-full uppercase font-bold">
+                      {currentProposta.cenario}
+                    </span>
+                  )}
+                  {isReadOnly && (
+                    <span className="bg-amber-950/60 border border-amber-500/20 text-amber-300 text-[10px] px-2.5 py-0.5 rounded-full uppercase font-bold flex items-center space-x-1 pulse-badge">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      <span>Apenas Leitura</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-3 flex-wrap mt-1.5">
+                  <p className="text-xs text-slate-400">
+                    Criada em {new Date(currentProposta.created_at).toLocaleString('pt-BR')} {currentProposta.criado_por ? `por ${currentProposta.criado_por}` : ''}
+                  </p>
+                  {currentProposta.situacao === 'Ganho' && (
+                    <span className="text-[11px] font-bold text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded-md border border-amber-500/30">
+                      🏆 Ganho {currentProposta.data_fechamento ? `(${new Date(currentProposta.data_fechamento + 'T00:00:00').toLocaleDateString('pt-BR')})` : ''}
+                    </span>
+                  )}
+                  {currentProposta.situacao === 'Perdido' && (
+                    <span className="text-[11px] font-bold text-red-400 bg-red-950/80 px-2.5 py-0.5 rounded-md border border-red-500/30">
+                      😞 Perdido: {currentProposta.motivo_perda || 'Outros'} {currentProposta.data_fechamento ? `(${new Date(currentProposta.data_fechamento + 'T00:00:00').toLocaleDateString('pt-BR')})` : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center flex-wrap gap-2.5">
+              {currentProposta.situacao !== 'Ganho' && (
+                <button
+                  onClick={() => {
+                    setCloseDate(new Date().toISOString().split('T')[0]);
+                    setShowCloseModal('win');
+                  }}
+                  disabled={saving}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 disabled:opacity-50 text-amber-950 rounded-xl text-xs font-black shadow-lg shadow-amber-950/30 transition-all flex items-center space-x-1.5"
+                >
+                  <span>🏆 Marcar como Ganha</span>
+                </button>
+              )}
+
+              {currentProposta.situacao !== 'Perdido' && currentProposta.situacao !== 'Ganho' && (
+                <button
+                  onClick={() => {
+                    setCloseDate(new Date().toISOString().split('T')[0]);
+                    setSelectedLossReason('');
+                    setShowCloseModal('loss');
+                  }}
+                  disabled={saving}
+                  className="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-lg shadow-red-950/30 transition-all flex items-center space-x-1.5"
+                >
+                  <span>😞 Marcar como Perdido</span>
+                </button>
+              )}
+
+              {currentProposta.situacao !== 'Ganho' && (
+                <button
+                  onClick={() => handleUpdateVersionStatus(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, 'Selecionada')}
+                  disabled={saving || currentProposta.situacao === 'Selecionada'}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 shadow-lg ${
+                    currentProposta.situacao === 'Selecionada'
+                      ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/30'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>
+                    {currentProposta.situacao === 'Selecionada' ? '✓ Selecionada' : 
+                     currentProposta.situacao === 'Desconsiderada' ? 'Reativar e Selecionar' : 'Selecionar'}
+                  </span>
+                </button>
+              )}
+
+              {!isReadOnly && (
+                <button
+                  onClick={handleSaveProposalDebounced}
+                  disabled={saving}
+                  className="p-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl shadow-lg shadow-indigo-950/30 transition-all flex items-center justify-center"
+                  title="Salvar Alterações"
+                >
+                  {saving ? (
+                    <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                  ) : (
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                      <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                      <polyline points="7 3 7 8 15 8"></polyline>
+                    </svg>
+                  )}
+                </button>
+              )}
+
+              <button
+                onClick={handleDeleteProposal}
+                disabled={saving}
+                className="p-2.5 bg-slate-900 hover:bg-red-950/40 text-slate-400 hover:text-red-400 border border-slate-800 hover:border-red-900/50 rounded-xl transition-all flex items-center justify-center"
+                title="Excluir Versão"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div className="p-6 bg-slate-900/10 border-b border-slate-900 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de Oportunidade</label>
+              <select
+                className="w-full rounded-xl bg-slate-900/50 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                value={getTipoOportunidade()}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'PROJETO') {
+                    setIsProjeto(true);
+                    setCurrentProposta({ ...currentProposta, cenario: '' });
+                  } else {
+                    setIsProjeto(false);
+                    setCurrentProposta({ ...currentProposta, cenario: val });
+                  }
+                }}
+              >
+                <option value="" disabled className="bg-slate-900 text-slate-400">Selecione o tipo de Oportunidade...</option>
+                <option value="PROJETO" className="bg-slate-900 text-slate-200">PROJETO</option>
+                <option value="GARANTIAS" className="bg-slate-900 text-slate-200">GARANTIAS</option>
+                <option value="SERVIÇOS" className="bg-slate-900 text-slate-200">SERVIÇOS</option>
+                <option value="SSU" className="bg-slate-900 text-slate-200">SSU</option>
+                <option value="VOLUMES" className="bg-slate-900 text-slate-200">VOLUMES</option>
+                <option value="UPGRADE" className="bg-slate-900 text-slate-200">UPGRADE</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de Projeto</label>
+              <select
+                className="w-full rounded-xl bg-slate-900/50 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+                value={currentProposta.cenario || ""}
+                onChange={(e) => setCurrentProposta({ ...currentProposta, cenario: e.target.value })}
+                disabled={isReadOnly || !isProjeto}
+              >
+                <option value="">Selecione o tipo...</option>
+                <option value="HCI">HCI (Hiperconvergência)</option>
+                <option value="Cloud">Cloud (Nuvem)</option>
+                <option value="Tradicional">Tradicional</option>
+                <option value="Upgrade">Upgrade</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Vendedor / Responsável</label>
+              <select
+                className="w-full rounded-xl bg-slate-900/50 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+                value={currentProposta.criado_por || ""}
+                onChange={(e) => setCurrentProposta({ ...currentProposta, criado_por: e.target.value })}
+                disabled={isReadOnly}
+              >
+                <option value="">Selecione o vendedor...</option>
+                {vendedores.map(v => (
+                  <option key={v.id} value={v.nome} className="bg-slate-900 text-slate-200">{v.nome}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Produtos e Serviços inclusos</h3>
+              {!isReadOnly && (
+                <button 
+                  onClick={() => setShowProductModal(true)}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1"
+                >
+                  <span>+ Adicionar Novo Item ao Catálogo</span>
+                </button>
+              )}
+            </div>
+
+            {itens.length === 0 ? (
+              <div className="border border-dashed border-slate-800 rounded-2xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+                <svg className="w-12 h-12 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                </svg>
+                <div>
+                  <p className="text-sm text-slate-400 font-medium">Esta proposta ainda não tem nenhum item adicionado.</p>
+                  {!isReadOnly && <p className="text-xs text-slate-500 mt-1">Adicione produtos do catálogo abaixo.</p>}
+                </div>
+                {!isReadOnly && (
+                  <button
+                    onClick={handleAddItem}
+                    className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/20 rounded-xl text-xs font-bold transition-all"
+                  >
+                    Adicionar Primeiro Item
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto" style={{ overflow: 'visible', minHeight: '280px' }}>
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800/80 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      <th className="pb-3">Produto [Fabricante]</th>
+                      <th className="pb-3 w-2/12">Distribuidor</th>
+                      <th className="pb-3 w-[60px] text-center">Qtd</th>
+                      <th className="pb-3 w-2/12 text-right">Unitário</th>
+                      <th className="pb-3 w-2/12 text-right">Subtotal</th>
+                      {!isReadOnly && <th className="pb-3 w-[60px] text-center">Ações</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-900/60">
+                    {itens.map((item, index) => {
+                      const subtotal = item.quantidade * item.preco_unitario || 0;
+                      return (
+                        <tr key={item.id} className="group hover:bg-slate-900/20 transition-colors">
+                          <td className="py-3.5 pr-4 relative" style={{ overflow: 'visible' }}>
+                            {isReadOnly ? (
+                              <div className="text-sm font-semibold text-slate-200">
+                                {produtos.find(p => p.id === item.produto_id)?.nome || 'Produto não encontrado'}
+                                <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                                  Fabricante: {produtos.find(p => p.id === item.produto_id)?.fabricante || '-'}
+                                </span>
+                              </div>
+                            ) : (
+                              <React.Fragment>
+                                <input
+                                  type="text"
+                                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                  placeholder="Digite para buscar produto..."
+                                  value={
+                                    item.searchTerm !== undefined
+                                      ? item.searchTerm
+                                      : (produtos.find(p => p.id === item.produto_id)?.nome || '')
+                                  }
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    handleItemChange(index, { searchTerm: val, showDropdown: true });
+                                  }}
+                                  onFocus={() => {
+                                    const currentVal = item.searchTerm !== undefined
+                                      ? item.searchTerm
+                                      : (produtos.find(p => p.id === item.produto_id)?.nome || '');
+                                    handleItemChange(index, { searchTerm: currentVal, showDropdown: true });
+                                  }}
+                                  onBlur={() => {
+                                    setTimeout(() => {
+                                      handleItemChange(index, { showDropdown: false });
+                                    }, 200);
+                                  }}
+                                />
+                                
+                                {item.showDropdown && (item.searchTerm !== undefined ? item.searchTerm : (produtos.find(p => p.id === item.produto_id)?.nome || '')) && (
+                                  (() => {
+                                    const searchVal = item.searchTerm !== undefined
+                                      ? item.searchTerm
+                                      : (produtos.find(p => p.id === item.produto_id)?.nome || '');
+                                    const filtrados = produtos.filter(p => 
+                                      (p.nome || '').toLowerCase().includes(searchVal.toLowerCase()) ||
+                                      (p.fabricante || '').toLowerCase().includes(searchVal.toLowerCase())
+                                    );
+                                    return filtrados.length > 0 ? (
+                                      <ul className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-800 rounded-xl max-h-48 overflow-y-auto shadow-2xl z-[9999] block divide-y divide-slate-800">
+                                        {filtrados.map(p => (
+                                          <li
+                                            key={p.id}
+                                            className="p-2.5 text-sm text-slate-300 hover:bg-indigo-600 hover:text-white cursor-pointer transition-colors block text-left"
+                                            onMouseDown={() => {
+                                              handleItemChange(index, { 
+                                                produto_id: p.id, 
+                                                searchTerm: p.nome, 
+                                                unitario: p.custo_referencia || 0,
+                                                showDropdown: false 
+                                              });
+                                            }}
+                                          >
+                                            <span className="font-medium">{p.nome}</span> 
+                                            <span className="text-xs text-slate-500 ml-2">({p.fabricante})</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : null;
+                                  })()
+                                )}
+                              </React.Fragment>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 pr-4">
+                            {isReadOnly ? (
+                              <span className="text-sm text-slate-300">
+                                {distribuidores.find(d => d.id === item.distribuidor_id)?.nome || '-'}
+                              </span>
+                            ) : (
+                              <select
+                                className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                value={item.distribuidor_id || ''}
+                                onChange={(e) => handleItemChange(index, 'distribuidor_id', e.target.value)}
+                              >
+                                {distribuidores.length === 0 ? (
+                                  <option value="">Nenhum distribuidor cadastrado</option>
+                                ) : (
+                                  distribuidores.map(d => (
+                                    <option key={d.id} value={d.id}>{d.nome}</option>
+                                  ))
+                                )}
+                              </select>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 pr-4 text-center">
+                            {isReadOnly ? (
+                              <span className="text-sm font-bold text-slate-300">{item.quantidade}</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="1"
+                                className="w-16 mx-auto rounded-xl bg-slate-900 border border-slate-800 p-2 text-sm text-center text-slate-200 focus:outline-none focus:border-indigo-500"
+                                value={item.quantidade}
+                                onChange={(e) => handleItemChange(index, 'quantidade', e.target.value)}
+                              />
+                            )}
+                          </td>
+
+                          <td className="py-3.5 pr-4 text-right whitespace-nowrap">
+                            {isReadOnly ? (
+                              <span className="text-sm text-slate-300">
+                                R$ {Number(item.preco_unitario).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                              </span>
+                            ) : (
+                              <div className="relative">
+                                <span className="absolute left-2 top-2 text-xs text-slate-500">R$</span>
+                                <input
+                                  type="text"
+                                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2 pl-7 text-sm text-right text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                                  value={formatMaskedCurrency(item.preco_unitario)}
+                                  onChange={(e) => handleCurrencyInputChange(index, e.target.value)}
+                                />
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 text-right font-bold text-slate-200 text-sm whitespace-nowrap">
+                            R$ {subtotal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          </td>
+
+                          {!isReadOnly && (
+                            <td className="py-3.5 text-center">
+                              <button
+                                onClick={() => handleRemoveItem(index)}
+                                className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {!isReadOnly && (
+              <button
+                onClick={handleAddItem}
+                className="w-full mt-4 py-3 border border-dashed border-slate-800 hover:border-indigo-500/40 rounded-2xl text-xs font-semibold text-slate-500 hover:text-indigo-400 bg-slate-900/10 hover:bg-slate-900/30 transition-all flex items-center justify-center space-x-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>Adicionar Item</span>
+              </button>
+            )}
+          </div>
+
+          <div className="border-t border-slate-800 bg-slate-900/30 p-6 flex flex-col md:flex-row justify-between items-center">
+            <div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Resumo Comercial</span>
+              <p className="text-xs text-slate-400 mt-1">Cálculo ativo com base em {itens.length} {itens.length === 1 ? 'item' : 'itens'}.</p>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total da Proposta</span>
+              <span className="text-3xl font-extrabold text-indigo-400">
+                R$ {realTimeGrandTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       
@@ -1856,14 +2885,14 @@ function App() {
           Relatórios
         </button>
         <button
-          onClick={() => setActiveTab('propostas')}
+          onClick={() => setActiveTab('kanban')}
           className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-            activeTab === 'propostas' 
+            activeTab === 'kanban' 
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40' 
               : 'text-slate-400 hover:text-slate-200 bg-slate-900/40 hover:bg-slate-900/80 border border-slate-800/80'
           }`}
         >
-          Propostas
+          Pipeline de Vendas (Kanban)
         </button>
       </div>
 
@@ -1899,14 +2928,14 @@ function App() {
               </div>
 
               {/* Seletor de Período e Comparativo */}
-              <div className="flex flex-wrap items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl p-2.5">
+              <div className="flex flex-wrap items-center gap-3 bg-slate-900/40 backdrop-blur-md border border-slate-800/80 rounded-2xl p-2.5 shadow-lg">
                 <div className="flex items-center space-x-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Início</label>
                   <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
                   />
                 </div>
                 <div className="flex items-center space-x-2">
@@ -1915,52 +2944,65 @@ function App() {
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
                   />
                 </div>
                 <div className="flex items-center space-x-2">
-                  <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Início Comp.</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Início Comp.</label>
                   <input
                     type="date"
                     value={compareStartDate}
                     onChange={(e) => setCompareStartDate(e.target.value)}
-                    className="bg-slate-950 border border-indigo-950/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
                   />
                 </div>
                 <div className="flex items-center space-x-2">
-                  <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Fim Comp.</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fim Comp.</label>
                   <input
                     type="date"
                     value={compareEndDate}
                     onChange={(e) => setCompareEndDate(e.target.value)}
-                    className="bg-slate-950 border border-indigo-950/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
                   />
                 </div>
                 <button
                   onClick={() => loadDashboardData()}
                   disabled={loadingDashboard}
-                  className="px-3.5 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all"
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-950/30 active:scale-95"
                 >
                   {loadingDashboard ? '...' : 'Filtrar'}
                 </button>
               </div>
             </div>
 
+            {/* Card Informativo de Integridade de Dados */}
+            <div className="mb-4 p-2 px-3 rounded-lg bg-slate-900/40 border border-slate-800/80 flex items-center space-x-2 text-[11px] text-slate-400">
+              <svg className="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="leading-none">
+                <strong className="text-slate-300 font-bold">Nota de Integridade:</strong> Os totais deste painel refletem os itens detalhados no <strong className="text-indigo-400">Supabase</strong>. O tabuleiro Kanban reflete o faturamento total das oportunidades no <strong className="text-indigo-400">ClickUp</strong>.
+              </span>
+            </div>
+
             {/* Cards Executivos de BI */}
             {!loadingDashboard && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 {/* Card 1: Negócios Convertidos */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col relative overflow-hidden">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Negócios Convertidos (Ganhos)</span>
-                  <div className="flex items-baseline space-x-2">
+                <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 rounded-2xl p-5 flex flex-col relative overflow-hidden transition-all duration-300 hover:border-slate-700/60 hover:shadow-lg hover:shadow-indigo-950/10">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 z-10">Negócios Convertidos (Ganhos)</span>
+                  <svg className="w-9 h-9 text-emerald-400/25 absolute top-3 right-3 pointer-events-none z-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex items-baseline space-x-2 z-10">
                     <span className="text-2xl font-black text-white">{biMetrics.wonCount}</span>
                     <span className="text-xs text-slate-400">propostas</span>
                   </div>
-                  <div className="text-xl font-bold text-emerald-400 mt-1">
+                  <div className="text-xl font-bold text-emerald-400 mt-1 z-10">
                     R$ {biMetrics.wonValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   {compareStartDate && compareEndDate && (
-                    <div className="mt-3 flex items-center space-x-1.5 text-xs">
+                    <div className="mt-3 flex items-center space-x-1.5 text-xs z-10">
                       <span className={`font-bold flex items-center ${biMetrics.wonValDiff >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {biMetrics.wonValDiff >= 0 ? '▲' : '▼'} {Math.abs(biMetrics.wonValDiff).toFixed(1)}%
                       </span>
@@ -1970,17 +3012,20 @@ function App() {
                 </div>
 
                 {/* Card 2: Negócios Perdidos */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col relative overflow-hidden">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Negócios Perdidos</span>
-                  <div className="flex items-baseline space-x-2">
+                <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 rounded-2xl p-5 flex flex-col relative overflow-hidden transition-all duration-300 hover:border-slate-700/60 hover:shadow-lg hover:shadow-indigo-950/10">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 z-10">Negócios Perdidos</span>
+                  <svg className="w-9 h-9 text-rose-400/25 absolute top-3 right-3 pointer-events-none z-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div className="flex items-baseline space-x-2 z-10">
                     <span className="text-2xl font-black text-white">{biMetrics.lostCount}</span>
                     <span className="text-xs text-slate-400">propostas</span>
                   </div>
-                  <div className="text-xl font-bold text-red-400 mt-1">
+                  <div className="text-xl font-bold text-red-400 mt-1 z-10">
                     R$ {biMetrics.lostValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   {compareStartDate && compareEndDate && (
-                    <div className="mt-3 flex items-center space-x-1.5 text-xs">
+                    <div className="mt-3 flex items-center space-x-1.5 text-xs z-10">
                       <span className={`font-bold flex items-center ${biMetrics.lostValDiff <= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {biMetrics.lostValDiff <= 0 ? '▼' : '▲'} {Math.abs(biMetrics.lostValDiff).toFixed(1)}%
                       </span>
@@ -1990,12 +3035,15 @@ function App() {
                 </div>
 
                 {/* Card 3: Taxa de Conversão */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col relative overflow-hidden">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Taxa de Conversão Geral</span>
-                  <div className="text-3xl font-black text-indigo-400 mt-1">
+                <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 rounded-2xl p-5 flex flex-col relative overflow-hidden transition-all duration-300 hover:border-slate-700/60 hover:shadow-lg hover:shadow-indigo-950/10">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 z-10">Taxa de Conversão Geral</span>
+                  <svg className="w-9 h-9 text-indigo-400/25 absolute top-3 right-3 pointer-events-none z-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
+                  </svg>
+                  <div className="text-3xl font-black text-indigo-400 mt-1 z-10">
                     {biMetrics.convRate.toFixed(1)}%
                   </div>
-                  <div className="text-xs text-slate-400 mt-1">
+                  <div className="text-xs text-slate-400 mt-1 z-10">
                     sobre total fechado ({biMetrics.wonCount + biMetrics.lostCount})
                   </div>
                   {compareStartDate && compareEndDate && (
@@ -2026,56 +3074,112 @@ function App() {
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Gráfico A: Distribuidor */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 flex flex-col">
-                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 flex flex-col transition-all duration-300 hover:border-slate-800">
+                  <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                     <div>
                       <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-1">Distribuição por Distribuidor</h3>
                       <p className="text-xs text-slate-500">Faturamento total acumulado agrupado por Distribuidor</p>
                     </div>
-                    <select
-                      value={selectedDistributorFilter}
-                      onChange={(e) => setSelectedDistributorFilter(e.target.value)}
-                      className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="all">Todos</option>
-                      {Array.from(new Set(
-                        commercialData
-                          .map(item => item.distribuidores?.nome)
-                          .filter(Boolean)
-                      )).sort((a, b) => a.localeCompare(b)).map(dist => (
-                        <option key={dist} value={dist}>{dist}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={selectedDistributorFilter}
+                        onChange={(e) => setSelectedDistributorFilter(e.target.value)}
+                        className="appearance-none bg-slate-900 border border-slate-700/80 rounded-lg pl-3 pr-8 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer font-semibold shadow-inner"
+                      >
+                        <option value="all">Todos</option>
+                        {Array.from(new Set(
+                          commercialData
+                            .map(item => item.distribuidores?.nome)
+                            .filter(Boolean)
+                        )).sort((a, b) => a.localeCompare(b)).map(dist => (
+                          <option key={dist} value={dist}>{dist}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </div>
                   </div>
-                  <div className="relative h-80 w-full flex-1 min-h-[320px]">
+                  <div className="relative h-64 w-full flex items-center justify-center">
                     <canvas ref={distributorCanvasRef}></canvas>
+                    <div className="absolute flex flex-col items-center justify-center text-center pointer-events-none">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total</span>
+                      <span className="text-lg font-black text-white">{formatValueCompact(distributorTotalSum)}</span>
+                    </div>
+                  </div>
+                  {/* Legenda HTML Customizada */}
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-6 pt-4 border-t border-slate-800/60 max-h-40 overflow-y-auto pr-1">
+                    {Object.keys(distributorTotals).map((label, idx) => {
+                      const val = distributorTotals[label];
+                      const percent = distributorTotalSum > 0 ? Math.round((val / distributorTotalSum) * 100) : 0;
+                      const color = chartColors[idx % chartColors.length];
+                      return (
+                        <div key={label} className="flex items-center justify-between text-xs py-1">
+                          <div className="flex items-center space-x-2 truncate mr-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                            <span className="text-slate-400 truncate">{label}</span>
+                          </div>
+                          <span className="font-bold text-slate-300">{percent}%</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Gráfico B: Fabricante */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 flex flex-col">
-                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 flex flex-col transition-all duration-300 hover:border-slate-800">
+                  <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                     <div>
                       <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-1">Distribuição por Fabricante</h3>
                       <p className="text-xs text-slate-500">Faturamento total acumulado agrupado por Fabricante</p>
                     </div>
-                    <select
-                      value={selectedManufacturerFilter}
-                      onChange={(e) => setSelectedManufacturerFilter(e.target.value)}
-                      className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="all">Todos</option>
-                      {Array.from(new Set(
-                        commercialData
-                          .map(item => item.produtos?.fabricante)
-                          .filter(Boolean)
-                      )).sort((a, b) => a.localeCompare(b)).map(fab => (
-                        <option key={fab} value={fab}>{fab}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={selectedManufacturerFilter}
+                        onChange={(e) => setSelectedManufacturerFilter(e.target.value)}
+                        className="appearance-none bg-slate-900 border border-slate-700/80 rounded-lg pl-3 pr-8 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer font-semibold shadow-inner"
+                      >
+                        <option value="all">Todos</option>
+                        {Array.from(new Set(
+                          commercialData
+                            .map(item => item.produtos?.fabricante)
+                            .filter(Boolean)
+                        )).sort((a, b) => a.localeCompare(b)).map(fab => (
+                          <option key={fab} value={fab}>{fab}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </div>
                   </div>
-                  <div className="relative h-80 w-full flex-1 min-h-[320px]">
+                  <div className="relative h-64 w-full flex items-center justify-center">
                     <canvas ref={manufacturerCanvasRef}></canvas>
+                    <div className="absolute flex flex-col items-center justify-center text-center pointer-events-none">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total</span>
+                      <span className="text-lg font-black text-white">{formatValueCompact(manufacturerTotalSum)}</span>
+                    </div>
+                  </div>
+                  {/* Legenda HTML Customizada */}
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-6 pt-4 border-t border-slate-800/60 max-h-40 overflow-y-auto pr-1">
+                    {Object.keys(manufacturerTotals).map((label, idx) => {
+                      const val = manufacturerTotals[label];
+                      const percent = manufacturerTotalSum > 0 ? Math.round((val / manufacturerTotalSum) * 100) : 0;
+                      const color = chartColors[idx % chartColors.length];
+                      return (
+                        <div key={label} className="flex items-center justify-between text-xs py-1">
+                          <div className="flex items-center space-x-2 truncate mr-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                            <span className="text-slate-400 truncate">{label}</span>
+                          </div>
+                          <span className="font-bold text-slate-300">{percent}%</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -2083,563 +3187,132 @@ function App() {
           </main>
         )}
 
-        {/* ABA 1: EDITOR DE PROPOSTAS */}
-        {activeTab === 'propostas' && (
-          !clickupTaskId ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto space-y-6">
-              <div className="w-20 h-20 bg-indigo-950/50 rounded-full border border-indigo-500/20 flex items-center justify-center">
-                <svg className="w-10 h-10 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+        {/* ABA 1: TABULEIRO KANBAN (PIPELINE DE VENDAS) */}
+        {activeTab === 'kanban' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {loadingKanban ? (
+              <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                <div className="w-12 h-12 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
+                <p className="text-slate-400 font-medium">Carregando oportunidades do ClickUp...</p>
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-white mb-2">Editor de Propostas Bloqueado</h3>
-                <p className="text-sm text-slate-400">Por favor, insira um Negócio ID no topo do painel para carregar as propostas correspondentes e habilitar a timeline de versões.</p>
-              </div>
-            </div>
-          ) : (
-            <React.Fragment>
-              {/* Barra Lateral: Timeline de Versões */}
-              <aside className="w-1/5 border-r border-slate-800 bg-slate-900/40 p-4 flex flex-col space-y-4 overflow-y-auto">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-400">Timeline de Versões</h2>
-                  <span className="bg-slate-800 px-2 py-0.5 rounded-full text-xs font-semibold text-slate-300">
-                    {propostas.length}
-                  </span>
-                </div>
-
-                {propostas.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center p-4 text-center space-y-4">
-                    <svg className="w-10 h-10 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p className="text-xs text-slate-400">Nenhuma proposta criada para este negócio.</p>
+            ) : (
+              <React.Fragment>
+                <div className="flex flex-col md:flex-row md:items-center justify-between px-6 py-3 bg-slate-900/40 border-b border-slate-800/80 flex-shrink-0 space-y-3 md:space-y-0">
+                  <div className="flex items-center space-x-3 flex-wrap gap-y-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Exibir Estágios:</span>
                     <button 
-                      onClick={handleCreateInitialProposal}
-                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold text-white shadow-lg transition-all"
+                      onClick={() => setShowGanhoCol(!showGanhoCol)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
+                        showGanhoCol 
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
                     >
-                      Criar Versão vA
+                      <span>🏆 Ganho</span>
+                    </button>
+                    <button 
+                      onClick={() => setShowPerdidoCol(!showPerdidoCol)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
+                        showPerdidoCol 
+                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400' 
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <span>😞 Perdido</span>
+                    </button>
+                    <button 
+                      onClick={() => setShowCongeladoCol(!showCongeladoCol)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
+                        showCongeladoCol 
+                          ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <span>❄️ Congelado</span>
                     </button>
                   </div>
-                ) : (
-                <div className="flex-1 space-y-3 pr-1">
-                  {propostas.map((prop, i) => {
-                    const isSelected = currentProposta && currentProposta.id === prop.id;
-                    const statusColors = {
-                       'Ativa': 'bg-blue-500 text-blue-100 border-blue-400/20',
-                       'Selecionada': 'bg-emerald-500 text-emerald-100 border-emerald-400/20',
-                       'Ganho': 'bg-amber-500 text-amber-950 border-amber-400/20 font-extrabold',
-                       'Desconsiderada': 'bg-red-600 text-white border-red-500/20',
-                       'Não selecionada': 'bg-slate-600 text-slate-300 border-slate-500/20',
-                       'Substituída': 'bg-amber-600/70 text-amber-200 border-amber-500/20'
-                     };
+
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Ordenar por:</span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="rounded-xl bg-slate-900 border border-slate-800 p-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="default">Padrão</option>
+                      <option value="name">Nome (A - Z)</option>
+                      <option value="value_asc">Valor (Menor para Maior)</option>
+                      <option value="value_desc">Valor (Maior para Menor)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="kanban-board">
+                  {kanbanColumns.map(col => {
+                    const colName = col.name.toLowerCase();
+                    if (colName.includes("ganho") && !showGanhoCol) return null;
+                    if (colName.includes("perdido") && !showPerdidoCol) return null;
+                    if (colName.includes("congelado") && !showCongeladoCol) return null;
                     
+                    const tasksInCol = kanbanTasks.filter(t => getTaskOptionId(t, kanbanColumns) === col.id);
+                    
+                    const sortedTasks = [...tasksInCol].sort((a, b) => {
+                      if (sortBy === 'name') {
+                        return a.name.localeCompare(b.name);
+                      }
+                      if (sortBy === 'value_asc' || sortBy === 'value_desc') {
+                        const valA = getOpportunityValue(a) || 0;
+                        const valB = getOpportunityValue(b) || 0;
+                        if (valA === 0 && valB !== 0) return 1;
+                        if (valB === 0 && valA !== 0) return -1;
+                        if (valA === 0 && valB === 0) return 0;
+                        return sortBy === 'value_asc' ? valA - valB : valB - valA;
+                      }
+                      return 0;
+                    });
+
                     return (
-                      <div 
-                        key={prop.id}
-                        onClick={() => loadProposalDetails(prop.id)}
-                        className={`relative p-3 rounded-xl cursor-pointer timeline-item glass-card transition-all ${
-                          isSelected ? 'active-glow border-indigo-500 bg-slate-800/80' : 'bg-slate-900/40 hover:bg-slate-800/30'
-                        }`}
-                      >
-                        <div className="timeline-line"></div>
-                        
-                        <div className="flex items-center justify-between mb-1.5">
+                      <div key={col.id} className="kanban-column">
+                        <div className="kanban-column-header">
                           <div className="flex items-center space-x-2">
-                            <span className="w-5 h-5 flex items-center justify-center bg-indigo-950 text-indigo-300 rounded-md text-xs font-bold border border-indigo-500/30">
-                              {prop.versao}
-                            </span>
-                            <span className="text-xs font-medium text-slate-300 uppercase">{prop.cenario}</span>
+                            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: col.color || '#fff' }}></span>
+                            <span className="text-sm font-bold text-white uppercase tracking-wider">{col.name}</span>
                           </div>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${statusColors[prop.situacao] || 'bg-slate-700'}`}>
-                            {prop.situacao}
+                          <span className="bg-slate-800 px-2 py-0.5 rounded-full text-xs font-bold text-slate-400">
+                            {tasksInCol.length}
                           </span>
                         </div>
-
-                        <div className="flex justify-between items-baseline mt-2">
-                          <span className="text-[10px] text-slate-500">
-                            {new Date(prop.created_at).toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})} • {prop.criado_por.split(' ')[0]}
-                          </span>
-                          <span className="text-sm font-bold text-white">
-                            R$ {Number(prop.total_proposta).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                          </span>
+                        <div 
+                          data-option-id={col.id}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => handleDrop(e, col.id)}
+                          className="kanban-cards"
+                        >
+                          {sortedTasks.map(task => {
+                            const dealValue = getOpportunityValue(task);
+                            const formattedValue = dealValue !== null && dealValue !== undefined
+                              ? `R$ ${Number(dealValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` 
+                              : 'Sem Valor';
+                            const responsavel = task.responsavel_negocio;
+                            return (
+                              <KanbanCard 
+                                key={task.id}
+                                task={task}
+                                dealValue={dealValue}
+                                formattedValue={formattedValue}
+                                responsavel={responsavel}
+                                handleDragStart={handleDragStart}
+                                handleCardClick={handleCardClick}
+                              />
+                            );
+                          })}
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              )}
-              {propostas.length > 0 && (
-                <button
-                  onClick={handleGerarNovaVersao}
-                  disabled={saving}
-                  className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 mt-4 shadow-lg shadow-indigo-950/50 hover:bg-indigo-500"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                  </svg>
-                  <span>Gerar Nova Versão</span>
-                </button>
-              )}
-            </aside>
-
-            {/* Painel Central: Editor */}
-            <main className="w-4/5 flex flex-col bg-slate-950 relative overflow-hidden">
-              {loading ? (
-                <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-                  <div className="w-10 h-10 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
-                  <p className="text-sm text-slate-400 font-medium">Processando dados da proposta...</p>
-                </div>
-              ) : !currentProposta ? (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto space-y-6">
-                  <div className="w-20 h-20 bg-indigo-950/50 rounded-full border border-indigo-500/20 flex items-center justify-center">
-                    <svg className="w-10 h-10 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-white mb-2">Painel de Propostas Comerciais</h3>
-                    <p className="text-sm text-slate-400">Selecione ou gere uma nova proposta na barra lateral para carregar a tela de negociação.</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  
-                  {/* Barra de Título / Cabeçalho do Editor */}
-                  <div className="border-b border-slate-800 bg-slate-900/20 p-6 flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-                    <div className="flex items-center space-x-4">
-                      <div>
-                        {projectContext.name && (
-                          <h1 className="text-3xl font-extrabold text-indigo-400 tracking-tight mb-2">
-                            {projectContext.name}
-                          </h1>
-                        )}
-                        <div className="flex items-center space-x-2 flex-wrap gap-2">
-                          <h2 className="text-2xl font-bold text-white tracking-tight">Proposta {currentProposta.versao}</h2>
-                          {currentProposta.cenario && (
-                            <span className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2.5 py-0.5 rounded-full uppercase font-bold">
-                              {currentProposta.cenario}
-                            </span>
-                          )}
-                          {isReadOnly && (
-                            <span className="bg-amber-950/60 border border-amber-500/20 text-amber-300 text-[10px] px-2.5 py-0.5 rounded-full uppercase font-bold flex items-center space-x-1 pulse-badge">
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                              </svg>
-                              <span>Apenas Leitura</span>
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-3 flex-wrap mt-1.5">
-                          <p className="text-xs text-slate-400">
-                            Criada em {new Date(currentProposta.created_at).toLocaleString('pt-BR')} {currentProposta.criado_por ? `por ${currentProposta.criado_por}` : ''}
-                          </p>
-                          {currentProposta.situacao === 'Ganho' && (
-                            <span className="text-[11px] font-bold text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded-md border border-amber-500/30">
-                              🏆 Ganho {currentProposta.data_fechamento ? `(${new Date(currentProposta.data_fechamento + 'T00:00:00').toLocaleDateString('pt-BR')})` : ''}
-                            </span>
-                          )}
-                          {currentProposta.situacao === 'Perdido' && (
-                            <span className="text-[11px] font-bold text-red-400 bg-red-950/80 px-2.5 py-0.5 rounded-md border border-red-500/30">
-                              😞 Perdido: {currentProposta.motivo_perda || 'Outros'} {currentProposta.data_fechamento ? `(${new Date(currentProposta.data_fechamento + 'T00:00:00').toLocaleDateString('pt-BR')})` : ''}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Ações */}
-                    <div className="flex items-center flex-wrap gap-2.5">
-                      {currentProposta.situacao !== 'Ganho' && (
-                        <button
-                          onClick={() => {
-                            setCloseDate(new Date().toISOString().split('T')[0]);
-                            setShowCloseModal('win');
-                          }}
-                          disabled={saving}
-                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 disabled:opacity-50 text-amber-950 rounded-xl text-xs font-black shadow-lg shadow-amber-950/30 transition-all flex items-center space-x-1.5"
-                        >
-                          <span>🏆 Marcar como Ganha</span>
-                        </button>
-                      )}
-
-                      {currentProposta.situacao !== 'Perdido' && currentProposta.situacao !== 'Ganho' && (
-                        <button
-                          onClick={() => {
-                            setCloseDate(new Date().toISOString().split('T')[0]);
-                            setSelectedLossReason('');
-                            setShowCloseModal('loss');
-                          }}
-                          disabled={saving}
-                          className="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-lg shadow-red-950/30 transition-all flex items-center space-x-1.5"
-                        >
-                          <span>😞 Marcar como Perdido</span>
-                        </button>
-                      )}
-
-                      {currentProposta.situacao !== 'Selecionada' && currentProposta.situacao !== 'Ganho' && (
-                        <button
-                          onClick={handleSelectProposal}
-                          disabled={saving}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-950/30 transition-all flex items-center space-x-1.5"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>
-                            {currentProposta.situacao === 'Desconsiderada' ? 'Reativar e Selecionar' : 'Selecionar'}
-                          </span>
-                        </button>
-                      )}
-
-                      {!isReadOnly && (
-                        <button
-                          onClick={handleSaveProposalDebounced}
-                          disabled={saving}
-                          className="p-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl shadow-lg shadow-indigo-950/30 transition-all flex items-center justify-center"
-                          title="Salvar Alterações"
-                        >
-                          {saving ? (
-                            <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                          ) : (
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-                              <polyline points="17 21 17 13 7 13 7 21"></polyline>
-                              <polyline points="7 3 7 8 15 8"></polyline>
-                            </svg>
-                          )}
-                        </button>
-                      )}
-
-                      <button
-                        onClick={handleDeleteProposal}
-                        disabled={saving}
-                        className="p-2.5 bg-slate-900 hover:bg-red-950/40 text-slate-400 hover:text-red-400 border border-slate-800 hover:border-red-900/50 rounded-xl transition-all flex items-center justify-center"
-                        title="Excluir Versão"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          <line x1="10" y1="11" x2="10" y2="17"></line>
-                          <line x1="14" y1="11" x2="14" y2="17"></line>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="p-6 bg-slate-900/10 border-b border-slate-900 grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">É um Projeto?</label>
-                      <select
-                        className="w-full rounded-xl bg-slate-900/50 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                        value={isProjeto ? "true" : "false"}
-                        onChange={(e) => {
-                          const val = e.target.value === "true";
-                          setIsProjeto(val);
-                          if (!val) {
-                            setCurrentProposta({ ...currentProposta, cenario: "" });
-                          }
-                        }}
-                      >
-                        <option value="false" className="bg-slate-900 text-slate-200">Não</option>
-                        <option value="true" className="bg-slate-900 text-slate-200">Sim</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de Projeto</label>
-                      <select
-                        className="w-full rounded-xl bg-slate-900/50 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
-                        value={currentProposta.cenario || ""}
-                        onChange={(e) => setCurrentProposta({ ...currentProposta, cenario: e.target.value })}
-                        disabled={isReadOnly || !isProjeto}
-                      >
-                        <option value="">Selecione o tipo...</option>
-                        <option value="HCI">HCI (Hiperconvergência)</option>
-                        <option value="Cloud">Cloud (Nuvem)</option>
-                        <option value="Tradicional">Tradicional</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Vendedor / Responsável</label>
-                      <select
-                        className="w-full rounded-xl bg-slate-900/50 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
-                        value={currentProposta.criado_por || ""}
-                        onChange={(e) => setCurrentProposta({ ...currentProposta, criado_por: e.target.value })}
-                        disabled={isReadOnly}
-                      >
-                        <option value="">Selecione o vendedor...</option>
-                        {vendedores.map(v => (
-                          <option key={v.id} value={v.nome} className="bg-slate-900 text-slate-200">{v.nome}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Situação Atual</label>
-                      <div className="flex items-center bg-slate-900/50 border border-slate-800 rounded-xl px-3 h-[42px] space-x-2">
-                        <span className={`w-2.5 h-2.5 rounded-full ${
-                          currentProposta.situacao === 'Selecionada' ? 'bg-emerald-500 animate-pulse' :
-                          currentProposta.situacao === 'Ativa' ? 'bg-blue-500' :
-                          currentProposta.situacao === 'Ganho' ? 'bg-amber-500 animate-bounce' :
-                          currentProposta.situacao === 'Perdido' ? 'bg-red-500' :
-                          currentProposta.situacao === 'Desconsiderada' ? 'bg-red-500/50' : 'bg-slate-500'
-                        }`}></span>
-                        <select
-                          className="bg-transparent border-0 p-0 text-sm font-semibold text-slate-200 focus:ring-0 focus:outline-none cursor-pointer flex-1"
-                          value={currentProposta.situacao}
-                          onChange={(e) => handleSituationChange(e.target.value)}
-                        >
-                          <option value="Ativa" className="bg-slate-900 text-slate-200">Ativa</option>
-                          <option value="Selecionada" className="bg-slate-900 text-slate-200">Selecionada</option>
-                          <option value="Ganho" className="bg-slate-900 text-slate-200">Ganho</option>
-                          <option value="Desconsiderada" className="bg-slate-900 text-slate-200">Desconsiderada</option>
-                          <option value="Perdido" className="bg-slate-900 text-slate-200">Perdido</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Tabela de Itens */}
-                  <div className="flex-1 overflow-y-auto p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Produtos e Serviços inclusos</h3>
-                      {!isReadOnly && (
-                        <button 
-                          onClick={() => setShowProductModal(true)}
-                          className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1"
-                        >
-                          <span>+ Adicionar Novo Item ao Catálogo</span>
-                        </button>
-                      )}
-                    </div>
-
-                    {itens.length === 0 ? (
-                      <div className="border border-dashed border-slate-800 rounded-2xl p-12 text-center flex flex-col items-center justify-center space-y-4">
-                        <svg className="w-12 h-12 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                        </svg>
-                        <div>
-                          <p className="text-sm text-slate-400 font-medium">Esta proposta ainda não tem nenhum item adicionado.</p>
-                          {!isReadOnly && <p className="text-xs text-slate-500 mt-1">Adicione produtos do catálogo abaixo.</p>}
-                        </div>
-                        {!isReadOnly && (
-                          <button
-                            onClick={handleAddItem}
-                            className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/20 rounded-xl text-xs font-bold transition-all"
-                          >
-                            Adicionar Primeiro Item
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto" style={{ overflow: 'visible', minHeight: '280px' }}>
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="border-b border-slate-800/80 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                              <th className="pb-3 w-5/12">Produto [Fabricante]</th>
-                              <th className="pb-3 w-3/12">Distribuidor</th>
-                              <th className="pb-3 w-1/12 text-center">Qtd</th>
-                              <th className="pb-3 w-2/12 text-right">Unitário</th>
-                              <th className="pb-3 w-2/12 text-right">Subtotal</th>
-                              {!isReadOnly && <th className="pb-3 w-1/12 text-center">Ações</th>}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-900/60">
-                            {itens.map((item, index) => {
-                              const subtotal = item.quantidade * item.preco_unitario || 0;
-                              return (
-                                <tr key={item.id} className="group hover:bg-slate-900/20 transition-colors">
-                                  
-                                  {/* Produto */}
-                                  <td className="py-3.5 pr-4 relative" style={{ overflow: 'visible' }}>
-                                    {isReadOnly ? (
-                                      <div className="text-sm font-semibold text-slate-200">
-                                        {produtos.find(p => p.id === item.produto_id)?.nome || 'Produto não encontrado'}
-                                        <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
-                                          Fabricante: {produtos.find(p => p.id === item.produto_id)?.fabricante || '-'}
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <React.Fragment>
-                                        <input
-                                          type="text"
-                                          className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                                          placeholder="Digite para buscar produto..."
-                                          value={
-                                            item.searchTerm !== undefined
-                                              ? item.searchTerm
-                                              : (produtos.find(p => p.id === item.produto_id)?.nome || '')
-                                          }
-                                          onChange={(e) => {
-                                            const val = e.target.value;
-                                            handleItemChange(index, { searchTerm: val, showDropdown: true });
-                                          }}
-                                          onFocus={() => {
-                                            const currentVal = item.searchTerm !== undefined
-                                              ? item.searchTerm
-                                              : (produtos.find(p => p.id === item.produto_id)?.nome || '');
-                                            handleItemChange(index, { searchTerm: currentVal, showDropdown: true });
-                                          }}
-                                          onBlur={() => {
-                                            setTimeout(() => {
-                                              handleItemChange(index, { showDropdown: false });
-                                            }, 200);
-                                          }}
-                                        />
-                                        
-                                        {item.showDropdown && (item.searchTerm !== undefined ? item.searchTerm : (produtos.find(p => p.id === item.produto_id)?.nome || '')) && (
-                                          (() => {
-                                            const searchVal = item.searchTerm !== undefined
-                                              ? item.searchTerm
-                                              : (produtos.find(p => p.id === item.produto_id)?.nome || '');
-                                            const filtrados = produtos.filter(p => 
-                                              (p.nome || '').toLowerCase().includes(searchVal.toLowerCase()) ||
-                                              (p.fabricante || '').toLowerCase().includes(searchVal.toLowerCase())
-                                            );
-                                            return filtrados.length > 0 ? (
-                                              <ul className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-800 rounded-xl max-h-48 overflow-y-auto shadow-2xl z-[9999] block divide-y divide-slate-800">
-                                                {filtrados.map(p => (
-                                                  <li
-                                                    key={p.id}
-                                                    className="p-2.5 text-sm text-slate-300 hover:bg-indigo-600 hover:text-white cursor-pointer transition-colors block text-left"
-                                                    onMouseDown={() => {
-                                                      handleItemChange(index, { 
-                                                        produto_id: p.id, 
-                                                        searchTerm: p.nome, 
-                                                        unitario: p.custo_referencia || 0,
-                                                        showDropdown: false 
-                                                      });
-                                                    }}
-                                                  >
-                                                    <span className="font-medium">{p.nome}</span> 
-                                                    <span className="text-xs text-slate-500 ml-2">({p.fabricante})</span>
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                            ) : null;
-                                          })()
-                                        )}
-                                      </React.Fragment>
-                                    )}
-                                  </td>
-
-                                  {/* Distribuidor (Dropdown a partir da tabela distribuidores) */}
-                                  <td className="py-3.5 pr-4">
-                                    {isReadOnly ? (
-                                      <span className="text-sm text-slate-300">
-                                        {distribuidores.find(d => d.id === item.distribuidor_id)?.nome || '-'}
-                                      </span>
-                                    ) : (
-                                      <select
-                                        className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                                        value={item.distribuidor_id || ''}
-                                        onChange={(e) => handleItemChange(index, 'distribuidor_id', e.target.value)}
-                                      >
-                                        {distribuidores.length === 0 ? (
-                                          <option value="">Nenhum distribuidor cadastrado</option>
-                                        ) : (
-                                          distribuidores.map(d => (
-                                            <option key={d.id} value={d.id}>{d.nome}</option>
-                                          ))
-                                        )}
-                                      </select>
-                                    )}
-                                  </td>
-
-                                  {/* Quantidade */}
-                                  <td className="py-3.5 pr-4 text-center">
-                                    {isReadOnly ? (
-                                      <span className="text-sm font-bold text-slate-300">{item.quantidade}</span>
-                                    ) : (
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        className="w-16 mx-auto rounded-xl bg-slate-900 border border-slate-800 p-2 text-sm text-center text-slate-200 focus:outline-none focus:border-indigo-500"
-                                        value={item.quantidade}
-                                        onChange={(e) => handleItemChange(index, 'quantidade', e.target.value)}
-                                      />
-                                    )}
-                                  </td>
-
-                                  {/* Preço Unitário com Máscara Visual (sem R$ no input) */}
-                                  <td className="py-3.5 pr-4 text-right">
-                                    {isReadOnly ? (
-                                      <span className="text-sm text-slate-300">
-                                        R$ {Number(item.preco_unitario).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                                      </span>
-                                    ) : (
-                                      <div className="relative">
-                                        <span className="absolute left-2 top-2 text-xs text-slate-500">R$</span>
-                                        <input
-                                          type="text"
-                                          className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2 pl-7 text-sm text-right text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
-                                          value={formatMaskedCurrency(item.preco_unitario)}
-                                          onChange={(e) => handleCurrencyInputChange(index, e.target.value)}
-                                        />
-                                      </div>
-                                    )}
-                                  </td>
-
-                                  {/* Subtotal */}
-                                  <td className="py-3.5 text-right font-bold text-slate-200 text-sm">
-                                    R$ {subtotal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                                  </td>
-
-                                  {/* Remover item */}
-                                  {!isReadOnly && (
-                                    <td className="py-3.5 text-center">
-                                      <button
-                                        onClick={() => handleRemoveItem(index)}
-                                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                      </button>
-                                    </td>
-                                  )}
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {!isReadOnly && (
-                      <button
-                        onClick={handleAddItem}
-                        className="w-full mt-4 py-3 border border-dashed border-slate-800 hover:border-indigo-500/40 rounded-2xl text-xs font-semibold text-slate-500 hover:text-indigo-400 bg-slate-900/10 hover:bg-slate-900/30 transition-all flex items-center justify-center space-x-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
-                        </svg>
-                        <span>Adicionar Item</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Totais */}
-                  <div className="border-t border-slate-800 bg-slate-900/30 p-6 flex flex-col md:flex-row justify-between items-center">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Resumo Comercial</span>
-                      <p className="text-xs text-slate-400 mt-1">Cálculo ativo com base em {itens.length} {itens.length === 1 ? 'item' : 'itens'}.</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total da Proposta</span>
-                      <span className="text-3xl font-extrabold text-indigo-400">
-                        R$ {realTimeGrandTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                      </span>
-                    </div>
-                  </div>
-
-                </div>
-              )}
-            </main>
-          </React.Fragment>
-          )
+              </React.Fragment>
+            )}
+          </div>
         )}
 
       </div>
@@ -3209,7 +3882,7 @@ function App() {
 
       {/* 6. Modal de Fechamento (Ganho ou Perdido) */}
       {showCloseModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 relative">
             <button 
               onClick={() => setShowCloseModal(false)}
@@ -3273,6 +3946,120 @@ function App() {
                 {saving ? 'Gravando...' : 'Confirmar Fechamento'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Drawer Lateral Direito */}
+      {showDrawer && (
+        <div className="drawer-container">
+          <div 
+            className={`drawer-backdrop ${showDrawer ? 'active' : ''}`} 
+            onClick={() => {
+              setShowDrawer(false);
+              setClickupTaskId('');
+            }}
+          ></div>
+          <div 
+            className={`drawer-content h-full flex flex-col ${showDrawer ? 'active' : ''} ${
+              drawerTab === 'budget' ? 'w-[75vw] max-w-7xl' : 'w-full max-w-xl'
+            }`}
+          >
+            {drawerTab === 'details' ? (
+              <div className="flex-1 flex flex-col p-6 overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-white">{selectedTask ? selectedTask.name : 'Detalhes do Negócio'}</h3>
+                    {(() => {
+                      const propNumField = selectedTask && selectedTask.custom_fields 
+                        ? selectedTask.custom_fields.find(f => f.id === 'c44cc05d-303f-47e2-b243-40c6b26b732f') 
+                        : null;
+                      const propNum = propNumField ? propNumField.value : null;
+                      return (
+                        <p className="text-xs text-slate-400">
+                          {propNum ? `Nº da Proposta: ${propNum}` : `ID da oportunidade: #${clickupTaskId}`}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setShowDrawer(false);
+                      setClickupTaskId('');
+                    }}
+                    className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="space-y-4 mb-8">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Responsável pelo Negócio</span>
+                      <select
+                        className="w-full bg-transparent border-0 p-0 text-sm font-semibold text-slate-200 focus:ring-0 focus:outline-none cursor-pointer mt-1"
+                        value={selectedTask ? (selectedTask.responsavel_negocio || "") : ""}
+                        onChange={(e) => {
+                          if (selectedTask) {
+                            const u = vendedores.find(v => v.nome === e.target.value);
+                            handleResponsavelChange(selectedTask.id, e.target.value, u ? u.id : null);
+                          }
+                        }}
+                      >
+                        <option value="" className="bg-slate-900 text-slate-400">Selecione o responsável...</option>
+                        {vendedores.map(v => (
+                          <option key={v.id} value={v.nome} className="bg-slate-900 text-slate-200">{v.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Valor Estimado</span>
+                      <span className="text-sm font-semibold text-indigo-400 mt-1 block">
+                        {(() => {
+                          if (currentProposta && currentProposta.situacao === 'Selecionada') {
+                            return `R$ ${Number(realTimeGrandTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                          }
+                          const val = getOpportunityValue(selectedTask);
+                          return (val !== null && val !== undefined && !isNaN(val))
+                            ? `R$ ${Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                            : 'R$ 0,00';
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 flex flex-col">
+                  {renderTimeline()}
+                </div>
+              </div>
+            ) : (
+              <div className="drawer-split-container">
+                {/* Lado Esquerdo: Timeline sempre visível */}
+                <div className="drawer-split-sidebar flex flex-col p-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-4 flex-shrink-0">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-indigo-400">Histórico de Versões</h4>
+                    <button 
+                      onClick={() => setDrawerTab('details')}
+                      className="text-[10px] bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg text-slate-300 transition-colors font-bold"
+                    >
+                      ← Detalhes
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+                    {renderTimeline()}
+                  </div>
+                </div>
+
+                {/* Lado Direito: Editor de Orçamentos */}
+                <div className="drawer-split-main flex flex-col">
+                  {renderBudgetEditor()}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
