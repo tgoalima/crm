@@ -1,0 +1,15 @@
+# Chaves secretas e configurações locais
+.env
+
+# Arquivos temporários do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Cache do Python (evita poluir o repositório)
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Arquivos de log e build locais
+dist/
+node_modules/

@@ -2,6 +2,12 @@
 
 const { useState, useEffect, useMemo, useRef } = React;
 
+if (typeof Chart !== 'undefined') {
+  Chart.Tooltip.positioners.followMouse = function(elements, eventPosition) {
+    return { x: eventPosition.x, y: eventPosition.y };
+  };
+}
+
 const DEAL_VALUE_FIELD_ID = 'ee65221a-029d-4d0a-a981-b71b5a29b4b4';
 const RESPONSAVEL_FIELD_ID = ''; // Mapeado via assignees nativos do ClickUp
 const API_KEY = '';
@@ -28,12 +34,33 @@ const chartBorderColors = [
   'rgba(20, 184, 166, 1)',
 ];
 
-// Configuração padrão ou carregada do LocalStorage
+// Configuração padrão
 const getInitialConfig = () => {
   return {
-    url: localStorage.getItem('supa_url') || '',
-    anonKey: localStorage.getItem('supa_key') || '',
+    url: '',
+    anonKey: '',
   };
+};
+
+const getSupabaseHeaders = () => {
+  return {};
+};
+
+// Função utilitária global: extrai o nome do estágio de forma segura.
+// Evita crash fatal quando stage_name ou status são objetos em vez de strings.
+const getSafeStageName = (card) => {
+  if (!card) return "";
+  let val = "";
+  if (card.stage_name) {
+    val = typeof card.stage_name === 'object' 
+      ? (card.stage_name.name || card.stage_name.status || card.stage_name.value || "") 
+      : card.stage_name;
+  } else if (card.status) {
+    val = typeof card.status === 'object' 
+      ? (card.status.status || card.status.name || card.status.value || "") 
+      : card.status;
+  }
+  return String(val || "").toLowerCase().trim();
 };
 
 const formatValueCompact = (val) => {
@@ -75,16 +102,24 @@ const getNextVersionLetter = (currentVersao) => {
   }
   return prefix + charArray.join('');
 };
-const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick }) => {
+const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick, hasOverdue }) => {
   return (
     <div 
       data-id={task.id} 
       draggable={true}
       onDragStart={(e) => handleDragStart(e, task)}
       onClick={() => handleCardClick(task)}
-      className="kanban-card flex flex-col"
+      className="kanban-card flex flex-col relative"
     >
-      <h4 className="text-sm font-semibold text-slate-100 line-clamp-2 mb-2 pr-2">{task.name}</h4>
+      <div className="flex items-start justify-between mb-2">
+        <h4 className="text-sm font-semibold text-slate-100 line-clamp-2 pr-2">{task.name}</h4>
+        {hasOverdue && (
+          <span 
+            className="w-2.5 h-2.5 rounded-full bg-red-500 border border-slate-950 flex-shrink-0 mt-1 animate-pulse" 
+            title="Possui tarefa comercial atrasada!"
+          />
+        )}
+      </div>
       <div className="flex items-center justify-between text-xs text-slate-400 mt-auto">
         <span>{responsavel || 'Sem Responsável'}</span>
         <span className="font-bold text-indigo-400">{formattedValue}</span>
@@ -93,17 +128,255 @@ const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, h
   );
 });
 
+const STAGE_ORDER = [
+  { key: 'registro',       width: '100%' },
+  { key: 'qualifica',      width: '85%'  },
+  { key: 'proposta',       width: '70%'  },
+  { key: 'desenvolvimento',width: '55%'  },
+  { key: 'negocia',        width: '40%'  },
+  { key: 'termo',          width: '25%'  },
+  { key: 'aceite',         width: '25%'  },
+];
+
+const getStageSortKey = (name) => {
+  const n = name.toLowerCase();
+  for (let i = 0; i < STAGE_ORDER.length; i++) {
+    if (n.includes(STAGE_ORDER[i].key)) return i;
+  }
+  return 99;
+};
+
+const getStageWidth = (name) => {
+  const n = name.toLowerCase();
+  for (let i = 0; i < STAGE_ORDER.length; i++) {
+    if (n.includes(STAGE_ORDER[i].key)) return STAGE_ORDER[i].width;
+  }
+  return '100%';
+};
+
+const ForecastFunnelPanel = ({ 
+  kanbanColumns, 
+  kanbanTasks, 
+  showGanhoCol, 
+  showPerdidoCol, 
+  showCongeladoCol, 
+  filterStage, 
+  setFilterStage,
+  getTaskOptionId,
+  getOpportunityValue
+}) => {
+  // Guards defensivos: garante que arrays nunca sejam undefined
+  const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];
+  const safeTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];
+
+  const activeCols = safeColumns.filter(col => {
+    if (!col || typeof col.name !== 'string') return false;
+    const colName = col.name.toLowerCase();
+    if (colName.includes("ganho") || colName.includes("perdido") || colName.includes("congelado")) return false;
+    return true;
+  });
+
+  const rawStageData = activeCols.map(col => {
+    const tasksInCol = safeTasks.filter(t => getTaskOptionId && getTaskOptionId(t, safeColumns) === col.id);
+    const total = tasksInCol.reduce((acc, t) => acc + (getOpportunityValue ? (getOpportunityValue(t) || 0) : 0), 0);
+    return {
+      id: col.id,
+      name: col.name,
+      color: col.color || '#6366f1',
+      total,
+      count: tasksInCol.length,
+      funnelWidth: getStageWidth(col.name),
+    };
+  });
+
+  // Sort stages chronologically (top of funnel first)
+  const stageData = [...rawStageData].sort((a, b) => getStageSortKey(a.name) - getStageSortKey(b.name));
+
+  const totalFunnelSum = stageData.reduce((acc, s) => acc + s.total, 0);
+  const selectedStageObj = filterStage ? stageData.find(s => s.id === filterStage) : null;
+  const displayTotal = selectedStageObj ? selectedStageObj.total : totalFunnelSum;
+  const displayTitle = selectedStageObj ? selectedStageObj.name : "Total Funil";
+
+  return (
+    <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/30 flex-shrink-0">
+      <div className="text-xs font-bold text-slate-400 mb-4 uppercase tracking-wider flex items-center justify-between">
+        <span>Funil de Vendas &amp; Forecast</span>
+        {filterStage && (
+          <button 
+            onClick={() => setFilterStage(null)}
+            className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer"
+          >
+            Limpar Filtro
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full items-stretch">
+        {/* Left Column: Inverted pyramid funnel (50% width) */}
+        <div className="flex flex-col items-stretch justify-center space-y-1.5 py-1">
+          {stageData.map((stage) => {
+            const isSelected = filterStage === stage.id;
+            return (
+              <div key={stage.id} className="flex justify-center w-full">
+                <button
+                  onClick={() => setFilterStage(filterStage === stage.id ? null : stage.id)}
+                  style={{ width: stage.funnelWidth }}
+                  className={`group flex items-center justify-between px-3 py-2 rounded-xl transition-all duration-200 border cursor-pointer ${
+                    isSelected
+                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-500/20'
+                      : 'bg-slate-900/70 hover:bg-slate-800/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-600'
+                  }`}
+                >
+                  {/* Left: dot + name | Right: badge de quantidade */}
+                  <div className="flex items-center justify-between w-full min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span 
+                        className="w-1.5 h-1.5 rounded-full flex-shrink-0" 
+                        style={{ backgroundColor: stage.color }}
+                      />
+                      <span className="text-[10px] font-bold tracking-wide uppercase whitespace-nowrap overflow-hidden text-ellipsis">
+                        {stage.name}
+                      </span>
+                    </div>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 ml-2 ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-400 group-hover:text-slate-200'
+                    }`}>
+                      {stage.count}
+                    </span>
+                  </div>
+                  {/* Right: value */}
+                  <span className={`font-mono text-[10px] font-bold flex-shrink-0 ml-2 ${isSelected ? 'text-white' : 'text-indigo-400'}`}>
+                    R$ {stage.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right Column: Total em Negociação — usa displayTotal que já respeita filterStage e exclui inativos */}
+        <div className="bg-gradient-to-br from-indigo-950/50 to-slate-900/80 p-6 rounded-2xl border border-indigo-500/15 flex flex-col justify-center items-center text-center w-full min-h-[240px]">
+          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-3 block">
+            {filterStage && selectedStageObj ? selectedStageObj.name : "Total em Negociação"}
+          </span>
+          <span className="text-3xl font-black text-emerald-400 leading-none select-all drop-shadow-[0_2px_10px_rgba(16,185,129,0.2)]">
+            R$ {displayTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+          <p className="text-[11px] text-slate-400 mt-4 max-w-xs leading-relaxed">
+            {filterStage && selectedStageObj
+              ? `Soma dos negócios na etapa "${selectedStageObj.name}".`
+              : "Soma total de todos os negócios comerciais ativos em andamento no funil."}
+          </p>
+          {!filterStage && (
+            <div className="mt-3 text-xs text-slate-500 font-semibold px-3 py-1 bg-slate-950/50 rounded-full border border-slate-800/40">
+              {stageData.reduce((a, s) => a + s.count, 0)} negócios em andamento
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LoginScreen = ({ onLogin, error }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setLocalError('');
+    try {
+      const res = await onLogin(email, password);
+      if (res && res.error) {
+        setLocalError(res.error.message);
+      }
+    } catch (err) {
+      setLocalError(err.message || 'Erro ao realizar login');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md">
+      <div className="w-full max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl animate-fade-in">
+        <div className="text-center mb-8">
+          <div className="inline-flex p-3 bg-indigo-500/10 text-indigo-400 rounded-full mb-3">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-white">Gestão Comercial</h2>
+          <p className="text-slate-400 text-sm mt-1">Faça login para acessar o sistema</p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">E-mail</label>
+            <input 
+              type="email" 
+              required
+              className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-100 rounded-lg outline-none transition-all"
+              placeholder="seu-email@suprimatica.com.br"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Senha</label>
+            <input 
+              type="password" 
+              required
+              className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-100 rounded-lg outline-none transition-all"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+
+          {(localError || error) && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg">
+              {localError || error}
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white font-semibold rounded-lg shadow-lg hover:shadow-indigo-500/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : "Entrar"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [config, setConfig] = useState(getInitialConfig);
   const [supabaseClient, setSupabaseClient] = useState(null);
   const [dbConnected, setDbConnected] = useState(false);
+  const [session, setSession] = useState(null);
   const [clickupTaskId, setClickupTaskId] = useState('');
   const [clickupListId, setClickupListId] = useState('');
   
   // Constante e Estados do Kanban & Drawer
   const TARGET_LIST_ID = '901326185457';
-  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban' | 'relatorios'
-  const [kanbanTasks, setKanbanTasks] = useState([]);
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('crm_active_view') || 'kanban'); // 'kanban' | 'relatorios'
+  
+  useEffect(() => {
+    localStorage.setItem('crm_active_view', activeTab);
+  }, [activeTab]);
+  const [kanbanTasks, setKanbanTasks] = useState(() => {
+    const cached = localStorage.getItem('crm_cache_kanban_tasks');
+    return cached ? JSON.parse(cached) : [];
+  });
   const [kanbanColumns, setKanbanColumns] = useState([]);
   const [loadingKanban, setLoadingKanban] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
@@ -113,8 +386,31 @@ function App() {
   const [showGanhoCol, setShowGanhoCol] = useState(false);
   const [showPerdidoCol, setShowPerdidoCol] = useState(false);
   const [showCongeladoCol, setShowCongeladoCol] = useState(false);
-  const [sortBy, setSortBy] = useState('default'); // 'default' | 'name' | 'value_asc' | 'value_desc'
+  const [sortBy, setSortBy] = useState(() => {
+    return localStorage.getItem('crm_sort_order') || 'default';
+  });
   const [supabaseProposalsList, setSupabaseProposalsList] = useState([]);
+  const [commercialTasks, setCommercialTasks] = useState([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [tasksFilterAssignee, setTasksFilterAssignee] = useState('all');
+  const [tasksShowCompleted, setTasksShowCompleted] = useState(false);
+  const [showNewTaskModal, setShowNewTaskModal] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskType, setNewTaskType] = useState('Ligação');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [newTaskAssignee, setNewTaskAssignee] = useState('');
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [showForecast, setShowForecast] = useState(false);
+  const [filterStage, setFilterStage] = useState(null);
+  const [hasTime, setHasTime] = useState(false);
+  const [newTaskTime, setNewTaskTime] = useState('09:00');
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [tasksCollapsed, setTasksCollapsed] = useState(false);
+  const [searchProposalQuery, setSearchProposalQuery] = useState('');
+  const [proposalSearchResults, setProposalSearchResults] = useState([]);
+  const [showProposalDropdown, setShowProposalDropdown] = useState(false);
+  const [selectedProposalForTask, setSelectedProposalForTask] = useState(null);
   
   // Dashboard de Relatórios
   const [wonProposals, setWonProposals] = useState([]);
@@ -141,9 +437,13 @@ function App() {
 
   // Estados do Negócio/Propostas
   const [propostas, setPropostas] = useState([]);
+  const [todasPropostas, setTodasPropostas] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [distribuidores, setDistribuidores] = useState([]);
-  const [vendedores, setVendedores] = useState([]);
+  const [vendedores, setVendedores] = useState(() => {
+    const cached = localStorage.getItem('crm_cache_vendedores');
+    return cached ? JSON.parse(cached) : [];
+  });
   const [newVendedorName, setNewVendedorName] = useState('');
   const [editingVendedor, setEditingVendedor] = useState(null);
   const [currentProposta, setCurrentProposta] = useState(null);
@@ -153,7 +453,7 @@ function App() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingDistributor, setEditingDistributor] = useState(null);
   const [newDistributorName, setNewDistributorName] = useState('');
-  const [settingsActiveTab, setSettingsActiveTab] = useState('connection'); // 'connection' | 'products' | 'distributors' | 'venders'
+  const [settingsActiveTab, setSettingsActiveTab] = useState('products'); // 'products' | 'distributors' | 'venders'
   const [showCloseModal, setShowCloseModal] = useState(false); // 'win' | 'loss' | false
   const [closeDate, setCloseDate] = useState('');
   const [selectedLossReason, setSelectedLossReason] = useState('');
@@ -227,21 +527,69 @@ function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // 1. Inicializar Cliente Supabase
+  // 1. Carregar Config do Servidor e Inicializar Cliente Supabase
   useEffect(() => {
-    if (config.url && config.anonKey) {
+    const initSupabase = async () => {
       try {
-        const client = window.supabase.createClient(config.url, config.anonKey);
-        setSupabaseClient(client);
-        testConnection(client);
+        const response = await fetch('/api/config');
+        if (!response.ok) throw new Error("Erro ao carregar configurações do servidor");
+        const data = await response.json();
+        const url = data.SUPABASE_URL;
+        const anonKey = data.SUPABASE_ANON_KEY;
+        
+        if (url && anonKey) {
+          const client = window.supabase.createClient(url, anonKey);
+          setSupabaseClient(client);
+          
+          // Limpa localStorage das chaves antigas por segurança
+          localStorage.removeItem('supa_url');
+          localStorage.removeItem('supa_key');
+          localStorage.removeItem('supabase_url');
+          localStorage.removeItem('supabase_key');
+          localStorage.removeItem('supabaseurl');
+          localStorage.removeItem('supabasekey');
+          
+          testConnection(client);
+        } else {
+          console.error("Configurações do Supabase ausentes no servidor.");
+          setErrorMsg("Configurações do Supabase ausentes no servidor (.env).");
+        }
       } catch (err) {
         console.error("Erro ao inicializar Supabase:", err);
         setDbConnected(false);
+        setErrorMsg("Erro de conexão com o servidor ao buscar configurações.");
       }
-    } else {
-      setShowSettingsModal(true);
+    };
+    initSupabase();
+  }, []);
+
+  // Escuta autenticação
+  useEffect(() => {
+    if (!supabaseClient) return;
+    
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession);
+      if (newSession) {
+        loadProducts(supabaseClient);
+        loadDistributors(supabaseClient);
+        loadVendedores(supabaseClient);
+      } else {
+        setSession(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabaseClient]);
+
+  const handleLogin = async (email, password) => {
+    if (!supabaseClient) return { error: { message: "Cliente Supabase não inicializado." } };
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) {
+      return { error };
     }
-  }, [config]);
+    setSession(data.session);
+    return data;
+  };
 
   // Testar conexão buscando produtos
   const testConnection = async (client) => {
@@ -250,9 +598,14 @@ function App() {
       if (error) throw error;
       setDbConnected(true);
       setErrorMsg('');
-      loadProducts(client);
-      loadDistributors(client);
-      loadVendedores(client);
+      
+      const { data: { session } } = await client.auth.getSession();
+      if (session) {
+        setSession(session);
+        loadProducts(client);
+        loadDistributors(client);
+        loadVendedores(client);
+      }
     } catch (err) {
       console.error("Erro de conexão com o banco:", err);
       setDbConnected(false);
@@ -283,31 +636,48 @@ function App() {
 
   const getOpportunityValue = (task) => {
     if (!task) return null;
-    
-    // 1. Procurar no Supabase por proposta ativa / selecionada / ganha
-    const cleanId = String(task.id).replace('#', '').trim();
+
+    // 1. PRIORIDADE MÁXIMA: Valor enriquecido em memória do Supabase (trata as chaves de ID normalizadas)
+    if (task.supabase_deal_value !== undefined && task.supabase_deal_value !== null) {
+      const val = parseFloat(task.supabase_deal_value);
+      if (!isNaN(val)) return val;
+    }
+
+    const cleanId = String(task.id || '').replace('#', '').trim();
+
+    // Fallback secundário: busca direta em supabaseProposalsList por ID
     if (supabaseProposalsList && supabaseProposalsList.length > 0) {
       const props = supabaseProposalsList.filter(p => {
-        const pClean = String(p.clickup_negocio_id).replace('#', '').trim();
+        const pClean = String(p.clickup_negocio_id || '').replace('#', '').trim();
         return pClean === cleanId;
       });
       if (props.length > 0) {
-        let selectedProp = props.find(p => p.situacao === 'Selecionada' || p.situacao === 'Ganho');
-        if (!selectedProp) {
-          selectedProp = props.find(p => p.situacao === 'Ativa');
-        }
-        if (!selectedProp) {
-          selectedProp = props[0];
-        }
-        return parseFloat(selectedProp.total_proposta) || 0;
+        let best =
+          props.find(p => p.situacao === 'Selecionada') ||
+          props.find(p => p.situacao === 'Ganho') ||
+          props.find(p => p.situacao === 'Ativa') ||
+          props.find(p => p.situacao === 'Desconsiderada') ||
+          props[0];
+        const val = parseFloat(best.total_proposta);
+        if (!isNaN(val)) return val;
       }
     }
     
-    // 2. Fallback: Deal Value do ClickUp
-    const dealValField = task.custom_fields ? task.custom_fields.find(f => f.id === DEAL_VALUE_FIELD_ID) : null;
+    // 2. Fallback: valor_estimado injetado no card
+    if (task.valor_estimado !== undefined && task.valor_estimado !== null) {
+      const ve = parseFloat(task.valor_estimado);
+      if (!isNaN(ve)) return ve;
+    }
+
+    // 3. Fallback: Deal Value custom field do ClickUp
+    const dealValField = task.custom_fields
+      ? task.custom_fields.find(f => f.id === DEAL_VALUE_FIELD_ID)
+      : null;
     if (dealValField && dealValField.value !== undefined && dealValField.value !== null) {
-      const val = parseFloat(dealValField.value);
-      return isNaN(val) ? 0 : val;
+      const raw = parseFloat(dealValField.value);
+      if (!isNaN(raw)) {
+        return raw;
+      }
     }
     
     return null;
@@ -351,38 +721,29 @@ function App() {
     const cleanId = String(taskId).replace('#', '').trim();
 
     // 2. Sincronização com ClickUp via Assignees nativos
-    if (responsavelId) {
-      try {
-        await fetch(`/clickup-api/task/${cleanId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            assignees: [parseInt(responsavelId)]
-          })
+    try {
+      if (responsavelId) {
+        const res = await fetch(`/clickup-api/task/${taskId}/assignee`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignees: [responsavelId] })
         });
-      } catch (err) {
-        console.warn("Erro silencioso ao atualizar assignees no ClickUp:", err);
+        if (!res.ok) throw new Error("Erro ClickUp Assignee");
       }
+    } catch (e) {
+      console.warn("Erro ao atualizar responsável no ClickUp:", e);
     }
 
-    // 3. Persistência Defensiva: Salvar no Supabase (apenas coluna criado_por)
-    if (!supabaseClient) return;
+    // 3. Atualizar no Supabase
     try {
-      const { data: existing } = await supabaseClient
+      const { data, error } = await supabaseClient
         .from('propostas')
-        .select('id')
+        .update({ criado_por: responsavelNome })
         .eq('clickup_negocio_id', cleanId);
 
-      if (existing && existing.length > 0) {
-        await supabaseClient
-          .from('propostas')
-          .update({ 
-            criado_por: responsavelNome 
-          })
-          .eq('clickup_negocio_id', cleanId);
-      } else {
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
         await supabaseClient
           .from('propostas')
           .insert({
@@ -433,7 +794,7 @@ function App() {
         }
       }
 
-      // 3. Buscar todas as páginas de tarefas do ClickUp
+      // 3. Buscar todas as tarefas do ClickUp
       let allTasks = [];
       let page = 0;
       let hasMore = true;
@@ -456,29 +817,48 @@ function App() {
         }
       }
 
-      // 4. Enriquecer tarefas com o responsável (priorizando ClickUp assignees, depois Supabase)
+      // 4. Enriquecer tarefas com responsável e valor da proposta do Supabase
       const enrichedTasks = allTasks.map(t => {
-        const cleanId = String(t.id).replace('#', '').trim();
+        const idAlpha = String(t.id || '').replace('#', '').trim();
+        const idNumeric = String(t.custom_id || t.task_id || '').replace('#', '').trim();
+
+        const propMatchesTask = (p) => {
+          const pClean = String(p.clickup_negocio_id || '').replace('#', '').trim();
+          if (!pClean) return false;
+          if (pClean === idAlpha) return true;
+          if (idNumeric && pClean === idNumeric) return true;
+          if (idAlpha && pClean === '#' + idAlpha) return true;
+          if (idNumeric && pClean === '#' + idNumeric) return true;
+          return false;
+        };
+
+        const matchedProps = propsList.filter(propMatchesTask);
+
         let resp = '';
-        
-        // 1. Tentar ler do assignees nativo do ClickUp
+        let supabaseDealValue = null;
+
+        if (matchedProps.length > 0) {
+          const best =
+            matchedProps.find(p => p.situacao === 'Selecionada') ||
+            matchedProps.find(p => p.situacao === 'Ganho') ||
+            matchedProps.find(p => p.situacao === 'Ativa') ||
+            matchedProps.find(p => p.situacao === 'Desconsiderada') ||
+            matchedProps[0];
+
+          resp = best.criado_por || '';
+          const v = parseFloat(best.total_proposta);
+          if (!isNaN(v)) supabaseDealValue = v;
+        }
+
         if (t.assignees && t.assignees.length > 0) {
-          resp = t.assignees[0].username || t.assignees[0].email || '';
+          resp = t.assignees[0].username || t.assignees[0].email || resp;
         }
-        
-        // 2. Fallback: Supabase
-        if (!resp) {
-          const matchedProps = propsList.filter(p => String(p.clickup_negocio_id).replace('#', '').trim() === cleanId);
-          if (matchedProps.length > 0) {
-            const selectedProp = matchedProps.find(p => p.situacao === 'Selecionada' || p.situacao === 'Ganho') || matchedProps[0];
-            resp = selectedProp.criado_por || '';
-          }
-        }
-        
-        return { ...t, responsavel_negocio: resp };
+
+        return { ...t, responsavel_negocio: resp, supabase_deal_value: supabaseDealValue };
       });
 
       setKanbanTasks(enrichedTasks);
+      localStorage.setItem('crm_cache_kanban_tasks', JSON.stringify(enrichedTasks));
     } catch (err) {
       console.error("Erro ao carregar dados do Kanban:", err);
       showToast("Erro ao carregar dados do Kanban do ClickUp.", "error");
@@ -491,7 +871,14 @@ function App() {
     if (activeTab === 'kanban') {
       fetchKanbanData();
     }
-  }, [activeTab]);
+  }, [activeTab, supabaseClient]);
+
+  // Pré-carrega tarefas comerciais na montagem inicial para o drawer não iniciar vazio
+  useEffect(() => {
+    if (supabaseClient) {
+      fetchCommercialTasks(supabaseClient);
+    }
+  }, [supabaseClient]);
 
   const updateTaskStage = async (taskId, newOptionId) => {
     const res = await fetch(`/clickup-api/task/${taskId}/field/c8d0abe2-c59f-4a9e-93ff-bd060659aa63`, {
@@ -639,6 +1026,12 @@ function App() {
     }
   }, [supabaseClient]);
 
+  useEffect(() => {
+    if (dbConnected) {
+      loadTodasPropostas();
+    }
+  }, [dbConnected]);
+
   // Carregar contexto do ClickUp via Edge Function Proxy
   useEffect(() => {
     if (dbConnected && clickupTaskId) {
@@ -734,6 +1127,7 @@ function App() {
               const users = membersData.team.members.map(m => m.user);
               const mapped = users.map(u => ({ id: u.id, nome: u.username || u.email }));
               setVendedores(mapped);
+              localStorage.setItem('crm_cache_vendedores', JSON.stringify(mapped));
             }
           }
         }
@@ -742,6 +1136,337 @@ function App() {
       console.warn("Erro ao carregar vendedores do ClickUp:", err);
     }
   };
+
+  // Funções para Tarefas Comerciais
+  const fetchCommercialTasks = async (client = supabaseClient, silent = false) => {
+    if (!silent) {
+      setLoadingTasks(true);
+    }
+    try {
+      const response = await fetch('/api/tarefas', {
+        headers: {
+          ...getSupabaseHeaders(),
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) throw new Error("Erro na API ao carregar tarefas");
+      const data = await response.json();
+      console.log("[DEBUG] Loaded tasks with headers:", data);
+      setCommercialTasks(data || []);
+    } catch (err) {
+      console.error("Erro ao buscar tarefas comerciais:", err);
+      showToast("Erro ao carregar tarefas comerciais.", "error");
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const toggleTaskStatus = async (task) => {
+    const nextStatus = task.status === 'concluida' ? 'pendente' : 'concluida';
+    
+    console.log('[DEBUG] Checkbox clicado para a tarefa:', task.id, 'Novo Status:', nextStatus);
+    setCommercialTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus } : t));
+    
+    try {
+      const response = await fetch(`/api/tarefas/${task.id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-supabase-url': localStorage.getItem('supa_url') || '',
+          'x-supabase-key': localStorage.getItem('supa_key') || ''
+        },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      
+      if (!response.ok) {
+        throw new Error("Erro na requisição para o servidor");
+      }
+      
+      const data = await response.json();
+      console.log('[DEBUG] Resposta do servidor para status:', data);
+      showToast("Status da tarefa atualizado com sucesso!", "success");
+    } catch (err) {
+      console.error("[ERROR] Falha ao atualizar status:", err);
+      showToast("Erro ao atualizar status da tarefa. Revertendo...", "error");
+      setCommercialTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: task.status } : t));
+    }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    if (!confirm("Deseja realmente excluir esta tarefa comercial?")) return;
+    
+    console.log('[DEBUG] Lixeira clicada para excluir a tarefa:', taskId);
+    // Optimistic update
+    setCommercialTasks(prev => prev.filter(t => t.id !== taskId));
+    
+    try {
+      const response = await fetch(`/api/tarefas/${taskId}`, {
+        method: 'DELETE',
+        headers: {
+          'x-supabase-url': localStorage.getItem('supa_url') || '',
+          'x-supabase-key': localStorage.getItem('supa_key') || ''
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error("Erro ao excluir tarefa no servidor");
+      }
+      
+      const data = await response.json();
+      console.log('[DEBUG] Resposta do servidor para exclusao:', data);
+      showToast("Tarefa comercial excluída com sucesso!", "success");
+    } catch (err) {
+      console.error("[ERROR] Falha ao excluir tarefa:", err);
+      showToast("Erro ao excluir tarefa comercial. Recarregando...", "error");
+      if (supabaseClient) {
+        fetchCommercialTasks(supabaseClient);
+      }
+    }
+  };
+
+  const handleCreateTaskSubmit = async (e) => {
+    e.preventDefault();
+    console.log("[DEBUG] Submit clicked! Raw form state:", { 
+      title: newTaskTitle, 
+      type: newTaskType, 
+      date: newTaskDueDate, 
+      time: newTaskTime, 
+      hasTime, 
+      assignee: newTaskAssignee 
+    });
+
+    let finalPropostaId = null;
+    let finalClickupId = null;
+
+    // Resilient proposal and clickup ID resolution
+    if (selectedProposalForTask) {
+      finalClickupId = selectedProposalForTask.id;
+      const associatedProp = (todasPropostas || []).find(p => p.clickup_negocio_id === selectedProposalForTask.id || p.clickup_negocio_id === '#' + selectedProposalForTask.id);
+      finalPropostaId = associatedProp ? associatedProp.id : null;
+    } else if (showDrawer) {
+      // Try to resolve from currentProposta or lookup by clickupTaskId in loaded propostas array
+      const resolvedProp = currentProposta || (propostas && propostas.find(p => p.clickup_negocio_id === clickupTaskId || p.clickup_negocio_id === '#' + clickupTaskId));
+      finalPropostaId = resolvedProp ? resolvedProp.id : null;
+      finalClickupId = clickupTaskId;
+    } else {
+      // In global mode, try to fallback to null proposal instead of throwing blocker alerts
+      finalPropostaId = null;
+      finalClickupId = null;
+    }
+
+    // Trava de segurança: se o ID do negócio não pôde ser resolvido por propostas e o drawer está fechado,
+    // mas a tarefa original em edição possuía um ID de negócio válido, nós preservamos o ID original!
+    if (!finalClickupId && !selectedProposalForTask && editingTask && editingTask.clickup_negocio_id) {
+      finalClickupId = editingTask.clickup_negocio_id;
+    }
+
+    // Ensure we have a valid ClickUp Negocio ID (fallback to clickupTaskId or selectedProposalForTask's ID or target input)
+    if (!finalClickupId && showDrawer) {
+      finalClickupId = clickupTaskId;
+    }
+
+    if (!finalClickupId) {
+      console.warn("[DEBUG] Aborted submission: clickup_negocio_id is missing!");
+      showToast("ID do negócio do ClickUp não encontrado.", "error");
+      return;
+    }
+
+    if (!newTaskTitle.trim()) {
+      console.warn("[DEBUG] Aborted submission: title is empty!");
+      showToast("O título da tarefa é obrigatório.", "error");
+      return;
+    }
+    if (!newTaskDueDate) {
+      console.warn("[DEBUG] Aborted submission: date is empty!");
+      showToast("A data de vencimento é obrigatória.", "error");
+      return;
+    }
+    
+    // Calculate final due date as milliseconds
+    let finalDueDateMs;
+    if (hasTime) {
+      const combinedDateTimeStr = `${newTaskDueDate}T${newTaskTime}:00`;
+      finalDueDateMs = new Date(combinedDateTimeStr).getTime();
+    } else {
+      const combinedDateTimeStr = `${newTaskDueDate}T23:59:59`;
+      finalDueDateMs = new Date(combinedDateTimeStr).getTime();
+    }
+
+    if (isNaN(finalDueDateMs)) {
+      console.warn("[DEBUG] Aborted submission: finalDueDateMs is NaN!");
+      showToast("Data de vencimento inválida.", "error");
+      return;
+    }
+    
+    setCreatingTask(true);
+    console.log("[DEBUG] Submitting task with proposal_id:", selectedProposalForTask?.id);
+    
+    // Resolve project/client name dynamically
+    const activeProp = selectedProposalForTask || currentProposta;
+    const activeProjectName = activeProp?.name || activeProp?.nome_projeto || activeProp?.projeto || activeProp?.cenario || (selectedTask ? selectedTask.name : "Projeto Sem Nome");
+
+    const payload = {
+      id: editingTask?.id || null,
+      proposta_id: finalPropostaId,
+      clickup_negocio_id: finalClickupId,
+      titulo: newTaskTitle.trim(),
+      tipo: newTaskType,
+      data_vencimento: finalDueDateMs,
+      responsavel_clickup_id: newTaskAssignee || null,
+      due_date_time: hasTime,
+      nome_projeto: activeProjectName,
+      clickup_subtask_id: editingTask?.clickup_subtask_id || null
+    };
+
+    // Se o usuário não limpou o campo manualmente (X) e o negócio resolvido deu undefined,
+    // mas a tarefa original POSSUI um clickup_negocio_id, MANTENHA-O.
+    if (!selectedProposalForTask && editingTask && editingTask.clickup_negocio_id) {
+       payload.clickup_negocio_id = editingTask.clickup_negocio_id;
+    }
+
+    try {
+      const method = editingTask ? 'PUT' : 'POST';
+      const endpoint = editingTask ? `/api/tarefas/${editingTask.id}` : '/api/tarefas';
+      console.log(`[DEBUG] Sending ${method} to ${endpoint} with payload:`, payload);
+      
+      const response = await fetch(endpoint, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...getSupabaseHeaders()
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      console.log("[DEBUG] API Response Status:", response.status);
+      
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Erro ao criar/atualizar tarefa no servidor");
+      }
+      
+      const resData = await response.json();
+      console.log('[DEBUG] Resposta do servidor para criacao/edicao:', resData);
+      
+      showToast(editingTask ? "Tarefa comercial atualizada com sucesso!" : "Tarefa comercial criada com sucesso!", "success");
+      setEditingTask(null);
+      setShowNewTaskModal(false);
+      setNewTaskTitle('');
+      setNewTaskType('Ligação');
+      setNewTaskDueDate('');
+      setNewTaskAssignee('');
+      setHasTime(false);
+      setNewTaskTime('09:00');
+      setSearchProposalQuery('');
+      setSelectedProposalForTask(null);
+      setProposalSearchResults([]);
+      
+      // Instantly load tasks to refresh local lists
+      if (supabaseClient) {
+        fetchCommercialTasks(supabaseClient);
+      }
+    } catch (err) {
+      console.error("[DEBUG] Network/JS Error during submit:", err);
+      showToast(err.message || "Erro ao criar tarefa comercial.", "error");
+    } finally {
+      setCreatingTask(false);
+    }
+  };
+
+  const handleNewTaskClick = () => {
+    setEditingTask(null);
+    setNewTaskTitle('');
+    setNewTaskType('Ligação');
+    setNewTaskDueDate(new Date().toISOString().split('T')[0]);
+    setNewTaskTime('09:00');
+    setNewTaskAssignee('');
+    setHasTime(false);
+    
+    if (showDrawer && clickupTaskId) {
+      const resolvedProp = currentProposta || (propostas && propostas.find(p => p.clickup_negocio_id === clickupTaskId || p.clickup_negocio_id === '#' + clickupTaskId)) || {
+        clickup_negocio_id: clickupTaskId,
+        nome_projeto: selectedTask ? selectedTask.name : "Negócio Atual"
+      };
+      setSelectedProposalForTask(resolvedProp);
+      const cleanLabel = (raw) => String(raw || '')
+        .replace(/^S\/N\s*\|\s*/i, '')
+        .replace(/\s*-\s*[A-Z]+$/i, '')
+        .trim();
+      setSearchProposalQuery(cleanLabel(resolvedProp.nome_projeto || resolvedProp.projeto || "Negócio Atual"));
+    } else {
+      setSelectedProposalForTask(null);
+      setSearchProposalQuery('');
+    }
+    
+    setShowNewTaskModal(true);
+  };
+
+  const handleEditTaskClick = (task) => {
+    console.log('[DEBUG] Inicializando modal de edição. Tarefa:', task);
+    console.log('[DEBUG] Lista de negócios (Kanban) disponíveis (tamanho):', kanbanTasks ? kanbanTasks.length : 0);
+    setEditingTask(task);
+    
+    const d = new Date(task.data_vencimento);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    
+    setNewTaskTitle(task.titulo || '');
+    setNewTaskType(task.tipo || 'Ligação');
+    setNewTaskDueDate(`${year}-${month}-${day}`);
+    setNewTaskTime(`${hours}:${minutes}`);
+    setNewTaskAssignee(task.responsavel_clickup_id || '');
+    setHasTime(task.due_date_time || false);
+    
+    const listaParaBusca = kanbanTasks || [];
+    
+    // Imprime uma amostra no console para diagnóstico estrutural
+    if (listaParaBusca && listaParaBusca.length > 0) {
+      console.log('[DEBUG] Amostra de estrutura de negócio (Kanban):', listaParaBusca[0]);
+    }
+
+    const negocioCorrespondente = listaParaBusca.find(p => {
+      if (!p) return false;
+      const matchClickUp = task.clickup_negocio_id && String(p.id).trim().toLowerCase() === String(task.clickup_negocio_id).trim().toLowerCase();
+      return matchClickUp;
+    });
+    
+    console.log('[DEBUG] Negócio resolvido por ID do Kanban na edição:', negocioCorrespondente);
+
+    const activeDeal = negocioCorrespondente || {
+      id: task.clickup_negocio_id,
+      name: task.nome_projeto || "Projeto"
+    };
+    
+    if (typeof setSelectedProposalForTask === 'function') {
+      setSelectedProposalForTask(activeDeal);
+    }
+    const cleanLabel = (raw) => String(raw || '')
+      .replace(/^S\/N\s*\|\s*/i, '')
+      .replace(/\s*-\s*[A-Z]+$/i, '')
+      .trim();
+    setSearchProposalQuery(cleanLabel(activeDeal.name || "Negócio Atual"));
+    
+    setShowNewTaskModal(true);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'tasks' && supabaseClient) {
+      const isSilent = commercialTasks && commercialTasks.length > 0;
+      if (!isSilent) {
+        setLoadingTasks(true);
+      }
+      Promise.all([
+        fetchCommercialTasks(supabaseClient, isSilent),
+        fetchKanbanData(),
+        loadVendedores()
+      ]).finally(() => {
+        setLoadingTasks(false);
+      });
+    }
+  }, [activeTab, supabaseClient]);
 
   // Carregar dados para o painel de relatórios
   const loadDashboardData = async (client = supabaseClient) => {
@@ -931,6 +1656,7 @@ function App() {
               display: false
             },
             tooltip: {
+              position: 'followMouse',
               callbacks: {
                 label: function(context) {
                   const value = context.raw || 0;
@@ -970,6 +1696,7 @@ function App() {
               display: false
             },
             tooltip: {
+              position: 'followMouse',
               callbacks: {
                 label: function(context) {
                   const value = context.raw || 0;
@@ -1012,6 +1739,36 @@ function App() {
     }
   }, [dbConnected, clickupTaskId]);
 
+  const fetchAllData = async () => {
+    console.log('[DEBUG] Auto-polling: Atualizando dados silenciosamente...');
+    try {
+      await fetchKanbanData();
+      if (supabaseClient) {
+        await fetchCommercialTasks(supabaseClient);
+      }
+      if (dbConnected) {
+        await loadDashboardData();
+      }
+      if (dbConnected && clickupTaskId) {
+        await loadPropostas();
+      }
+    } catch (e) {
+      console.error("Erro no auto-polling:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (!session) return;
+
+    const intervalId = setInterval(() => {
+      if (!document.hidden) {
+        fetchAllData();
+      }
+    }, 180000);
+
+    return () => clearInterval(intervalId);
+  }, [session, dbConnected, clickupTaskId, supabaseClient]);
+
   const loadPropostas = async (targetId = null) => {
     if (!supabaseClient || !clickupTaskId) return;
     setLoading(true);
@@ -1046,6 +1803,20 @@ function App() {
       showToast('Erro ao carregar propostas.', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTodasPropostas = async () => {
+    if (!supabaseClient) return;
+    try {
+      const { data, error } = await supabaseClient
+        .from('propostas')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setTodasPropostas(data || []);
+    } catch (err) {
+      console.error("[DEBUG] Erro ao carregar todas as propostas:", err);
     }
   };
 
@@ -1366,6 +2137,34 @@ function App() {
     if (isReadOnly || !currentProposta) return;
     setSaving(true);
     try {
+      // ⚡ ATUALIZAÇÃO OTÍMISTA EM MEMÓRIA
+      // Atualiza supabaseProposalsList imediatamente (sem esperar o banco)
+      // para que o Kanban e o Forecast reflitam o novo valor na hora.
+      const cleanTaskId = String(clickupTaskId || '').replace('#', '').trim();
+      if (cleanTaskId) {
+        setSupabaseProposalsList(prev => {
+          const updated = (prev || []).map(p => {
+            const pClean = String(p.clickup_negocio_id || '').replace('#', '').trim();
+            if (pClean === cleanTaskId && p.id === currentProposta.id) {
+              return { ...p, total_proposta: realTimeGrandTotal, situacao: currentProposta.situacao };
+            }
+            return p;
+          });
+          // Se não havia entrada, adiciona uma nova
+          const exists = updated.some(p => String(p.clickup_negocio_id || '').replace('#', '').trim() === cleanTaskId && p.id === currentProposta.id);
+          if (!exists) {
+            updated.push({
+              clickup_negocio_id: cleanTaskId,
+              total_proposta: realTimeGrandTotal,
+              situacao: currentProposta.situacao,
+              criado_por: currentProposta.criado_por,
+              id: currentProposta.id
+            });
+          }
+          return updated;
+        });
+      }
+
       const { error: propError } = await supabaseClient
         .from('propostas')
         .update({
@@ -1409,6 +2208,8 @@ function App() {
 
       showToast('Proposta salva com sucesso!', 'success');
       loadPropostas(currentProposta.id);
+      // Confirma a lista global com dados frescos do banco em segundo plano
+      refreshSupabaseProposalsList();
     } catch (err) {
       console.error(err);
       showToast('Erro ao salvar proposta.', 'error');
@@ -1490,9 +2291,10 @@ function App() {
   };
 
   // 8.5. Excluir Versão (Com regra específica para vA e secundárias)
-  const handleDeleteProposal = async () => {
-    if (!currentProposta || !supabaseClient) return;
-    const isVa = currentProposta.versao === 'vA';
+  const handleDeleteProposal = async (proposalToDelete = null) => {
+    const targetProp = proposalToDelete || currentProposta;
+    if (!targetProp || !supabaseClient) return;
+    const isVa = targetProp.versao === 'vA';
     
     if (isVa) {
       const message = 'Atenção! Excluir a versão inicial (vA) deletará permanentemente TODAS as versões desta proposta. Deseja continuar?';
@@ -1530,28 +2332,41 @@ function App() {
         setSaving(false);
       }
     } else {
-      const message = `Deseja realmente excluir a versão ${currentProposta.versao}?`;
+      const message = `Deseja realmente excluir a versão ${targetProp.versao}?`;
       if (!confirm(message)) return;
       setSaving(true);
       try {
-        // Deleta os itens da proposta atual
+        // Deleta os itens da proposta
         await supabaseClient
           .from('itens_proposta')
           .delete()
-          .eq('proposta_id', currentProposta.id);
+          .eq('proposta_id', targetProp.id);
 
-        // Deleta a proposta atual
+        // Deleta a proposta
         const { error } = await supabaseClient
           .from('propostas')
           .delete()
-          .eq('id', currentProposta.id);
+          .eq('id', targetProp.id);
 
         if (error) throw error;
 
         showToast('Versão excluída com sucesso!', 'success');
 
-        const vaProp = propostas.find(p => p.versao === 'vA');
-        await loadPropostas(vaProp?.id || null);
+        // Verifica se a proposta deletada era a atualmente selecionada
+        const isCurrentDeleted = currentProposta && currentProposta.id === targetProp.id;
+        
+        // Atualiza estado local propostas imediatamente
+        setPropostas(prev => prev.filter(p => p.id !== targetProp.id));
+
+        if (isCurrentDeleted) {
+          const vaProp = propostas.find(p => p.versao === 'vA');
+          if (vaProp && vaProp.id !== targetProp.id) {
+            await loadProposalDetails(vaProp.id);
+          } else {
+            setCurrentProposta(null);
+            setItens([]);
+          }
+        }
       } catch (err) {
         console.error(err);
         showToast('Erro ao excluir versão.', 'error');
@@ -2188,15 +3003,17 @@ function App() {
     }
   };
 
-  const renderTimeline = () => {
+  const renderTimeline = (showHeader = true) => {
     return (
       <div className="flex flex-col space-y-4 h-full">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-400">Timeline de Versões</h2>
-          <span className="bg-slate-800 px-2 py-0.5 rounded-full text-xs font-semibold text-slate-300">
-            {propostas.length}
-          </span>
-        </div>
+        {showHeader && (
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-400">Timeline de Versões</h2>
+            <span className="bg-slate-800 px-2 py-0.5 rounded-full text-xs font-semibold text-slate-300">
+              {propostas.length}
+            </span>
+          </div>
+        )}
 
         {propostas.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-4 text-center space-y-4">
@@ -2266,31 +3083,42 @@ function App() {
                         {openMenuVersionId === prop.id && (
                           <React.Fragment>
                             <div className="fixed inset-0 z-40 bg-transparent cursor-default" onClick={() => setOpenMenuVersionId(null)} />
-                            <div className="absolute right-full top-0 mr-2 z-50 w-36 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 block">
-                              {['Ativa', 'Selecionada', 'Ganho', 'Desconsiderada', 'Perdido'].map(st => (
-                                <button
-                                  key={st}
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    setOpenMenuVersionId(null);
-                                    await loadProposalDetails(prop.id);
-                                    if (st === 'Ganho') {
-                                      setCloseDate(new Date().toISOString().split('T')[0]);
-                                      setShowCloseModal('win');
-                                    } else if (st === 'Perdido') {
-                                      setCloseDate(new Date().toISOString().split('T')[0]);
-                                      setSelectedLossReason('');
-                                      setShowCloseModal('loss');
-                                    } else {
-                                      await handleUpdateVersionStatus(clickupTaskId || prop.clickup_negocio_id, prop.id, st);
-                                    }
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white"
-                                >
-                                  {st}
-                                </button>
-                              ))}
-                            </div>
+                             <div className="absolute right-full top-0 mr-2 z-50 w-36 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1 block">
+                               {['Ativa', 'Selecionada', 'Ganho', 'Desconsiderada', 'Perdido'].map(st => (
+                                 <button
+                                   key={st}
+                                   onClick={async (e) => {
+                                     e.stopPropagation();
+                                     setOpenMenuVersionId(null);
+                                     await loadProposalDetails(prop.id);
+                                     if (st === 'Ganho') {
+                                       setCloseDate(new Date().toISOString().split('T')[0]);
+                                       setShowCloseModal('win');
+                                     } else if (st === 'Perdido') {
+                                       setCloseDate(new Date().toISOString().split('T')[0]);
+                                       setSelectedLossReason('');
+                                       setShowCloseModal('loss');
+                                     } else {
+                                       await handleUpdateVersionStatus(clickupTaskId || prop.clickup_negocio_id, prop.id, st);
+                                     }
+                                   }}
+                                   className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white"
+                                 >
+                                   {st}
+                                 </button>
+                               ))}
+                               <div className="border-t border-slate-800 my-1"></div>
+                               <button
+                                 onClick={async (e) => {
+                                   e.stopPropagation();
+                                   setOpenMenuVersionId(null);
+                                   await handleDeleteProposal(prop);
+                                 }}
+                                 className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/30 hover:text-red-300 font-medium"
+                               >
+                                 🗑️ Excluir
+                               </button>
+                             </div>
                           </React.Fragment>
                         )}
                       </div>
@@ -2788,6 +3616,15 @@ function App() {
     );
   };
 
+  if (!session) {
+    return (
+      <LoginScreen 
+        onLogin={handleLogin} 
+        error={errorMsg}
+      />
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       
@@ -2869,6 +3706,22 @@ function App() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0" />
             </svg>
           </button>
+
+          <button 
+            onClick={async () => {
+              if (supabaseClient) {
+                await supabaseClient.auth.signOut();
+                setSession(null);
+                showToast("Sessão encerrada com sucesso.", "success");
+              }
+            }}
+            className="p-2 text-red-400 hover:text-red-300 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+            title="Sair / Logout"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -2893,6 +3746,16 @@ function App() {
           }`}
         >
           Pipeline de Vendas (Kanban)
+        </button>
+        <button
+          onClick={() => setActiveTab('tasks')}
+          className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            activeTab === 'tasks' 
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40' 
+              : 'text-slate-400 hover:text-slate-200 bg-slate-900/40 hover:bg-slate-900/80 border border-slate-800/80'
+          }`}
+        >
+          Tarefas Comerciais
         </button>
       </div>
 
@@ -3232,22 +4095,58 @@ function App() {
                     </button>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Ordenar por:</span>
-                    <select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value)}
-                      className="rounded-xl bg-slate-900 border border-slate-800 p-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Ordenar por:</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => {
+                          const newValue = e.target.value;
+                          localStorage.setItem('crm_sort_order', newValue);
+                          setSortBy(newValue);
+                        }}
+                        className="rounded-xl bg-slate-900 border border-slate-800 p-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="default">Padrão</option>
+                        <option value="name">Nome (A - Z)</option>
+                        <option value="value_asc">Valor (Menor para Maior)</option>
+                        <option value="value_desc">Valor (Maior para Menor)</option>
+                      </select>
+                    </div>
+
+                    <button 
+                      onClick={() => {
+                        const nextVal = !showForecast;
+                        console.log("[DEBUG] Forecast clicked, state is now:", nextVal);
+                        setShowForecast(nextVal);
+                        if (!nextVal) {
+                          setFilterStage(null);
+                        }
+                      }} 
+                      className={`mr-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showForecast ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
                     >
-                      <option value="default">Padrão</option>
-                      <option value="name">Nome (A - Z)</option>
-                      <option value="value_asc">Valor (Menor para Maior)</option>
-                      <option value="value_desc">Valor (Maior para Menor)</option>
-                    </select>
+                      📈 Forecast
+                    </button>
                   </div>
                 </div>
+
+                {showForecast && (
+                  <ForecastFunnelPanel 
+                    kanbanColumns={kanbanColumns}
+                    kanbanTasks={kanbanTasks}
+                    showGanhoCol={showGanhoCol}
+                    showPerdidoCol={showPerdidoCol}
+                    showCongeladoCol={showCongeladoCol}
+                    filterStage={filterStage}
+                    setFilterStage={setFilterStage}
+                    getTaskOptionId={getTaskOptionId}
+                    getOpportunityValue={getOpportunityValue}
+                  />
+                )}
+
                 <div className="kanban-board">
                   {kanbanColumns.map(col => {
+                    if (filterStage && col.id !== filterStage) return null;
                     const colName = col.name.toLowerCase();
                     if (colName.includes("ganho") && !showGanhoCol) return null;
                     if (colName.includes("perdido") && !showPerdidoCol) return null;
@@ -3293,17 +4192,23 @@ function App() {
                               ? `R$ ${Number(dealValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` 
                               : 'Sem Valor';
                             const responsavel = task.responsavel_negocio;
-                            return (
-                              <KanbanCard 
-                                key={task.id}
-                                task={task}
-                                dealValue={dealValue}
-                                formattedValue={formattedValue}
-                                responsavel={responsavel}
-                                handleDragStart={handleDragStart}
-                                handleCardClick={handleCardClick}
-                              />
-                            );
+                             const hasOverdue = commercialTasks.some(t => {
+                               const propObj = Array.isArray(t.propostas) ? t.propostas[0] : t.propostas;
+                               const isThisDeal = t.clickup_negocio_id === task.id || (propObj && propObj.clickup_negocio_id === task.id);
+                               return isThisDeal && t.status === 'pendente' && new Date(t.data_vencimento) < new Date();
+                             });
+                             return (
+                               <KanbanCard 
+                                 key={task.id}
+                                 task={task}
+                                 dealValue={dealValue}
+                                 formattedValue={formattedValue}
+                                 responsavel={responsavel}
+                                 handleDragStart={handleDragStart}
+                                 handleCardClick={handleCardClick}
+                                 hasOverdue={hasOverdue}
+                               />
+                             );
                           })}
                         </div>
                       </div>
@@ -3312,6 +4217,227 @@ function App() {
                 </div>
               </React.Fragment>
             )}
+          </div>
+        )}
+
+        {activeTab === 'tasks' && (
+          <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
+              <div>
+                <h1 className="text-2xl font-extrabold text-white tracking-tight">Tarefas Comerciais</h1>
+                <p className="text-xs text-slate-400 mt-1">Gerenciamento e controle de atividades integradas ao ClickUp</p>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Responsável:</span>
+                  <select
+                    value={tasksFilterAssignee}
+                    onChange={(e) => setTasksFilterAssignee(e.target.value)}
+                    className="rounded-xl bg-slate-900 border border-slate-800 p-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="all">Todos</option>
+                    {vendedores.map(v => (
+                      <option key={v.id} value={String(v.id)}>{v.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={() => setTasksShowCompleted(!tasksShowCompleted)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    tasksShowCompleted 
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  {tasksShowCompleted ? '✓ Mostrando Concluídas' : 'Mostrar Concluídas'}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSelectedProposalForTask(null);
+                    setSearchProposalQuery('');
+                    setProposalSearchResults([]);
+                    setShowNewTaskModal(true);
+                  }}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1"
+                >
+                  <span>➕ Nova Tarefa</span>
+                </button>
+              </div>
+            </div>
+
+            {loadingTasks ? (
+              <div className="flex-1 flex flex-col items-center justify-center space-y-3">
+                <div className="w-10 h-10 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
+                <p className="text-sm text-slate-400 font-medium">Carregando tarefas comerciais...</p>
+              </div>
+            ) : (() => {
+              const filtered = commercialTasks.filter(task => {
+                if (tasksFilterAssignee !== 'all' && String(task.responsavel_clickup_id) !== tasksFilterAssignee) {
+                  return false;
+                }
+                if (!tasksShowCompleted && task.status === 'concluida') {
+                  return false;
+                }
+                return true;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto space-y-4">
+                    <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center border border-slate-800 text-3xl">
+                      📋
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white mb-1">Nenhuma tarefa encontrada</h3>
+                      <p className="text-xs text-slate-500">Não há tarefas comerciais registradas para os filtros selecionados.</p>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="flex-1 overflow-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <th className="py-3 px-4 w-12">Status</th>
+                        <th className="py-3 px-4">Título</th>
+                        <th className="py-3 px-4">Negócio/Proposta</th>
+                        <th className="py-3 px-4">Tipo</th>
+                        <th className="py-3 px-4">Vencimento</th>
+                        <th className="py-3 px-4">Responsável</th>
+                        <th className="py-3 px-4 w-16 text-center">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-xs">
+                      {filtered.map(task => {
+                        const isDone = task.status === 'concluida';
+                        const typeColors = {
+                          'Ligação': 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+                          'Reunião': 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
+                          'E-mail': 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+                          'Follow-up': 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        };
+                        const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
+                        const assigneeName = matchedUser ? matchedUser.nome : (task.responsavel_clickup_id || 'Não assinalado');
+                        
+                        const proposalText = (() => {
+                          const localProps = (typeof propostas !== 'undefined' && Array.isArray(propostas) ? propostas : []) || 
+                                             (typeof proposals !== 'undefined' && Array.isArray(proposals) ? proposals : []);
+                                             
+                          const matchedProp = localProps.find(p => 
+                            (task.proposta_id && p.id === task.proposta_id) || 
+                            (task.clickup_negocio_id && p.clickup_negocio_id === task.clickup_negocio_id)
+                          );
+
+                          const propObj = Array.isArray(task.propostas) ? task.propostas[0] : task.propostas;
+
+                          const resolvedName = matchedProp?.nome_projeto || 
+                                               matchedProp?.projeto || 
+                                               task.nome_projeto || 
+                                               propObj?.nome_projeto || 
+                                               propObj?.cenario || 
+                                               task.proposta?.nome_projeto;
+
+                          const resolvedVersion = matchedProp?.versao || propObj?.versao || task.proposta?.versao || "";
+                          const versionPrefix = resolvedVersion ? `v${resolvedVersion} - ` : "";
+
+                          const resolvedClickUpId = matchedProp?.clickup_negocio_id || task.clickup_negocio_id || propObj?.clickup_negocio_id;
+                          const clickUpSuffix = resolvedClickUpId ? ` (#${resolvedClickUpId})` : "";
+
+                          if (!resolvedName || resolvedName === "Sem Proposta") {
+                            return "Sem Proposta";
+                          }
+                          return `${versionPrefix}${resolvedName}${clickUpSuffix}`;
+                        })();
+
+                        return (
+                          <tr key={task.id} className="hover:bg-slate-900/20 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <input
+                                type="checkbox"
+                                checked={isDone}
+                                onChange={() => toggleTaskStatus(task)}
+                                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                              />
+                            </td>
+                            <td className={`py-3.5 px-4 font-semibold ${isDone ? 'line-through text-slate-500' : 'text-white'}`}>
+                              {task.titulo}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-400">
+                              {(() => {
+                                // 1. Tenta buscar nas propostas físicas do Supabase
+                                const localProps = (typeof propostas !== 'undefined' && Array.isArray(propostas) ? propostas : []) || 
+                                                   (typeof proposals !== 'undefined' && Array.isArray(proposals) ? proposals : []);
+                                                   
+                                let matchedProp = localProps.find(p => 
+                                  (task.proposta_id && p.id === task.proposta_id) || 
+                                  (task.clickup_negocio_id && p.clickup_negocio_id === task.clickup_negocio_id)
+                                );
+
+                                if (matchedProp) {
+                                  return matchedProp.nome_projeto || matchedProp.projeto || "Projeto";
+                                }
+
+                                // 2. FALLBACK DE OURO: Busca o nome diretamente na lista de cards/negócios do Kanban do React
+                                const activeKanbanCards = (typeof kanbanTasks !== 'undefined' ? kanbanTasks : null) || [];
+
+                                const matchedKanbanCard = Array.isArray(activeKanbanCards) && activeKanbanCards.find(c => 
+                                  c.id === task.clickup_negocio_id || c.clickup_id === task.clickup_negocio_id
+                                );
+
+                                if (matchedKanbanCard) {
+                                  return matchedKanbanCard.name || matchedKanbanCard.nome || matchedKanbanCard.nome_projeto || "Projeto Sem Nome";
+                                }
+
+                                // 3. Fallbacks de segurança
+                                if (task.nome_projeto && task.nome_projeto !== "Sem Proposta") return task.nome_projeto;
+                                if (task.proposta?.nome_projeto) return task.proposta.nome_projeto;
+
+                                return "Sem Proposta";
+                              })()}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${typeColors[task.tipo] || 'bg-slate-800'}`}>
+                                {task.tipo}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-slate-300">
+                              {new Date(task.data_vencimento).toLocaleString('pt-BR')}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-400 font-medium">
+                              👤 {assigneeName}
+                            </td>
+                            <td className="py-3.5 px-4 text-center flex items-center justify-center space-x-2">
+                              {/* Editar (Lápis) */}
+                              <button
+                                onClick={() => handleEditTaskClick(task)}
+                                className="p-1 text-slate-400 hover:text-blue-500 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                                title="Editar Tarefa"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                              </button>
+                              {/* Excluir (Lixeira) */}
+                              <button
+                                onClick={() => handleDeleteTask(task.id)}
+                                className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                                title="Excluir Tarefa"
+                              >
+                                <svg className="w-4 h-4 text-slate-400 hover:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -3344,16 +4470,6 @@ function App() {
             <div className="flex-1 flex overflow-hidden">
               {/* Menu Lateral de Abas */}
               <aside className="w-1/4 border-r border-slate-800 bg-slate-950/20 p-4 space-y-2 flex flex-col">
-                <button
-                  onClick={() => setSettingsActiveTab('connection')}
-                  className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all ${
-                    settingsActiveTab === 'connection'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                  }`}
-                >
-                  Conexão Supabase
-                </button>
                 <button
                   onClick={() => setSettingsActiveTab('products')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all ${
@@ -3388,42 +4504,6 @@ function App() {
 
               {/* Área de Conteúdo da Aba Ativa */}
               <main className="flex-1 p-6 overflow-y-auto bg-slate-950/50">
-                {/* 1. ABA CONEXÃO */}
-                {settingsActiveTab === 'connection' && (
-                  <form onSubmit={handleSaveConfig} className="space-y-4 max-w-md">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Project URL</label>
-                      <input 
-                        type="url" 
-                        name="url"
-                        required
-                        placeholder="https://xxxx.supabase.co"
-                        defaultValue={config.url}
-                        className="w-full rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Anon Key (Public API Key)</label>
-                      <textarea 
-                        name="key"
-                        required
-                        rows="4"
-                        placeholder="eyJhbGciOi..."
-                        defaultValue={config.anonKey}
-                        className="w-full rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
-                      />
-                    </div>
-
-                    <button 
-                      type="submit" 
-                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-bold text-white shadow-lg shadow-indigo-950/30 transition-all"
-                    >
-                      Conectar e Validar
-                    </button>
-                  </form>
-                )}
-
                 {/* 2. ABA PRODUTOS */}
                 {settingsActiveTab === 'products' && (
                   <div className="space-y-6">
@@ -3950,6 +5030,289 @@ function App() {
         </div>
       )}
 
+      {/* 6.5 Modal de Criar Nova Tarefa Comercial (Salesforce Style) */}
+      {showNewTaskModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden relative">
+            <div className="border-b border-slate-800 p-5 bg-slate-900/60 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center space-x-2">
+                <span>📋 {editingTask ? 'Editar Tarefa Comercial' : 'Nova Tarefa Comercial'}</span>
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowNewTaskModal(false);
+                  setSelectedProposalForTask(null);
+                  setSearchProposalQuery('');
+                  setProposalSearchResults([]);
+                }}
+                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateTaskSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Negócio
+                </label>
+                <div className="relative">
+                  {/* Input + clear button row */}
+                  <div className={`flex items-center w-full rounded-xl border transition-all ${
+                    selectedProposalForTask
+                      ? 'bg-indigo-950/25 border-indigo-500/40'
+                      : 'bg-slate-950 border-slate-800 focus-within:border-indigo-500'
+                  }`}>
+                    {/* Search icon */}
+                    <span className="pl-3 text-slate-500 flex-shrink-0">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                      </svg>
+                    </span>
+
+                    <input
+                      type="text"
+                      value={searchProposalQuery}
+                      onChange={(e) => {
+                        const q = e.target.value;
+                        setSearchProposalQuery(q);
+                        setSelectedProposalForTask(null);
+                        if (q.trim().length >= 1) {
+                          const q_lower = q.toLowerCase();
+                          // Filter local kanbanTasks
+                          const filtered = (kanbanTasks || []).filter(t => 
+                            (t.name || "").toLowerCase().includes(q_lower) ||
+                            (t.id || "").toLowerCase().includes(q_lower)
+                          );
+                          setProposalSearchResults(filtered);
+                          setShowProposalDropdown(filtered.length > 0);
+                        } else {
+                          setProposalSearchResults([]);
+                          setShowProposalDropdown(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (searchProposalQuery.trim().length >= 1 && proposalSearchResults.length > 0) {
+                          setShowProposalDropdown(true);
+                        } else if (searchProposalQuery.trim().length === 0) {
+                          setProposalSearchResults(kanbanTasks || []);
+                          if ((kanbanTasks || []).length > 0) setShowProposalDropdown(true);
+                        }
+                      }}
+                      placeholder="Comece a digitar para buscar o negócio..."
+                      className="flex-1 bg-transparent pl-2 pr-2 py-2.5 text-sm text-slate-200 focus:outline-none placeholder-slate-600"
+                    />
+
+                    {/* Clear / checkmark indicator */}
+                    {selectedProposalForTask ? (
+                      <div className="flex items-center gap-1 pr-3">
+                        <span className="text-emerald-400 text-xs font-bold">✓</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedProposalForTask(null);
+                            setSearchProposalQuery('');
+                            setProposalSearchResults([]);
+                            setShowProposalDropdown(false);
+                          }}
+                          className="text-slate-500 hover:text-red-400 transition-colors p-0.5 cursor-pointer"
+                          title="Limpar seleção"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ) : searchProposalQuery.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchProposalQuery('');
+                          setProposalSearchResults([]);
+                          setShowProposalDropdown(false);
+                        }}
+                        className="pr-3 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <span className="pr-3 text-slate-600">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Selected proposal preview strip */}
+                  {selectedProposalForTask && (
+                    <div className="mt-1.5 px-3 py-1.5 bg-indigo-950/40 border border-indigo-500/20 rounded-lg flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
+                      <span className="text-[11px] text-indigo-200 font-semibold truncate flex-1">{searchProposalQuery}</span>
+                      <span className="text-[10px] text-indigo-400 font-mono">Selecionado</span>
+                    </div>
+                  )}
+
+                  {/* Floating dropdown */}
+                  {showProposalDropdown && proposalSearchResults.length > 0 && (
+                    <React.Fragment>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowProposalDropdown(false)} />
+                      <ul className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg max-h-60 overflow-y-auto shadow-xl z-50 divide-y divide-slate-800/60">
+                        {proposalSearchResults.map(p => (
+                          <li
+                            key={p.id}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setSelectedProposalForTask(p);
+                              const cleanLabel = (raw) => String(raw || '')
+                                .replace(/^S\/N\s*\|\s*/i, '')
+                                .replace(/\s*-\s*v?[A-Z]{1,3}$/i, '')
+                                .trim();
+                              setSearchProposalQuery(cleanLabel(p.name || 'Projeto'));
+                              setShowProposalDropdown(false);
+                            }}
+                            className="flex items-center gap-2 cursor-pointer px-3 py-2.5 text-sm text-slate-200 hover:bg-slate-800 hover:text-white transition-colors"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
+                            <span className="font-medium text-sm text-slate-100 leading-snug truncate">
+                              {p.name || 'Projeto'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </React.Fragment>
+                  )}
+
+                  {/* No results message */}
+                  {showProposalDropdown && proposalSearchResults.length === 0 && searchProposalQuery.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-slate-500 text-center shadow-xl z-50">
+                      Nenhum negócio encontrado para "{searchProposalQuery}"
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Assunto / Título da Tarefa</label>
+                <input 
+                  type="text" 
+                  required
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  placeholder="Ex: Ligar para alinhar proposta comercial"
+                  className="w-full rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tipo de Atividade</label>
+                  <select 
+                    value={newTaskType}
+                    onChange={(e) => setNewTaskType(e.target.value)}
+                    className="w-full rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="Ligação">📞 Ligação</option>
+                    <option value="Reunião">👥 Reunião</option>
+                    <option value="E-mail">✉️ E-mail</option>
+                    <option value="Follow-up">🔄 Follow-up</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Atribuído a</label>
+                  <select 
+                    value={newTaskAssignee}
+                    onChange={(e) => setNewTaskAssignee(e.target.value)}
+                    className="w-full rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="" className="text-slate-400">Selecione o responsável...</option>
+                    {vendedores.map(v => (
+                      <option key={v.id} value={String(v.id)}>{v.nome}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Data de Vencimento</label>
+                <div className="flex items-center space-x-3">
+                  <input 
+                    type="date"
+                    required
+                    value={newTaskDueDate}
+                    onChange={(e) => setNewTaskDueDate(e.target.value)}
+                    className="flex-1 rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                  
+                  {!hasTime ? (
+                    <button
+                      type="button"
+                      onClick={() => setHasTime(true)}
+                      className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                    >
+                      <span>➕ Adicionar hora</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center space-x-1">
+                      <select
+                        value={newTaskTime}
+                        onChange={(e) => setNewTaskTime(e.target.value)}
+                        className="rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer font-mono"
+                      >
+                        {Array.from({ length: 41 }, (_, i) => {
+                          const hour = Math.floor(8 + i * 0.25);
+                          const minute = (i * 15) % 60;
+                          const hourStr = String(hour).padStart(2, '0');
+                          const minuteStr = String(minute).padStart(2, '0');
+                          return `${hourStr}:${minuteStr}`;
+                        }).map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setHasTime(false)}
+                        className="p-2.5 bg-red-950/40 text-red-400 hover:bg-red-950/60 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                        title="Remover hora"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-800/60 mt-6">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowNewTaskModal(false);
+                    setSelectedProposalForTask(null);
+                    setSearchProposalQuery('');
+                    setProposalSearchResults([]);
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={creatingTask}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-950/30 transition-all"
+                >
+                  {creatingTask ? (editingTask ? 'Salvando...' : 'Criando...') : (editingTask ? 'Salvar Alterações' : 'Criar Tarefa')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 7. Drawer Lateral Direito */}
       {showDrawer && (
         <div className="drawer-container">
@@ -3962,7 +5325,7 @@ function App() {
           ></div>
           <div 
             className={`drawer-content h-full flex flex-col ${showDrawer ? 'active' : ''} ${
-              drawerTab === 'budget' ? 'w-[75vw] max-w-7xl' : 'w-full max-w-xl'
+              drawerTab === 'budget' ? 'w-[75vw] max-w-7xl' : 'w-full max-w-xl md:max-w-2xl'
             }`}
           >
             {drawerTab === 'details' ? (
@@ -4030,10 +5393,162 @@ function App() {
                       </span>
                     </div>
                   </div>
+                  
+                  <div className="flex items-center justify-between border-t border-slate-800 pt-4 mt-2">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Ações do Negócio</span>
+                    <button
+                      onClick={() => {
+                        if (typeof setSelectedProposalForTask === 'function') setSelectedProposalForTask(currentProposta);
+                        if (typeof setSelectedProposal === 'function') setSelectedProposal(currentProposta);
+                        if (currentProposta) {
+                          const propNum = currentProposta.numero_proposta ? currentProposta.numero_proposta + ' | ' : '';
+                          const propName = currentProposta.nome_projeto || currentProposta.cenario || 'Projeto';
+                          setSearchProposalQuery(`${propNum}${propName} - v${currentProposta.versao}`);
+                        } else {
+                          setSearchProposalQuery('Sem Proposta');
+                        }
+                        setShowNewTaskModal(true);
+                      }}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1"
+                    >
+                      <span>➕ Nova Tarefa Comercial</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex-1 flex flex-col">
-                  {renderTimeline()}
+                <div className="flex-1 flex flex-col space-y-4 overflow-y-auto pr-1">
+                  {/* Seção 1: Timeline de Versões */}
+                  <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900/20">
+                    <div 
+                      onClick={() => setTimelineCollapsed(!timelineCollapsed)}
+                      className="flex items-center justify-between p-4 bg-slate-900/40 cursor-pointer select-none hover:bg-slate-900/60 transition-colors"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-400 text-xs">{timelineCollapsed ? '▶' : '▼'}</span>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-indigo-400">Timeline de Versões</h4>
+                      </div>
+                      
+                      {timelineCollapsed && (
+                        <span className="text-[10px] bg-indigo-950/80 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/20 font-semibold max-w-[200px] truncate">
+                          {(() => {
+                            const activeProp = propostas.find(p => ['Ativa', 'Selecionada', 'Ganho'].includes(p.situacao)) || propostas[0];
+                            return activeProp 
+                              ? `${activeProp.versao} ${activeProp.situacao} - R$ ${Number(activeProp.total_proposta).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                              : 'Nenhuma Versão';
+                          })()}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {!timelineCollapsed && (
+                      <div className="p-4 border-t border-slate-800/60 max-h-[300px] overflow-y-auto">
+                        {renderTimeline(false)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Seção 2: Tarefas do Negócio */}
+                  <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900/20">
+                    <div 
+                      onClick={() => setTasksCollapsed(!tasksCollapsed)}
+                      className="flex items-center justify-between p-4 bg-slate-900/40 cursor-pointer select-none hover:bg-slate-900/60 transition-colors"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-400 text-xs">{tasksCollapsed ? '▶' : '▼'}</span>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-indigo-400">Tarefas do Negócio</h4>
+                      </div>
+                      
+                      {tasksCollapsed && (
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${
+                          commercialTasks.filter(t => {
+                            const propObj = Array.isArray(t.propostas) ? t.propostas[0] : t.propostas;
+                            const isThisDeal = t.clickup_negocio_id === clickupTaskId || 
+                                               (propObj && propObj.clickup_negocio_id === clickupTaskId) ||
+                                               (currentProposta && t.proposta_id === currentProposta.id);
+                            return isThisDeal && t.status === 'pendente' && new Date(t.data_vencimento) < new Date();
+                          }).length > 0
+                            ? 'bg-red-950/80 text-red-300 border-red-500/20 font-bold animate-pulse'
+                            : 'bg-slate-800 text-slate-300 border-slate-700/20'
+                        }`}>
+                          {(() => {
+                            const dealTasks = commercialTasks.filter(t => {
+                              const propObj = Array.isArray(t.propostas) ? t.propostas[0] : t.propostas;
+                              return t.clickup_negocio_id === clickupTaskId || 
+                                     (propObj && propObj.clickup_negocio_id === clickupTaskId) ||
+                                     (currentProposta && t.proposta_id === currentProposta.id);
+                            });
+                            const pTasks = dealTasks.filter(t => t.status === 'pendente');
+                            const odTasks = pTasks.filter(t => new Date(t.data_vencimento) < new Date());
+                            return `${pTasks.length} Pendentes ${odTasks.length > 0 ? `| ${odTasks.length} Atrasada(s)` : ''}`;
+                          })()}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {!tasksCollapsed && (
+                      <div className="p-4 border-t border-slate-800/60 space-y-4 max-h-[300px] overflow-y-auto">
+                        {(() => {
+                          const dealTasks = commercialTasks.filter(t => {
+                            const propObj = Array.isArray(t.propostas) ? t.propostas[0] : t.propostas;
+                            return t.clickup_negocio_id === clickupTaskId || 
+                                   (propObj && propObj.clickup_negocio_id === clickupTaskId) ||
+                                   (currentProposta && t.proposta_id === currentProposta.id);
+                          });
+                          
+                          if (dealTasks.length === 0) {
+                            return <p className="text-xs text-slate-500 text-center py-2">Nenhuma tarefa associada a este negócio.</p>;
+                          }
+                          
+                          return (
+                            <div className="space-y-3">
+                              {dealTasks.map(task => {
+                                const isOverdue = task.status === 'pendente' && new Date(task.data_vencimento) < new Date();
+                                const isDone = task.status === 'concluida';
+                                const typeEmoji = {
+                                  'Ligação': '📞',
+                                  'Reunião': '👥',
+                                  'E-mail': '✉️',
+                                  'Follow-up': '🔄'
+                                }[task.tipo] || '📋';
+                                
+                                return (
+                                  <div key={task.id} className="flex items-start justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/60 hover:border-slate-700 transition-colors">
+                                    <div className="flex items-start space-x-2.5">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={isDone}
+                                        onChange={() => toggleTaskStatus(task)}
+                                        className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer mt-0.5"
+                                      />
+                                      <div>
+                                        <p className={`text-xs font-semibold ${isDone ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                          {typeEmoji} {task.titulo}
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-0.5">
+                                          Vence em: {new Date(task.data_vencimento).toLocaleString('pt-BR')} 
+                                          {isOverdue && <span className="text-red-400 font-bold ml-1.5">⚠️ Atrasada</span>}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      {/* Editar (Lápis) */}
+                                      <button onClick={() => handleEditTaskClick(task)} className="p-1 text-slate-400 hover:text-blue-500 transition-colors" title="Editar Tarefa">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                      </button>
+                                      {/* Excluir (Lixeira) */}
+                                      <button onClick={() => handleDeleteTask(task.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors" title="Excluir Tarefa">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
