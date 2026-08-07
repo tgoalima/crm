@@ -6,7 +6,7 @@
   <title>Gerador de Propostas Comerciais - Suprimática</title>
   
   <!-- Estilos de Produção (Tailwind v4 + Custom CSS compilados) -->
-  <link rel="stylesheet" href="/dist/styles.css?v=1.6">
+  <link rel="stylesheet" href="/dist/styles.css?v=23.0">
   
   <!-- Supabase JS Client CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -18,17 +18,17 @@
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="h-full bg-slate-950 text-slate-100 flex flex-col antialiased overflow-hidden">
+<body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col antialiased">
   <!-- Root do App React -->
-  <div id="root" class="flex-1 flex flex-col overflow-hidden">
+  <div id="root" class="min-h-screen flex flex-col">
     <!-- Loader inicial -->
     <div class="flex-1 flex flex-col items-center justify-center space-y-4">
-      <div class="w-12 h-12 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
-      <p class="text-slate-400 font-medium animate-pulse">Carregando interface do Gerador...</p>
+      <div class="w-12 h-12 border-4 border-slate-200 border-t-indigo-500 rounded-full animate-spin"></div>
+      <p class="text-slate-500 font-medium animate-pulse">Carregando interface do Gerador...</p>
     </div>
   </div>
 
   <!-- Script principal do App (Compilado para Produção) -->
-  <script type="module" src="/dist/app.js?v=8.0"></script>
+  <script type="module" src="/dist/app.js?v=23.0"></script>
 </body>
 </html>

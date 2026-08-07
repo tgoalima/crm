@@ -29,9 +29,11 @@ BIND_ADDRESS = "127.0.0.1"
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 CLICKUP_TOKEN = os.environ.get("CLICKUP_TOKEN", "pk_90848927_3RNB3KVYA0ZBY9YILUOJAH7RUKD61437")
 
-def parse_date_to_ms(date_str):
+def parse_date_to_ms(date_str, default_to_tomorrow=False):
     if not date_str:
-        return int((datetime.datetime.now() + datetime.timedelta(days=1)).timestamp() * 1000)
+        if default_to_tomorrow:
+            return int((datetime.datetime.now() + datetime.timedelta(days=1)).timestamp() * 1000)
+        return None
     
     # Se já for um timestamp numérico ou string numérica
     if isinstance(date_str, (int, float)):
@@ -49,7 +51,9 @@ def parse_date_to_ms(date_str):
             dt = dt.replace(hour=12, minute=0, second=0)
             return int(dt.timestamp() * 1000)
         except Exception:
-            return int((datetime.datetime.now() + datetime.timedelta(days=1)).timestamp() * 1000)
+            if default_to_tomorrow:
+                return int((datetime.datetime.now() + datetime.timedelta(days=1)).timestamp() * 1000)
+            return None
 
 def make_supabase_request(headers, path, method, payload=None):
     supa_url = os.environ.get("SUPABASE_URL") or headers.get("x-supabase-url") or ""
@@ -79,10 +83,10 @@ def make_supabase_request(headers, path, method, payload=None):
     with urllib.request.urlopen(req) as response:
         return response.status, response.read()
 
-def make_clickup_request(path, method, payload=None):
+def make_clickup_request(path, method, payload=None, token=None):
     target_url = f"https://api.clickup.com/api/v2/{path.lstrip('/')}"
     headers = {
-        "Authorization": CLICKUP_TOKEN,
+        "Authorization": token or CLICKUP_TOKEN,
         "Content-Type": "application/json"
     }
     data = json.dumps(payload).encode('utf-8') if payload is not None else None
@@ -98,6 +102,12 @@ def make_clickup_request(path, method, payload=None):
 class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DIRECTORY, **kwargs)
+
+    def get_client_token(self):
+        auth = self.headers.get("Authorization") or self.headers.get("x-clickup-token")
+        if auth and auth.strip() and auth not in ("null", "undefined", "Bearer null", "None"):
+            return auth.strip()
+        return CLICKUP_TOKEN
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -117,6 +127,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_propostas()
         elif self.path.startswith('/api/itens_proposta'):
             self.handle_api_itens_proposta()
+        elif self.path.startswith('/api/atividades'):
+            self.handle_get_atividades()
         elif self.path.startswith('/api/tarefas'):
             self.handle_get_tarefas()
         elif self.path.startswith('/api/diagnostic'):
@@ -138,6 +150,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith('/clickup-api/'):
             self.handle_proxy()
+        elif self.path == '/api/atividades':
+            self.handle_create_atividade()
         elif self.path == '/api/tarefas':
             self.handle_create_task()
         else:
@@ -146,6 +160,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_PUT(self):
         if self.path.startswith('/clickup-api/'):
             self.handle_proxy()
+        elif re.match(r'^/api/atividades/[^/]+$', self.path):
+            self.handle_update_atividade()
         elif re.match(r'^/api/tarefas/[^/]+/status$', self.path):
             self.handle_update_task_status()
         elif self.path == '/api/tarefas' or re.match(r'^/api/tarefas/[^/]+$', self.path):
@@ -156,6 +172,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_DELETE(self):
         if self.path.startswith('/clickup-api/'):
             self.handle_proxy()
+        elif re.match(r'^/api/atividades/[^/]+$', self.path):
+            self.handle_delete_atividade()
         elif re.match(r'^/api/tarefas/[^/]+$', self.path):
             self.handle_delete_task()
         else:
@@ -168,11 +186,12 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length) if content_length > 0 else None
 
+        client_token = self.get_client_token()
         req = urllib.request.Request(
             target_url,
             data=body,
             headers={
-                "Authorization": CLICKUP_TOKEN,
+                "Authorization": client_token,
                 "Content-Type": "application/json"
             },
             method=self.command
@@ -224,7 +243,9 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 except ValueError:
                     pass
             
-            due_date_ms = parse_date_to_ms(data_vencimento)
+            data_inicio = data.get("data_inicio")
+            start_date_ms = parse_date_to_ms(data_inicio)
+            due_date_ms = parse_date_to_ms(data_vencimento, default_to_tomorrow=True)
             
             task_id = data.get("id")
             clickup_subtask_id = None
@@ -254,6 +275,9 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "due_date": due_date_ms,
                     "due_date_time": due_date_time
                 }
+                if start_date_ms:
+                    clickup_payload["start_date"] = start_date_ms
+
                 if clickup_negocio_id and clickup_negocio_id != old_clickup_negocio_id:
                     print(f"[LOG] Detectada alteracao de negocio pai: de {old_clickup_negocio_id} para {clickup_negocio_id}. Adicionando parent ao payload do ClickUp.")
                     sys.stdout.flush()
@@ -265,7 +289,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     status_code, clickup_res = make_clickup_request(
                         f"task/{clickup_subtask_id}",
                         "PUT",
-                        clickup_payload
+                        clickup_payload,
+                        token=self.get_client_token()
                     )
                     print(f"[LOG] Resposta da edicao no ClickUp [Status {status_code}]: {clickup_res.decode('utf-8')}")
                     sys.stdout.flush()
@@ -280,7 +305,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     return
             else:
                 try:
-                    parent_status, parent_res = make_clickup_request(f"task/{clickup_negocio_id}", "GET")
+                    parent_status, parent_res = make_clickup_request(f"task/{clickup_negocio_id}", "GET", token=self.get_client_token())
                     if parent_status != 200:
                         raise Exception(f"Erro ao obter tarefa pai: {parent_res.decode('utf-8')}")
                     parent_data = json.loads(parent_res.decode('utf-8'))
@@ -304,6 +329,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "due_date_time": due_date_time,
                     "parent": clickup_negocio_id
                 }
+                if start_date_ms:
+                    clickup_payload["start_date"] = start_date_ms
                 
                 print(f"[LOG] Enviando payload para criacao no ClickUp (List: {list_id}): {json.dumps(clickup_payload)}")
                 sys.stdout.flush()
@@ -312,7 +339,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     status_code, clickup_res = make_clickup_request(
                         f"list/{list_id}/task",
                         "POST",
-                        clickup_payload
+                        clickup_payload,
+                        token=self.get_client_token()
                     )
                     print(f"[LOG] Resposta do ClickUp [Status {status_code}]: {clickup_res.decode('utf-8')}")
                     sys.stdout.flush()
@@ -565,7 +593,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     # 1. Obter a lista pai da subtask
                     print(f"[LOG] Buscando detalhes da subtask {clickup_subtask_id} para obter o ID da lista")
                     sys.stdout.flush()
-                    task_code, task_res = make_clickup_request(f"task/{clickup_subtask_id}", "GET")
+                    task_code, task_res = make_clickup_request(f"task/{clickup_subtask_id}", "GET", token=self.get_client_token())
                     if task_code == 200:
                         task_data = json.loads(task_res.decode('utf-8'))
                         list_id = task_data.get("list", {}).get("id")
@@ -574,7 +602,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         if list_id:
                             print(f"[LOG] Buscando status da lista do ClickUp: {list_id}")
                             sys.stdout.flush()
-                            list_code, list_res = make_clickup_request(f"list/{list_id}", "GET")
+                            list_code, list_res = make_clickup_request(f"list/{list_id}", "GET", token=self.get_client_token())
                             if list_code == 200:
                                 list_data = json.loads(list_res.decode('utf-8'))
                                 statuses = list_data.get("statuses", [])
@@ -603,7 +631,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     cu_code, cu_res = make_clickup_request(
                         f"task/{clickup_subtask_id}",
                         "PUT",
-                        clickup_payload
+                        clickup_payload,
+                        token=self.get_client_token()
                     )
                     print(f"[LOG] Transicao de status no ClickUp respondida com status {cu_code}: {cu_res.decode('utf-8')}")
                     sys.stdout.flush()
@@ -698,7 +727,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 try:
                     cu_status, cu_res = make_clickup_request(
                         f"task/{clickup_subtask_id}",
-                        "DELETE"
+                        "DELETE",
+                        token=self.get_client_token()
                     )
                     print(f"[LOG] Resposta da exclusão no ClickUp [Status {cu_status}]")
                     sys.stdout.flush()
@@ -1015,6 +1045,336 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps([]).encode('utf-8'))
+
+    def handle_get_atividades(self):
+        """GET /api/atividades?clickup_negocio_id={id} — Lista atividades de um negócio (Supabase + ClickUp fallback)"""
+        try:
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            clickup_id = query_params.get('clickup_negocio_id', [None])[0]
+
+            if not clickup_id or clickup_id in ('null', 'undefined', ''):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps([]).encode('utf-8'))
+                return
+
+            id_clean = clickup_id.replace('#', '')
+            atividades = []
+
+            # 1. Tentar buscar do Supabase
+            try:
+                sb_status, sb_res = make_supabase_request(
+                    self.headers,
+                    f"/rest/v1/atividades_negocio?clickup_negocio_id=eq.{id_clean}&order=data_execucao.desc",
+                    "GET"
+                )
+                if sb_status == 200:
+                    atividades = json.loads(sb_res.decode('utf-8'))
+            except Exception as sb_err:
+                print(f"[WARN] Busca no Supabase falhou (tabela pode nao existir): {str(sb_err)}")
+
+            # 2. Buscar comentários nativos do ClickUp e mesclar (fallback inteligente)
+            try:
+                cu_status, cu_res = make_clickup_request(f"task/{id_clean}/comment", "GET", token=self.get_client_token())
+                if cu_status == 200:
+                    cu_data = json.loads(cu_res.decode('utf-8'))
+                    comments = cu_data.get("comments", [])
+                    sb_comment_ids = {str(a.get("clickup_comment_id")) for a in atividades if a.get("clickup_comment_id")}
+
+                    for c in comments:
+                        c_id = str(c.get("id"))
+                        if c_id not in sb_comment_ids:
+                            raw_text = c.get("comment_text", "")
+                            clean_text = raw_text.replace("[SPA Gestão Comercial] ", "").strip()
+                            date_val = c.get("date")
+                            date_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                            if date_val:
+                                try:
+                                    date_ms = int(date_val)
+                                    date_iso = datetime.datetime.fromtimestamp(date_ms / 1000.0, tz=datetime.timezone.utc).isoformat()
+                                except Exception:
+                                    pass
+
+                            atividades.append({
+                                "id": f"cu_{c_id}",
+                                "clickup_negocio_id": id_clean,
+                                "clickup_comment_id": c_id,
+                                "texto": clean_text,
+                                "data_execucao": date_iso,
+                                "created_at": date_iso,
+                                "updated_at": date_iso
+                            })
+            except Exception as cu_err:
+                print(f"[WARN] Busca de comentários no ClickUp falhou: {str(cu_err)}")
+
+            # Ordenar por data_execucao descendente
+            atividades.sort(key=lambda x: str(x.get("data_execucao", "")), reverse=True)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(atividades).encode('utf-8'))
+
+        except Exception as e:
+            print(f"[ERROR] GET /api/atividades falhou: {str(e)}")
+            traceback.print_exc()
+            sys.stdout.flush()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps([]).encode('utf-8'))
+
+    def handle_create_atividade(self):
+        """POST /api/atividades — Cria atividade no Supabase + comentário no ClickUp"""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            clickup_negocio_id = data.get("clickup_negocio_id")
+            texto = data.get("texto", "").strip()
+
+            if not clickup_negocio_id or not texto:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "clickup_negocio_id e texto são obrigatórios"}).encode('utf-8'))
+                return
+
+            id_clean = clickup_negocio_id.replace('#', '')
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            # 1. Enviar como comentário no ClickUp
+            clickup_comment_id = None
+            try:
+                comment_payload = {
+                    "comment_text": f"[SPA Gestão Comercial] {texto}",
+                    "notify_all": False
+                }
+                cu_status, cu_res = make_clickup_request(
+                    f"task/{id_clean}/comment",
+                    "POST",
+                    comment_payload,
+                    token=self.get_client_token()
+                )
+                if cu_status in (200, 201):
+                    cu_data = json.loads(cu_res.decode('utf-8'))
+                    clickup_comment_id = str(cu_data.get("id") or cu_data.get("comment", {}).get("id") or "")
+                    print(f"[LOG] Comentário criado no ClickUp: {clickup_comment_id}")
+                else:
+                    print(f"[WARN] ClickUp comment creation returned status {cu_status}: {cu_res.decode('utf-8')}")
+                sys.stdout.flush()
+            except Exception as cu_err:
+                print(f"[WARN] Falha ao criar comentário no ClickUp: {str(cu_err)}")
+                sys.stdout.flush()
+
+            # 2. Salvar no Supabase (não fatal se a tabela ainda não foi criada)
+            supabase_payload = {
+                "clickup_negocio_id": id_clean,
+                "clickup_comment_id": clickup_comment_id,
+                "texto": texto,
+                "data_execucao": now_iso,
+                "created_at": now_iso,
+                "updated_at": now_iso
+            }
+
+            sb_res_data = [supabase_payload]
+            try:
+                sb_status, sb_res = make_supabase_request(
+                    self.headers,
+                    "/rest/v1/atividades_negocio",
+                    "POST",
+                    supabase_payload
+                )
+                if sb_status in (200, 201):
+                    sb_res_data = json.loads(sb_res.decode('utf-8'))
+            except Exception as sb_err:
+                print(f"[WARN] Falha ao salvar atividade no Supabase (comentário foi criado no ClickUp): {str(sb_err)}")
+                sys.stdout.flush()
+
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(sb_res_data).encode('utf-8'))
+
+        except Exception as e:
+            print(f"[ERROR] POST /api/atividades falhou: {str(e)}")
+            traceback.print_exc()
+            sys.stdout.flush()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
+    def handle_update_atividade(self):
+        """PUT /api/atividades/{id} — Edita atividade no Supabase + comentário no ClickUp"""
+        try:
+            match = re.match(r'^/api/atividades/([^/]+)$', self.path)
+            if not match:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "ID da atividade inválido"}).encode('utf-8'))
+                return
+
+            atividade_id = match.group(1)
+
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            texto = data.get("texto", "").strip()
+            if not texto:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "O texto é obrigatório"}).encode('utf-8'))
+                return
+
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            # Extrair clickup_comment_id se for um id tipo "cu_12345" ou UUID
+            clickup_comment_id = None
+            if atividade_id.startswith("cu_"):
+                clickup_comment_id = atividade_id.replace("cu_", "")
+            else:
+                try:
+                    sb_get_status, sb_get_res = make_supabase_request(
+                        self.headers,
+                        f"/rest/v1/atividades_negocio?id=eq.{atividade_id}",
+                        "GET"
+                    )
+                    if sb_get_status == 200:
+                        existing = json.loads(sb_get_res.decode('utf-8'))
+                        if existing:
+                            clickup_comment_id = existing[0].get("clickup_comment_id")
+                except Exception as sb_err:
+                    print(f"[WARN] Busca da atividade no Supabase falhou: {str(sb_err)}")
+
+            # Atualizar comentário no ClickUp se houver ID
+            if clickup_comment_id:
+                try:
+                    comment_payload = {
+                        "comment_text": f"[SPA Gestão Comercial] {texto}"
+                    }
+                    cu_status, cu_res = make_clickup_request(
+                        f"comment/{clickup_comment_id}",
+                        "PUT",
+                        comment_payload,
+                        token=self.get_client_token()
+                    )
+                    print(f"[LOG] Comentário {clickup_comment_id} atualizado no ClickUp (status: {cu_status})")
+                    sys.stdout.flush()
+                except Exception as cu_err:
+                    print(f"[WARN] Falha ao atualizar comentário no ClickUp: {str(cu_err)}")
+                    sys.stdout.flush()
+
+            # Atualizar no Supabase se não for id puramente ClickUp
+            if not atividade_id.startswith("cu_"):
+                try:
+                    make_supabase_request(
+                        self.headers,
+                        f"/rest/v1/atividades_negocio?id=eq.{atividade_id}",
+                        "PATCH",
+                        {"texto": texto, "updated_at": now_iso}
+                    )
+                except Exception as sb_err:
+                    print(f"[WARN] PATCH Supabase falhou: {str(sb_err)}")
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True, "texto": texto}).encode('utf-8'))
+
+        except Exception as e:
+            print(f"[ERROR] PUT /api/atividades falhou: {str(e)}")
+            traceback.print_exc()
+            sys.stdout.flush()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
+    def handle_delete_atividade(self):
+        """DELETE /api/atividades/{id} — Deleta atividade do Supabase + comentário no ClickUp"""
+        try:
+            match = re.match(r'^/api/atividades/([^/]+)$', self.path)
+            if not match:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "ID da atividade inválido"}).encode('utf-8'))
+                return
+
+            atividade_id = match.group(1)
+            clickup_comment_id = None
+
+            if atividade_id.startswith("cu_"):
+                clickup_comment_id = atividade_id.replace("cu_", "")
+            else:
+                try:
+                    sb_get_status, sb_get_res = make_supabase_request(
+                        self.headers,
+                        f"/rest/v1/atividades_negocio?id=eq.{atividade_id}",
+                        "GET"
+                    )
+                    if sb_get_status == 200:
+                        existing = json.loads(sb_get_res.decode('utf-8'))
+                        if existing:
+                            clickup_comment_id = existing[0].get("clickup_comment_id")
+                except Exception as sb_err:
+                    print(f"[WARN] Busca da atividade no Supabase falhou: {str(sb_err)}")
+
+                try:
+                    make_supabase_request(
+                        self.headers,
+                        f"/rest/v1/atividades_negocio?id=eq.{atividade_id}",
+                        "DELETE"
+                    )
+                except Exception as sb_err:
+                    print(f"[WARN] DELETE Supabase falhou: {str(sb_err)}")
+
+            if clickup_comment_id:
+                try:
+                    cu_status, cu_res = make_clickup_request(
+                        f"comment/{clickup_comment_id}",
+                        "DELETE",
+                        token=self.get_client_token()
+                    )
+                    print(f"[LOG] Comentário {clickup_comment_id} deletado no ClickUp (status: {cu_status})")
+                    sys.stdout.flush()
+                except Exception as cu_err:
+                    print(f"[WARN] Falha ao deletar comentário no ClickUp: {str(cu_err)}")
+                    sys.stdout.flush()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+
+        except Exception as e:
+            print(f"[ERROR] DELETE /api/atividades falhou: {str(e)}")
+            traceback.print_exc()
+            sys.stdout.flush()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
     def handle_diagnostic(self):
         results = {}

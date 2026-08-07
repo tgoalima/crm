@@ -1,6 +1,6 @@
 # Resumo_2 — Handover Completo: SPA Gestão Comercial Suprimática
 
-> **Propósito:** Este documento é um guia de handover atualizado para que uma IA possa retomar o desenvolvimento com contexto total. Ele complementa o `Resumo_1.md` com tudo que foi construído, corrigido e descoberto na fase atual do projeto.
+> **Propósito:** Este documento é o guia de handover atualizado para que qualquer IA possa retomar o desenvolvimento com contexto 100% alinhado. Ele documenta a arquitetura, todas as funcionalidades entregues até a **Versão 20.0 (v20.0)**, padrões visuais, comandos de build e regras de usabilidade.
 
 ---
 
@@ -8,248 +8,147 @@
 
 Uma **SPA (Single Page Application)** de CRM e Gestão Comercial para a empresa **Suprimática**, que integra:
 
-- **ClickUp** como fonte de dados de negócios (deals) via API REST
-- **Supabase (PostgreSQL)** como banco de dados de propostas comerciais
-- **React 18 via CDN** como framework de UI (sem build tool, sem Node.js em produção)
-- **Tailwind CSS v4 (compilado via esbuild)** como framework de estilos
+- **ClickUp** como fonte de dados de negócios (deals/tarefas) via API REST
+- **Supabase (PostgreSQL)** como banco de dados de propostas comerciais e catálogos
+- **React 18 via CDN** como framework de UI (sem build tool no browser, sem framework pesado)
+- **Tailwind CSS v4** como framework de estilos compilado
 
-A aplicação roda localmente via servidor Python (`server.py`) na porta `8000` e serve dois arquivos compilados: `dist/app.js` e `dist/styles.css`.
+A aplicação roda localmente via servidor Python (`server.py`) na porta `8000` (ou `http://127.0.0.1:8000`) e serve dois arquivos compilados: `dist/app.js` e `dist/styles.css`.
 
 ---
 
 ## 2. Arquitetura Atual e Fluxo de Build
 
-### ⚠️ PONTO CRÍTICO — o navegador NUNCA carrega `app.js` diretamente
+### ⚠️ REGRA DE OURO — O navegador NUNCA carrega `app.js` diretamente
 
-O `index.html` aponta para `/dist/app.js?v=6.5`. Portanto:
+O `index.html` aponta para `/dist/app.js?v=20.0`. Portanto:
 
-> **Toda edição feita em `app.js` (fonte) DEVE ser recompilada com esbuild para `dist/app.js`, caso contrário o navegador não vê nenhuma mudança.**
+> **Toda edição feita em `app.js` (fonte) DEVE ser recompilada com esbuild para `dist/app.js` e o CSS com Tailwind CLI, caso contrário o navegador não verá as alterações.**
 
-**Comando de build obrigatório após qualquer edição:**
+**Comando de build JS + CSS (executar após qualquer alteração no código):**
 ```bash
-npx esbuild app.js --bundle=false --outfile=dist/app.js --platform=browser --format=esm --loader:.js=jsx
+npx tailwindcss -i styles.css -o dist/styles.css && npx esbuild app.js --bundle=false --outfile=dist/app.js --platform=browser --format=esm --loader:.js=jsx
 ```
 
-**Comando para rodar o servidor:**
+**Validação de sintaxe JS no bundle (opcional mas recomendado):**
+```bash
+node -c dist/app.js
+```
+
+**Comando para rodar o servidor Python:**
 ```bash
 python3 server.py
 ```
 
-**URL de acesso:**
+**URL de Acesso:**
 ```
-http://127.0.0.1:8000
+http://localhost:8000  (ou http://127.0.0.1:8000)
 ```
 
 ### Estrutura de Arquivos Relevantes
 
 ```
 /
-├── app.js                  # Fonte principal (React + JSX). EDITAR AQUI.
+├── app.js                  # Fonte principal (React + JSX). EDITAR AQUI (~6.720 linhas).
 ├── dist/
-│   ├── app.js              # Arquivo COMPILADO. O que o navegador carrega.
+│   ├── app.js              # Arquivo COMPILADO (~284kb). O que o navegador carrega.
 │   └── styles.css          # Tailwind CSS compilado.
 ├── styles.css              # Fonte do Tailwind (input para compilação CSS).
-├── index.html              # Carrega /dist/app.js e /dist/styles.css.
-├── server.py               # Servidor HTTP Python (porta 8000) + proxy para APIs.
-├── package.json            # Só tem devDependencies do Tailwind CSS v4.
-└── supabase/               # Migrations e Edge Functions do Supabase.
+├── index.html              # Carrega /dist/app.js?v=20.0 e /dist/styles.css.
+├── server.py               # Servidor HTTP Python (porta 8000) + proxy ClickUp/Supabase.
+├── .env                    # Variáveis de ambiente (SUPABASE_URL, etc).
+├── package.json            # devDependencies do Tailwind CSS v4.
+└── Resumo_2.md             # Este documento de handover técnico.
 ```
 
 ---
 
-## 3. O Que o `server.py` Faz (Importante)
+## 3. O Que o `server.py` Faz
 
-O `server.py` **não é um servidor simples**. Ele é um **proxy reverso customizado** que:
+O `server.py` atua como **Proxy Reverso Customizado**:
 
-1. Serve os arquivos estáticos (HTML, JS, CSS) da pasta local.
-2. Faz proxy das chamadas `/clickup-api/*` para `https://api.clickup.com/api/v2/*`, injetando o token de autenticação do ClickUp.
-3. Faz proxy das chamadas `/api/*` para o Supabase, injetando as credenciais salvas no `.env`.
-4. O arquivo `.env` está ausente no ambiente atual (SUPABASE_URL não está configurado), o que impede a integração com o banco de dados mas não impede o funcionamento do Kanban/ClickUp.
+1. Serve os arquivos estáticos locais (HTML, JS, CSS).
+2. Faz proxy de `/clickup-api/*` para `https://api.clickup.com/api/v2/*`, injetando o token de autenticação.
+3. Faz proxy de `/api/*` para o Supabase, injetando as credenciais do `.env`.
 
-**Token ClickUp hardcoded no server.py:**
-```
-pk_90848927_3RNB3KVYA0ZBY9YILUOJAH7RUKD61437
-```
-
-**ID da lista alvo no ClickUp (TARGET_LIST_ID):**
-```
-901326185457
-```
+- **Token ClickUp:** `pk_90848927_3RNB3KVYA0ZBY9YILUOJAH7RUKD61437`
+- **ID da Lista Alvo (TARGET_LIST_ID):** `901326185457`
+- **Campo de Valor do Negócio (DEAL_VALUE_FIELD_ID):** `ee65221a-029d-4d0a-a981-b71b5a29b4b4`
 
 ---
 
-## 4. Arquitetura do `app.js` — Componentes Principais
-
-O `app.js` tem ~5.344 linhas. Abaixo os componentes e funções de maior importância:
-
-### Funções Utilitárias Globais (topo do arquivo)
+## 4. Funções Utilitárias Globais em `app.js`
 
 | Função | Propósito |
 |---|---|
-| `getSupabaseHeaders()` | Retorna headers com URL/Key do Supabase lidos do `localStorage` |
-| `getSafeStageName(card)` | **Novo — adicionado nessa sessão.** Extrai `stage_name` ou `status` de um card de forma segura, tratando casos onde o valor é um **objeto** em vez de string. Evita crash de `.toLowerCase()` em objetos. |
-| `formatValueCompact(val)` | Formata valores em R$ com sufixo K/M |
-| `formatMaskedCurrency(value)` | Formata valor como moeda pt-BR |
-| `getNextVersionLetter(versao)` | Incrementa letras de versão (vA → vB → ... → vZ → vAA) |
-| `getStageSortKey(name)` | Retorna índice de ordenação cronológica do estágio do funil |
-| `getStageWidth(name)` | Retorna largura percentual do estágio para o funil visual (100% → 25%) |
-
-### Componentes React
-
-| Componente | Localização | Propósito |
-|---|---|---|
-| `KanbanCard` | ~linha 104 | Card visual de um negócio no Kanban (memo) |
-| `ForecastFunnelPanel` | ~linha 156 | Painel de funil de vendas e forecast. **Corrigido nessa sessão.** |
-| `App()` | ~linha 285 | Componente raiz. Contém todos os estados e a lógica principal. |
-
-### Estados Principais do App()
-
-| Estado | Tipo | Propósito |
-|---|---|---|
-| `kanbanTasks` | Array | Lista de negócios/cards do ClickUp |
-| `kanbanColumns` | Array | Colunas/estágios do Kanban (vêm da API do ClickUp) |
-| `showForecast` | Boolean | Controla visibilidade do painel Forecast |
-| `filterStage` | String/null | ID do estágio selecionado para filtrar o Kanban |
-| `supabaseProposalsList` | Array | Propostas carregadas do Supabase |
-| `activeTab` | String | Aba ativa: `'kanban'` ou `'relatorios'` |
-| `showDrawer` | Boolean | Controla o drawer lateral de detalhes do negócio |
-| `selectedTask` | Object | Negócio selecionado para abrir no drawer |
-| `wonProposals` | Array | Propostas ganhas para o Dashboard |
-| `commercialData` | Array | Dados de itens para gráficos de relatório |
+| `getCleanBusinessName(raw)` | **Novo (v19.0/v20.0):** Limpa o nome do negócio removendo prefixos (`S/N \|`) e sufixos de versão (`- vA`, `- vvA`, `- vB`, `- versão A`), garantindo o nome exato do Negócio. |
+| `getSafeStageName(card)` | Extrai `stage_name` ou `status` de um card de forma segura, mesmo se for retornado como objeto da API ClickUp. |
+| `formatValueCompact(val)` | Formata valores em R$ com sufixo K/M. |
+| `formatMaskedCurrency(val)`| Formata valor como moeda brasileira (pt-BR). |
+| `getNextVersionLetter(v)` | Incrementa letras de versão (vA → vB → ... → vZ → vAA). |
+| `getStageSortKey(name)` | Retorna índice de ordenação do estágio no funil. |
 
 ---
 
-## 5. O Que Foi Construído e Corrigido Nesta Sessão
+## 5. Histórico Recente de Evolução & Versões (v14.0 a v20.0)
 
-### 5.1. Bug de Crash Fatal no Forecast (Tela Preta)
+### 🎨 v14.0 — Redesign Completo do Editor de Propostas
+- Cards de versão com fundo limpo + `ring-2 ring-indigo-500` na versão selecionada.
+- Barra lateral indicadora de 3px indigo no card ativo.
+- Botões de ação com gradientes e feedback visual.
+- Rodapé de total com tipografia `tabular-nums` e card gradiente.
 
-**Causa raiz identificada:**
-A API do ClickUp pode retornar `status` ou `stage_name` como um **objeto JavaScript** `{ status: "ganho", color: "#..." }` em vez de uma string simples. Ao chamar `.toLowerCase()` diretamente sobre esse objeto (ex: `card.status.toLowerCase()`), o React crashava com erro fatal, resultando em tela preta.
+### ⌨️ v15.0 — Redesign do Modal de Tarefas & Navegação por Teclado
+- Redesign estilo Salesforce para o modal de criar tarefa (`showNewTaskModal`) em Light Mode ultra limpo.
+- **Teclado ESC:** Listener global `useEffect` adicionado para fechar qualquer modal aberto (`showNewTaskModal`, `showSettingsModal`, `showProductModal`, `showCloseModal`, etc.) ao pressionar a tecla `Escape`.
+- **Navegação por Setas no Catálogo:** No dropdown de produtos da proposta, navegação por teclas (`ArrowUp`, `ArrowDown`, `Enter`, `Tab`, `Escape`) para navegar e escolher produtos facilmente.
 
-**Solução implementada:**
+### 📋 v16.0 — Redesign Completo do Painel de Tarefas Comerciais
+- **KPI Cards no topo:** *Pendentes*, *Vencidas* (destacado em vermelho com `animate-pulse`), *Para Hoje* (âmbar), *Concluídas*.
+- **Agrupamento por Urgência:** Seções automáticas para 🔴 *Vencidas* (ponto piscante + barra rosa), 🟡 *Hoje* (barra âmbar + horário), 🔵 *Próximas* (azul) e ✅ *Concluídas* (visíveis ao alternar filtro).
+- **Cards em vez de Tabela:** Cada tarefa é exibida em card moderno com badge do tipo (📞 Ligação, 🤝 Reunião, ✉️ E-mail, 🔄 Follow-up, 📍 Visita, 📄 Proposta), data relativa, avatar com iniciais do responsável e ações inline (Editar/Excluir) exibidas no hover.
 
-1. **Função global `getSafeStageName(card)`** adicionada no topo de `app.js` (linha ~48):
-   - Verifica `typeof card.stage_name === 'object'` antes de acessar o valor
-   - Tenta extrair `.name`, `.status` ou `.value` do objeto
-   - Sempre retorna uma `String` normalizada em lowercase
+### ⚙️ v17.0 & v18.0 — Correções no Modal de Configurações (Engrenagem)
+- **v17.0 (Light Mode):** Corrigido texto invisível (`text-white` em fundo `bg-white`) no modal da engrenagem e modal de novo produto. Convertidos todos os títulos para `text-slate-900 font-extrabold`.
+- **v18.0 (Bugfix Crítico):** Resolvido erro `ReferenceError: Can't find variable: importText` no Safari ao clicar na engrenagem. Declarado o estado `const [importText, setImportText] = useState('')` no componente raiz `App`.
 
-2. **`ForecastFunnelPanel` protegido com guards defensivos:**
-   - `const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];`
-   - `const safeTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];`
-   - Verificação `!col || typeof col.name !== 'string'` antes de processar colunas
-   - Verificações `getTaskOptionId &&` e `getOpportunityValue ?` para props de função
-
-3. **`totalVal` no JSX usa `safeTasks`** e chama `getSafeStageName(card)` em vez de lógica inline.
-
-### 5.2. Descoberta Crítica: O Build
-
-**Problema descoberto:** Todas as correções anteriores não estavam sendo vistas no navegador porque o arquivo `dist/app.js` nunca era atualizado. O servidor serve o arquivo compilado.
-
-**Solução:** Após cada ciclo de edição, o comando de build deve ser executado:
-```bash
-npx esbuild app.js --bundle=false --outfile=dist/app.js --platform=browser --format=esm --loader:.js=jsx
-```
+### 🏷️ v19.0 & v20.0 — Ajuste no Negócio Associado da Tarefa & Visibilidade do Drawer
+- **v19.0:** Criada a função `getCleanBusinessName(raw)` para eliminar duplicações como `vvA` ou sufixos de versão.
+- **v20.0 (Correção no Drawer):**
+  - **Título do Drawer (Foto 2):** Alterada a classe do nome do negócio de `text-white` (invisível em fundo branco) para `text-slate-900 font-extrabold text-[17px]`.
+  - **Botão "+ Nova Tarefa Comercial":** O botão nas Ações do Negócio dentro do Drawer continha um handler inline antigo que forçava o nome da proposta com versão (`${propName} - v${versao}`). Ele foi atualizado para chamar `handleNewTaskClick()`, que prioriza `selectedTask.name`.
+  - **Resultado:** A tarefa aberta a partir do negócio traz automaticamente o nome exato e limpo do Negócio (ex: **`Unimed São Carlos | Upgrade Switch Core Aruba`**), sem nenhuma versão ou caractere `vvA`.
 
 ---
 
-## 6. Funcionalidades da Aplicação (Estado Atual)
+## 6. Mapeamento de Modais e Atalhos do Teclado
 
-### Aba Kanban (Principal)
-- Kanban Board com drag-and-drop de cards entre colunas/estágios
-- Colunas de estágio carregadas dinamicamente da API ClickUp
-- Colunas ocultas por padrão: Ganho, Perdido, Congelado (toggles para mostrar)
-- Ordenação: por nome, valor crescente, valor decrescente
-- **Painel Forecast (📈):** Funil visual invertido com larguras proporcionais por estágio, total em negociação excluindo fechados/perdidos/congelados
-- Drawer lateral: Ao clicar em um card, abre drawer com detalhes do negócio, histórico de propostas e criação de tarefas comerciais
-
-### Aba Relatórios (Dashboard BI)
-- KPIs de faturamento: ganho, perdido, ticket médio
-- Comparação de períodos (atual vs. anterior)
-- Gráficos de pizza por distribuidor e por fabricante
-- Ranking de vendedores
-- Listagem de contratos fechados recentes
-- Filtros por data início/fim e por distribuidor/fabricante
-
-### Editor de Propostas (Drawer)
-- Criação e versionamento de propostas (vA → vB → ...)
-- Edição de itens com cálculo em tempo real
-- Importação via CSV ou XML
-- Sincronização bidirecional com ClickUp (Deal Value em centavos × 100)
-- Fluxo "🏆 Marcar como Ganha" → muda status no ClickUp e registra no Supabase
+| Modal | Estado | Atalho ESC | Estilo Visual |
+|---|---|---|---|
+| **Criar/Editar Tarefa** | `showNewTaskModal` | ✅ Ativo | Light Mode / Salesforce Style |
+| **Configurações (Engrenagem)** | `showSettingsModal` | ✅ Ativo | Light Mode com menu lateral de abas |
+| **Adicionar Produto** | `showProductModal` | ✅ Ativo | Light Mode compacto |
+| **Fechamento (Ganho/Perdido)** | `showCloseModal` | ✅ Ativo | Light Mode com motivos de perda |
+| **Drawer de Detalhes** | `showDrawer` | ✅ Ativo | Lateral direita com timeline e ações |
 
 ---
 
-## 7. Integrações Técnicas
+## 7. Esclarecimentos Sobre Alertas Comuns do Navegador
 
-### ClickUp API
-- **Proxy:** Todas as chamadas `/clickup-api/*` passam pelo `server.py`
-- **Token:** `pk_90848927_3RNB3KVYA0ZBY9YILUOJAH7RUKD61437` (hardcoded em `server.py`)
-- **Lista alvo:** `901326185457`
-- **Field de Deal Value:** `DEAL_VALUE_FIELD_ID = 'ee65221a-029d-4d0a-a981-b71b5a29b4b4'`
-- **Paginação:** Automática com `page=0, 1, 2...` e `include_closed=true`
-- **Valores monetários:** Enviados em centavos (`valorLimpo × 100`)
-
-### Supabase
-- **Configuração:** URL e Anon Key armazenadas no `localStorage` do navegador
-- **Headers:** Função `getSupabaseHeaders()` lê do localStorage
-- **Tabelas principais:** `propostas`, `itens_proposta`, `produtos`, `distribuidores`, `vendedores`
-- **Funções RPC:** `gerar_nova_versao` (clona proposta com nova versão letra)
-- **Estado atual:** `.env` não configurado no ambiente de dev → Supabase não conectado
+- **`Source Map 404 (chart.umd.min.js.map)` no Safari:**
+  Aviso de desenvolvimento que ocorre ao abrir as Ferramentas do Desenvolvedor do Safari. É apenas o navegador tentando buscar o mapa de código original do Chart.js para depuração. **Não é um erro do sistema e não afeta nada no uso real.**
 
 ---
 
-## 8. Como Retomar o Desenvolvimento
+## 8. Como Testar e Continuar o Desenvolvimento
 
-### Workflow de Desenvolvimento
-```bash
-# 1. Editar o arquivo FONTE
-# (editar app.js)
-
-# 2. Recompilar JavaScript (OBRIGATÓRIO após editar)
-npx esbuild app.js --bundle=false --outfile=dist/app.js --platform=browser --format=esm --loader:.js=jsx
-
-# 3. Recompilar CSS (apenas se editar styles.css)
-npx @tailwindcss/cli -i styles.css -o dist/styles.css
-
-# 4. Iniciar o servidor
-python3 server.py
-
-# 5. Testar no navegador
-# http://127.0.0.1:8000
-```
-
----
-
-## 9. Bugs Conhecidos e Pontos de Atenção
-
-| Situação | Status | Detalhe |
-|---|---|---|
-| Crash do Forecast (tela preta) | ✅ Corrigido | `getSafeStageName()` resolve o crash de objetos em stage_name/status. Build já aplicado. |
-| `.env` ausente | ⚠️ Pendente | Supabase não conecta sem o arquivo `.env` configurado |
-| Versão em cache no navegador | ⚠️ Atenção | O HTML usa `?v=6.5` como cache buster. Incrementar se necessário. |
-| `SUPABASE_URL presente? False` | ℹ️ Normal | Aparece sempre no boot do servidor sem `.env`. |
-| Erros 400 "HEALED FAILED" | ⚠️ Monitorar | Algumas chamadas à API ClickUp retornam 400 durante sincronização. O servidor tenta recuperar automaticamente. |
-
----
-
-## 10. Próximos Passos Sugeridos
-
-1. **Verificar o Forecast visualmente** — confirmar se os valores e o funil renderizam corretamente após a correção do crash.
-2. **Configurar o `.env`** com as credenciais do Supabase para habilitar o módulo de propostas.
-3. **Testar o Drawer de detalhes** — ao clicar em um card do Kanban, o drawer deve abrir com histórico de propostas do Supabase.
-4. **Automatizar o build** — criar um script `build.sh` ou adicionar um script `"build"` ao `package.json`.
-5. **Incrementar o cache buster** no `index.html` (`?v=6.6`) após grandes mudanças.
-6. **Testar o fluxo completo de proposta:** Criar → adicionar itens → selecionar → marcar como ganha → verificar sincronização no ClickUp.
-
----
-
-## 11. Arquivos de Referência
-
-| Arquivo | Propósito |
-|---|---|
-| `app.js` | Fonte principal React (EDITAR AQUI) |
-| `dist/app.js` | Compilado pelo esbuild (NÃO EDITAR DIRETAMENTE) |
-| `index.html` | Entrypoint HTML — carrega dist/app.js |
-| `server.py` | Servidor HTTP + Proxy ClickUp/Supabase |
-| `styles.css` | Fonte CSS (Tailwind input) |
-| `Resumo_1.md` | Contexto e correções da fase anterior do projeto |
+1. **Editar o código fonte:** Altere apenas o arquivo `app.js` (ou `styles.css`).
+2. **Recompilar:**
+   ```bash
+   npx tailwindcss -i styles.css -o dist/styles.css && npx esbuild app.js --bundle=false --outfile=dist/app.js --platform=browser --format=esm --loader:.js=jsx
+   ```
+3. **Iniciar o Servidor Python:**
+   ```bash
+   python3 server.py
+   ```
+4. **Testar no navegador:** Acesse `http://localhost:8000` e pressione **Cmd + R** se necessário para renovar o cache (`?v=20.0`).
