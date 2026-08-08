@@ -15,6 +15,9 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   
+  <!-- Babel Standalone para compilação instantânea sem cache preso -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -28,7 +31,7 @@
     </div>
   </div>
 
-  <!-- Script principal do App (Compilado para Produção) -->
-  <script type="module" src="/dist/app.js?v=23.0"></script>
+  <!-- Script principal do App React com Babel e versão 45.0 -->
+  <script type="text/babel" src="/app.js?v=45.0"></script>
 </body>
 </html>
