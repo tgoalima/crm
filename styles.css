@@ -143,7 +143,9 @@ h1, h2, h3, h4, h5, h6 {
   align-items: stretch;
   flex: 1;
   min-height: 0;
-  max-height: calc(100vh - 240px);
+  /* Sem max-height fixo em viewport: a altura vem do pai flex (que já é
+     limitado por min-h-0/overflow-hidden), evitando descasar com a altura
+     real do cabeçalho da coluna e cortar o último card. */
 }
 
 .kanban-column {
@@ -175,7 +177,10 @@ h1, h2, h3, h4, h5, h6 {
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  max-height: calc(100vh - 280px);
+  /* flex:1 + min-height:0 dentro de .kanban-column (que já tem altura/overflow
+     definidos) é suficiente para preencher exatamente o espaço restante depois
+     do cabeçalho, sem precisar de um segundo cálculo de viewport que pode
+     descasar do primeiro. */
 }
 
 .kanban-card {

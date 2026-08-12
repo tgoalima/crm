@@ -27,7 +27,7 @@ BIND_ADDRESS = "127.0.0.1"
 
 # Servir a pasta atual (onde está o index.html)
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
-CLICKUP_TOKEN = os.environ.get("CLICKUP_TOKEN", "pk_90848927_3RNB3KVYA0ZBY9YILUOJAH7RUKD61437")
+CLICKUP_TOKEN = os.environ.get("CLICKUP_TOKEN", "")
 
 def parse_date_to_ms(date_str, default_to_tomorrow=False):
     if not date_str:
@@ -975,60 +975,13 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if prop_status == 200:
                 props = json.loads(prop_res.decode('utf-8'))
 
-            # 3. Enriquece cada uma das tarefas de forma rica e sem perdas, aplicando auto-cura para órfãs
+            # 3. Enriquece cada uma das tarefas com a proposta correspondente.
+            # Toda tarefa já nasce vinculada a um negócio (escolhido manualmente ao
+            # criar pela aba Tarefas Comerciais, ou herdado automaticamente ao criar
+            # a partir de uma oportunidade) — se não houver proposta correspondente,
+            # é exibida como "Sem Proposta" em vez de inventar uma proposta nova.
             updated_tasks = []
             for task in tasks:
-                t_prop_id = task.get("proposta_id")
-                t_clickup_id = task.get("clickup_negocio_id")
-                
-                matched_prop = None
-                if t_prop_id:
-                    matched_prop = next((p for p in props if p.get("id") == t_prop_id), None)
-                if not matched_prop and t_clickup_id:
-                    t_cu_clean = t_clickup_id.replace('#', '')
-                    matched_prop = next((p for p in props if p.get("clickup_negocio_id") and p.get("clickup_negocio_id").replace('#', '') == t_cu_clean), None)
-
-                # AUTOCURA DE TAREFAS ANTIGAS: Se a tarefa não tem uma proposta associada no banco, cria uma agora!
-                if not matched_prop and t_clickup_id:
-                    try:
-                        new_prop = {
-                            "nome_projeto": "Unimed São Carlos | Upgrade Switch Core Aruba",
-                            "clickup_negocio_id": t_clickup_id,
-                            "numero_proposta": "S/N"
-                        }
-                        p_status, p_res = make_supabase_request(
-                            self.headers,
-                            "/rest/v1/propostas",
-                            "POST",
-                            new_prop
-                        )
-                        if p_status == 201:
-                            id_clean = t_clickup_id.replace('#', '')
-                            id_hash = f"#{id_clean}"
-                            prop_status, prop_res = make_supabase_request(
-                                self.headers,
-                                f"/rest/v1/propostas?select=*&clickup_negocio_id=in.({id_clean},{id_hash})&limit=1",
-                                "GET"
-                            )
-                            if prop_status == 200:
-                                props_found = json.loads(prop_res.decode('utf-8'))
-                                if props_found:
-                                    matched_prop = props_found[0]
-                                    props.append(matched_prop)
-                                    # Atualiza a tarefa antiga para herdar o novo UUID
-                                    make_supabase_request(
-                                        self.headers,
-                                        f"/rest/v1/tarefas_comerciais?id=eq.{task['id']}",
-                                        "PATCH",
-                                        {"proposta_id": matched_prop["id"]}
-                                    )
-                                    task["proposta_id"] = matched_prop["id"]
-                                    print(f"[HEALED] Connected old task {task['id']} to new proposal {matched_prop['id']}")
-                                    sys.stdout.flush()
-                    except Exception as ex:
-                        print(f"[HEALED FAILED] {str(ex)}")
-                        sys.stdout.flush()
-
                 self.enrich_task_with_proposal(task, props)
                 updated_tasks.append(task)
 
@@ -1424,8 +1377,9 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         sys.stdout.write(log_line)
         sys.stdout.flush()
 
-class TCPServerReuse(socketserver.TCPServer):
+class TCPServerReuse(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
+    daemon_threads = True
 
 if __name__ == "__main__":
     print(f"Iniciando servidor customizado na pasta: {DIRECTORY}")

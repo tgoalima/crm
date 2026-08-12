@@ -189,21 +189,29 @@ const getStageWidth = (name) => {
   return '100%';
 };
 
-const ForecastFunnelPanel = ({ 
-  kanbanColumns, 
-  kanbanTasks, 
-  showGanhoCol, 
-  showPerdidoCol, 
-  showCongeladoCol, 
-  filterStage, 
+const ForecastFunnelPanel = ({
+  kanbanColumns,
+  kanbanTasks,
+  filterStage,
   setFilterStage,
+  filterFabricante,
+  setFilterFabricante,
   getTaskOptionId,
   getOpportunityValue,
   onCardClick
 }) => {
   // Guards defensivos: garante que arrays nunca sejam undefined
   const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];
-  const safeTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];
+  const allTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];
+
+  // Lista de fabricantes distintos presentes nos negócios ativos, para o filtro
+  const fabricantesDisponiveis = Array.from(
+    new Set(allTasks.flatMap(t => Array.isArray(t.fabricantes) ? t.fabricantes : []))
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  const safeTasks = filterFabricante
+    ? allTasks.filter(t => Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante))
+    : allTasks;
 
   const activeCols = safeColumns.filter(col => {
     if (!col || typeof col.name !== 'string') return false;
@@ -234,20 +242,35 @@ const ForecastFunnelPanel = ({
   const displayTitle = selectedStageObj ? selectedStageObj.name : "Total Funil";
 
   return (
-    <div className="px-6 py-5 border-b border-slate-200 bg-white flex-shrink-0">
-      <div className="text-xs font-bold text-slate-500 mb-4 uppercase tracking-wider flex items-center justify-between">
-        <span>Funil de Vendas &amp; Forecast</span>
-        {filterStage && (
-          <button 
-            onClick={() => setFilterStage(null)}
-            className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer"
-          >
-            Limpar Filtro
-          </button>
-        )}
+    <div className={`px-6 py-5 border-b border-slate-200 bg-white flex flex-col ${filterStage ? 'flex-1 min-h-0 overflow-hidden' : 'flex-shrink-0'}`}>
+      <div className="mb-4 flex items-center justify-between flex-shrink-0 flex-wrap gap-2">
+        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Funil de Vendas &amp; Forecast</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fabricante:</span>
+            <select
+              value={filterFabricante || ''}
+              onChange={(e) => setFilterFabricante(e.target.value || null)}
+              className="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer hover:bg-slate-200/70 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            >
+              <option value="">Todos</option>
+              {fabricantesDisponiveis.map(fab => (
+                <option key={fab} value={fab}>{fab}</option>
+              ))}
+            </select>
+          </div>
+          {(filterStage || filterFabricante) && (
+            <button
+              onClick={() => { setFilterStage(null); setFilterFabricante(null); }}
+              className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer"
+            >
+              Limpar Filtro
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 items-stretch w-full">
+      <div className={`flex flex-col lg:flex-row gap-6 items-stretch w-full ${filterStage ? 'flex-1 min-h-0' : ''}`}>
         {/* Left Column: Funil (e Card de Total quando estágio selecionado) */}
         <div className={`flex flex-col items-stretch space-y-3 flex-shrink-0 ${
           filterStage && selectedStageObj ? 'w-full lg:w-[38%]' : 'w-full lg:w-[65%]'
@@ -342,11 +365,10 @@ const ForecastFunnelPanel = ({
                 {selectedStageObj.count} negócios
               </span>
             </div>
-            <div 
-              className="flex-1 overflow-y-auto bg-slate-50/50 border border-slate-200 rounded-b-xl p-3 space-y-2.5"
-              style={{ height: 'calc(100vh - 280px)', minHeight: '440px' }}
+            <div
+              className="flex-1 min-h-0 overflow-y-auto bg-slate-50/50 border border-slate-200 rounded-b-xl p-3 space-y-2.5"
             >
-              {kanbanTasks
+              {safeTasks
                 .filter(t => getTaskOptionId(t, kanbanColumns) === filterStage)
                 .map(task => {
                   const dealValue = getOpportunityValue(task);
@@ -378,6 +400,337 @@ const ForecastFunnelPanel = ({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+};
+
+// Lista de negócios estilo "Negócios" do Agendor: busca + filtros por status,
+// etapa, responsável e período de fechamento, com colunas Cliente / Responsável /
+// Status / Etapa / Data de Fechamento / Valor.
+const DealsListView = ({
+  kanbanTasks,
+  kanbanColumns,
+  getTaskOptionId,
+  getOpportunityValue,
+  onCardClick,
+  statusFilter,
+  setStatusFilter,
+  onClose,
+}) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [etapaFilter, setEtapaFilter] = useState('');
+  const [responsavelFilter, setResponsavelFilter] = useState('');
+  const [periodPreset, setPeriodPreset] = useState('todo_historico');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [sortKey, setSortKey] = useState('data_fechamento');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const safeTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];
+  const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];
+
+  const getStatus = (task) => {
+    const optId = getTaskOptionId ? getTaskOptionId(task, safeColumns) : null;
+    const col = safeColumns.find(c => c.id === optId);
+    const name = (col?.name || '').toLowerCase();
+    if (name.includes('ganho')) return 'Ganho';
+    if (name.includes('perdido')) return 'Perdido';
+    if (name.includes('congelado')) return 'Congelado';
+    return 'Em andamento';
+  };
+
+  const getEtapaName = (task) => {
+    const optId = getTaskOptionId ? getTaskOptionId(task, safeColumns) : null;
+    const col = safeColumns.find(c => c.id === optId);
+    return col?.name || '—';
+  };
+
+  const formatDateDisplay = (dateStr) => {
+    if (!dateStr) return '—';
+    const clean = String(dateStr).substring(0, 10);
+    const parts = clean.split('-');
+    if (parts.length !== 3) return '—';
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  };
+
+  const etapasDisponiveis = safeColumns.map(c => c.name).filter(Boolean);
+  const responsaveisDisponiveis = Array.from(
+    new Set(safeTasks.map(t => t.responsavel_negocio).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  const getPeriodRange = () => {
+    if (periodPreset === 'todo_historico') return null;
+    const now = new Date();
+    const year = now.getFullYear();
+    const pad = (n) => String(n).padStart(2, '0');
+    if (periodPreset === 'ano_atual') {
+      return { start: `${year}-01-01`, end: `${year}-12-31` };
+    }
+    if (periodPreset === 'trimestre_atual') {
+      const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+      const qEndDate = new Date(year, qStartMonth + 3, 0);
+      return {
+        start: `${year}-${pad(qStartMonth + 1)}-01`,
+        end: `${year}-${pad(qEndDate.getMonth() + 1)}-${pad(qEndDate.getDate())}`,
+      };
+    }
+    if (periodPreset === 'personalizado' && customStart && customEnd) {
+      return { start: customStart, end: customEnd };
+    }
+    return null;
+  };
+
+  const periodRange = getPeriodRange();
+
+  const filtered = safeTasks.filter(task => {
+    if (statusFilter !== 'Todos' && getStatus(task) !== statusFilter) return false;
+    if (etapaFilter && getEtapaName(task) !== etapaFilter) return false;
+    if (responsavelFilter && task.responsavel_negocio !== responsavelFilter) return false;
+    if (searchTerm.trim() && !(task.name || '').toLowerCase().includes(searchTerm.toLowerCase().trim())) return false;
+    if (periodRange) {
+      const df = task.data_fechamento ? String(task.data_fechamento).substring(0, 10) : null;
+      if (!df) return false;
+      if (df < periodRange.start || df > periodRange.end) return false;
+    }
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    let valA, valB;
+    switch (sortKey) {
+      case 'cliente':
+        valA = (a.name || '').toLowerCase(); valB = (b.name || '').toLowerCase();
+        break;
+      case 'responsavel':
+        valA = (a.responsavel_negocio || '').toLowerCase(); valB = (b.responsavel_negocio || '').toLowerCase();
+        break;
+      case 'status':
+        valA = getStatus(a); valB = getStatus(b);
+        break;
+      case 'etapa':
+        valA = getEtapaName(a); valB = getEtapaName(b);
+        break;
+      case 'valor':
+        valA = getOpportunityValue(a) || 0; valB = getOpportunityValue(b) || 0;
+        break;
+      case 'data_fechamento':
+      default:
+        valA = a.data_fechamento || '';
+        valB = b.data_fechamento || '';
+        break;
+    }
+    if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+    if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const totalValor = filtered.reduce((acc, t) => acc + (getOpportunityValue(t) || 0), 0);
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
+  const SortHeader = ({ label, sortField }) => (
+    <th
+      onClick={() => handleSort(sortField)}
+      className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-indigo-600"
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sortKey === sortField && <span className="text-indigo-500">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+      </span>
+    </th>
+  );
+
+  const statusBadgeClass = (status) => {
+    switch (status) {
+      case 'Ganho': return 'bg-emerald-100 text-emerald-700';
+      case 'Perdido': return 'bg-rose-100 text-rose-700';
+      case 'Congelado': return 'bg-blue-100 text-blue-700';
+      default: return 'bg-amber-100 text-amber-700';
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 bg-white">
+      {/* Barra de filtros */}
+      <div className="px-6 py-4 border-b border-slate-200 flex flex-col gap-3 flex-shrink-0">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+            📋 Lista de Negócios
+            <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold normal-case tracking-normal">
+              {filtered.length} {filtered.length === 1 ? 'negócio' : 'negócios'}
+            </span>
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-xs text-slate-400 hover:text-slate-600 font-semibold cursor-pointer"
+          >
+            ✕ Fechar Lista
+          </button>
+        </div>
+
+        <div className="flex items-center flex-wrap gap-2">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por cliente / negócio..."
+            className="flex-1 min-w-[200px] rounded-lg bg-slate-100 border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white"
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-500"
+          >
+            <option value="Todos">Status: Todos</option>
+            <option value="Em andamento">Em andamento</option>
+            <option value="Ganho">Ganho</option>
+            <option value="Perdido">Perdido</option>
+            <option value="Congelado">Congelado</option>
+          </select>
+
+          <select
+            value={etapaFilter}
+            onChange={(e) => setEtapaFilter(e.target.value)}
+            className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">Etapa: Todas</option>
+            {etapasDisponiveis.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+
+          <select
+            value={responsavelFilter}
+            onChange={(e) => setResponsavelFilter(e.target.value)}
+            className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">Responsável: Todos</option>
+            {responsaveisDisponiveis.map(nome => (
+              <option key={nome} value={nome}>{nome}</option>
+            ))}
+          </select>
+
+          <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs font-bold">
+            {[
+              { key: 'ano_atual', label: 'Ano Atual' },
+              { key: 'trimestre_atual', label: 'Trimestre Atual' },
+              { key: 'todo_historico', label: 'Todo Histórico' },
+              { key: 'personalizado', label: 'Personalizar' },
+            ].map(opt => (
+              <button
+                key={opt.key}
+                onClick={() => setPeriodPreset(opt.key)}
+                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                  periodPreset === opt.key ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200/70'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {periodPreset === 'personalizado' && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+              />
+              <span className="text-slate-400 text-xs">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          )}
+
+          {(searchTerm || statusFilter !== 'Todos' || etapaFilter || responsavelFilter || periodPreset !== 'todo_historico') && (
+            <button
+              onClick={() => {
+                setSearchTerm(''); setStatusFilter('Todos'); setEtapaFilter('');
+                setResponsavelFilter(''); setPeriodPreset('todo_historico');
+                setCustomStart(''); setCustomEnd('');
+              }}
+              className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold underline cursor-pointer"
+            >
+              Limpar Filtros
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabela */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <table className="w-full border-collapse">
+          <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+            <tr>
+              <SortHeader label="Cliente" sortField="cliente" />
+              <SortHeader label="Responsável" sortField="responsavel" />
+              <SortHeader label="Status" sortField="status" />
+              <SortHeader label="Etapa" sortField="etapa" />
+              <SortHeader label="Data Fechamento" sortField="data_fechamento" />
+              <th className="text-right px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-indigo-600" onClick={() => handleSort('valor')}>
+                <span className="inline-flex items-center gap-1">
+                  Valor
+                  {sortKey === 'valor' && <span className="text-indigo-500">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                </span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(task => {
+              const status = getStatus(task);
+              const dealValue = getOpportunityValue(task);
+              return (
+                <tr
+                  key={task.id}
+                  onClick={() => onCardClick && onCardClick(task)}
+                  className="border-b border-slate-100 hover:bg-indigo-50/50 cursor-pointer transition-colors"
+                >
+                  <td className="px-4 py-2.5 text-sm font-semibold text-slate-800 max-w-xs truncate">{task.name}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{task.responsavel_negocio || 'Sem responsável'}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusBadgeClass(status)}`}>{status}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{getEtapaName(task)}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{formatDateDisplay(task.data_fechamento)}</td>
+                  <td className="px-4 py-2.5 text-sm font-bold text-right text-emerald-600">
+                    {dealValue ? `R$ ${Number(dealValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center py-12 text-sm text-slate-400">
+                  Nenhum negócio encontrado com os filtros atuais.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Rodapé com total */}
+      <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between flex-shrink-0">
+        <span className="text-xs font-semibold text-slate-500">
+          {filtered.length} {filtered.length === 1 ? 'negócio listado' : 'negócios listados'}
+        </span>
+        <span className="text-sm font-black text-emerald-600">
+          Total: R$ {totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+        </span>
       </div>
     </div>
   );
@@ -571,15 +924,17 @@ function App() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [drawerTab, setDrawerTab] = useState('details'); // 'details' | 'budget'
   const [canDrag, setCanDrag] = useState(false);
-  const [showGanhoCol, setShowGanhoCol] = useState(false);
-  const [showPerdidoCol, setShowPerdidoCol] = useState(false);
-  const [showCongeladoCol, setShowCongeladoCol] = useState(false);
   const [sortBy, setSortBy] = useState(() => {
     return localStorage.getItem('crm_sort_order') || 'default';
   });
   const [supabaseProposalsList, setSupabaseProposalsList] = useState([]);
   const [commercialTasks, setCommercialTasks] = useState([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  // Marca se a aba Tarefas Comerciais já carregou alguma vez nesta sessão. Não usamos
+  // commercialTasks.length > 0 para decidir isso porque a tabela pode legitimamente estar
+  // vazia (0 tarefas) — nesse caso o array nunca fica "> 0" e a tela mostrava o spinner de
+  // carregamento cheio toda vez que se voltava para a aba, mesmo já tendo carregado antes.
+  const hasLoadedTasksOnceRef = useRef(false);
   const [editingTask, setEditingTask] = useState(null);
   const [tasksFilterAssignee, setTasksFilterAssignee] = useState('all');
   const [tasksPeriodFilter, setTasksPeriodFilter] = useState('all');
@@ -594,6 +949,9 @@ function App() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
   const [filterStage, setFilterStage] = useState(null);
+  const [filterFabricante, setFilterFabricante] = useState(null);
+  const [showDealsList, setShowDealsList] = useState(false);
+  const [dealsListStatus, setDealsListStatus] = useState('Todos');
   const [hasTime, setHasTime] = useState(false);
   const [newTaskTime, setNewTaskTime] = useState('09:00');
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
@@ -660,17 +1018,18 @@ function App() {
   
   // Filtros de período e dados do Painel Comercial com persistência em localStorage
   const [startDate, setStartDate] = useState(() => {
-    return localStorage.getItem('spa_selected_start') || '2026-01-01';
+    return localStorage.getItem('spa_selected_start') || `${new Date().getFullYear()}-01-01`;
   });
   const [endDate, setEndDate] = useState(() => {
-    return localStorage.getItem('spa_selected_end') || '2026-12-31';
+    return localStorage.getItem('spa_selected_end') || `${new Date().getFullYear()}-12-31`;
   });
   const [commercialData, setCommercialData] = useState([]);
+  const [showCustomRange, setShowCustomRange] = useState(false);
 
   // Ref que mantém o período ativo sempre atualizado para o auto-polling
   const currentDateFilterRef = useRef({
-    start: localStorage.getItem('spa_selected_start') || '2026-01-01',
-    end: localStorage.getItem('spa_selected_end') || '2026-12-31',
+    start: localStorage.getItem('spa_selected_start') || `${new Date().getFullYear()}-01-01`,
+    end: localStorage.getItem('spa_selected_end') || `${new Date().getFullYear()}-12-31`,
     compStart: '',
     compEnd: ''
   });
@@ -777,7 +1136,16 @@ function App() {
   }, [vendedores]);
   const [currentProposta, setCurrentProposta] = useState(null);
   const [itens, setItens] = useState([]);
-  
+  // Ref sempre atualizada com o valor mais recente de `itens`, para ser lida dentro do
+  // setInterval de auto-polling (useEffect com deps [session, dbConnected, clickupTaskId,
+  // supabaseClient]): esse efeito não é recriado enquanto o usuário digita itens em uma
+  // mesma proposta, então a closure do intervalo ficaria presa no `itens` de quando o
+  // efeito rodou pela última vez (array vazio) em vez do valor atual com itens não salvos.
+  const itensRef = useRef([]);
+  useEffect(() => {
+    itensRef.current = itens;
+  }, [itens]);
+
   // Edição no Painel de Gestão (Produtos e Distribuidores)
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingDistributor, setEditingDistributor] = useState(null);
@@ -904,7 +1272,7 @@ function App() {
     const wonItems = (commercialData || []).filter(item => {
       const prop = Array.isArray(item.propostas) ? item.propostas[0] : item.propostas;
       const sit = prop?.situacao;
-      if (!sit) return false;
+      if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
       return s === 'ganho' || s === 'selecionada';
     });
@@ -913,11 +1281,7 @@ function App() {
     itemsToProcess.forEach(item => {
       const value = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
       const distObj = Array.isArray(item.distribuidores) ? item.distribuidores[0] : item.distribuidores;
-      let distName = (distObj?.nome || 'NÃO INFORMADO').trim().toUpperCase();
-      if (distName === 'SUPRIMÁTICA') distName = 'SUPRIMATICA';
-      if (distName === '4SERVER' || distName === '4SERVERS') distName = '4SERVERS';
-      if (distName === 'TD SYNNEX' || distName === 'SYNNEX') distName = 'TD SYNNEX';
-      if (distName === 'TASK ID' || distName === 'TASK NAME') return;
+      const distName = (distObj?.nome || 'NÃO INFORMADO').trim().toUpperCase();
 
       if (selectedDistributorFilter === 'all' || distName.toLowerCase() === selectedDistributorFilter.trim().toLowerCase()) {
         totals[distName] = (totals[distName] || 0) + value;
@@ -940,7 +1304,7 @@ function App() {
     const wonItems = (commercialData || []).filter(item => {
       const prop = Array.isArray(item.propostas) ? item.propostas[0] : item.propostas;
       const sit = prop?.situacao;
-      if (!sit) return false;
+      if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
       return s === 'ganho' || s === 'selecionada';
     });
@@ -949,53 +1313,8 @@ function App() {
     itemsToProcess.forEach(item => {
       const value = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
       const prodObj = Array.isArray(item.produtos) ? item.produtos[0] : item.produtos;
-      const rawFab = (prodObj?.fabricante || '').trim().toUpperCase();
-      const prodNome = (prodObj?.nome || '').trim().toUpperCase();
-
-      let fabName = rawFab;
-      if (rawFab === 'DELL' || rawFab === 'DELL EMC' || prodNome.includes('DELL')) {
-        fabName = 'DELL EMC';
-      } else if (rawFab === 'FORTINET' || prodNome.includes('FORTINET') || prodNome === 'FIREWALL') {
-        fabName = 'FORTINET';
-      } else if (rawFab.includes('SUPRIMATICA') || rawFab.includes('SUPRIMÁTICA') || prodNome.includes('SSU') || prodNome.includes('SUPRIMATICA')) {
-        fabName = 'SUPRIMÁTICA SERVIÇOS';
-      } else if (rawFab === 'BROADCOM' || prodNome.includes('VMWARE') || rawFab === 'VMWARE') {
-        fabName = 'VMWARE';
-      } else if (rawFab === 'MICROSOFT' || prodNome.includes('MICROSOFT')) {
-        fabName = 'MICROSOFT';
-      } else if (rawFab === 'VEEAM' || prodNome.includes('VEEAM')) {
-        fabName = 'VEEAM';
-      } else if (rawFab === '4SERVERS' || prodNome.includes('UPGRADE STORAGE') || prodNome.includes('UPGRADE SERVIDOR')) {
-        fabName = '4SERVERS';
-      } else if (rawFab === 'PARK PLACE' || prodNome.includes('PARK PLACE')) {
-        fabName = 'PARK PLACE';
-      } else if (rawFab === 'LENOVO' || rawFab === 'LENONOVO' || prodNome.includes('LENOVO')) {
-        fabName = 'LENOVO';
-      } else if (rawFab === 'ARUBA' || prodNome.includes('ARUBA')) {
-        fabName = 'ARUBA';
-      } else if (rawFab === 'AWS' || prodNome.includes('AWS')) {
-        fabName = 'AWS';
-      } else if (rawFab === 'HPE' || prodNome.includes('HPE')) {
-        fabName = 'HPE';
-      } else if (rawFab === 'NUTANIX' || prodNome.includes('NUTANIX')) {
-        fabName = 'NUTANIX';
-      } else if (rawFab === 'APC' || prodNome.includes('APC')) {
-        fabName = 'APC';
-      } else if (rawFab === 'RED HAT' || prodNome.includes('RED HAT')) {
-        fabName = 'RED HAT';
-      } else if (rawFab === 'FUJITSU' || rawFab === '86AGG6J4Z') {
-        fabName = 'FUJITSU';
-      } else if (rawFab === 'LEGACY TI' || rawFab === '86AGG6J56') {
-        fabName = 'LEGACY TI';
-      } else if (rawFab === 'OMNISSA' || prodNome.includes('OMNISSA')) {
-        fabName = 'OMNISSA';
-      } else if (rawFab === 'AZURE' || prodNome.includes('AZURE')) {
-        fabName = 'AZURE';
-      } else if (rawFab === 'IBM' || prodNome.includes('IBM')) {
-        fabName = 'IBM';
-      } else if (rawFab === 'TASK ID' || rawFab === 'TASK NAME' || !rawFab) {
-        return;
-      }
+      const fabName = (prodObj?.fabricante || '').trim().toUpperCase();
+      if (!fabName) return;
 
       if (selectedManufacturerFilter === 'all' || fabName.toLowerCase() === selectedManufacturerFilter.trim().toLowerCase()) {
         totals[fabName] = (totals[fabName] || 0) + value;
@@ -1296,79 +1615,117 @@ function App() {
     }
   };
 
+  // Busca uma página de tarefas do ClickUp; retorna { tasks, lastPage }
+  const fetchClickUpTaskPage = async (page) => {
+    const res = await fetch(`/clickup-api/list/${TARGET_LIST_ID}/task?include_closed=true&page=${page}`);
+    if (!res.ok) return { tasks: [], lastPage: true };
+    const data = await res.json();
+    const tasks = data.tasks || [];
+    return { tasks, lastPage: data.last_page === true || tasks.length < 100 };
+  };
+
+  // Busca todas as páginas de tarefas do ClickUp em lotes paralelos (em vez de uma
+  // página por vez): busca a página 0 para saber se há mais, depois dispara um lote
+  // de páginas simultâneas até encontrar last_page, ao invés de esperar cada página
+  // terminar para pedir a próxima.
+  const fetchAllClickUpTasks = async () => {
+    const first = await fetchClickUpTaskPage(0);
+    let allTasks = [...first.tasks];
+    if (first.lastPage) return allTasks;
+
+    let nextPage = 1;
+    let done = false;
+    const BATCH_SIZE = 10;
+    while (!done) {
+      const batchPages = Array.from({ length: BATCH_SIZE }, (_, i) => nextPage + i);
+      const results = await Promise.all(batchPages.map(p => fetchClickUpTaskPage(p)));
+      for (const r of results) {
+        allTasks = allTasks.concat(r.tasks);
+        if (r.lastPage) done = true;
+      }
+      nextPage += BATCH_SIZE;
+      if (results.every(r => r.tasks.length === 0)) done = true;
+    }
+    return allTasks;
+  };
+
   const fetchKanbanData = async (silent = false) => {
     if (kanbanTasks.length === 0 && !silent) {
       setLoadingKanban(true);
     }
     try {
-      // 1. Carregar todas as propostas do Supabase
+      // 1. Carregar propostas do Supabase, colunas do ClickUp e tarefas do ClickUp
+      // em paralelo (antes eram 3 chamadas em sequência, uma esperando a outra).
+      const propsPromise = supabaseClient
+        ? supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, criado_por, data_fechamento')
+        : Promise.resolve({ data: [], error: null });
+
+      const itensPromise = supabaseClient
+        ? supabaseClient.from('itens_proposta').select('proposta_id, produtos(fabricante)')
+        : Promise.resolve({ data: [], error: null });
+
+      const fieldsPromise = fetch(`/clickup-api/list/${TARGET_LIST_ID}/field`)
+        .then(res => (res.ok ? res.json() : null))
+        .catch(() => null);
+
+      const [{ data: props, error: propsErr }, { data: itensData, error: itensErr }, fieldsData, allTasks] = await Promise.all([
+        propsPromise,
+        itensPromise,
+        fieldsPromise,
+        fetchAllClickUpTasks(),
+      ]);
+
+      // Índice proposta_id -> lista de fabricantes distintos dos itens da proposta
+      const fabricantesByPropId = new Map();
+      if (!itensErr && itensData) {
+        for (const item of itensData) {
+          const prodObj = Array.isArray(item.produtos) ? item.produtos[0] : item.produtos;
+          const fab = (prodObj?.fabricante || '').trim();
+          if (!fab || !item.proposta_id) continue;
+          if (!fabricantesByPropId.has(item.proposta_id)) fabricantesByPropId.set(item.proposta_id, new Set());
+          fabricantesByPropId.get(item.proposta_id).add(fab);
+        }
+      }
+
       let propsList = [];
-      if (supabaseClient) {
-        const { data: props, error: propsErr } = await supabaseClient
-          .from('propostas')
-          .select('clickup_negocio_id, total_proposta, situacao, criado_por');
-        if (!propsErr && props) {
-          propsList = props;
-          setSupabaseProposalsList(props);
+      if (!propsErr && props) {
+        propsList = props;
+        setSupabaseProposalsList(props);
+      }
+
+      if (fieldsData && fieldsData.fields) {
+        const stageField = fieldsData.fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63');
+        if (stageField && stageField.type_config && stageField.type_config.options) {
+          setKanbanColumns(stageField.type_config.options);
         }
       }
 
-      // 2. Carregar colunas do ClickUp
-      const fieldsRes = await fetch(`/clickup-api/list/${TARGET_LIST_ID}/field`);
-      let columnsData = [];
-      if (fieldsRes.ok) {
-        const fieldsData = await fieldsRes.json();
-        if (fieldsData.fields) {
-          const stageField = fieldsData.fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63');
-          if (stageField && stageField.type_config && stageField.type_config.options) {
-            columnsData = stageField.type_config.options;
-            setKanbanColumns(stageField.type_config.options);
-          }
-        }
+      // 2. Índice das propostas por clickup_negocio_id (uma vez, O(m)) em vez de
+      // filtrar a lista inteira de propostas para cada uma das tarefas (O(n*m)).
+      const propsByClickupId = new Map();
+      for (const p of propsList) {
+        const pClean = String(p.clickup_negocio_id || '').replace('#', '').trim();
+        if (!pClean) continue;
+        if (!propsByClickupId.has(pClean)) propsByClickupId.set(pClean, []);
+        propsByClickupId.get(pClean).push(p);
       }
 
-      // 3. Buscar todas as tarefas do ClickUp
-      let allTasks = [];
-      let page = 0;
-      let hasMore = true;
-      while (hasMore) {
-        const tasksRes = await fetch(`/clickup-api/list/${TARGET_LIST_ID}/task?include_closed=true&page=${page}`);
-        if (tasksRes.ok) {
-          const tasksData = await tasksRes.json();
-          if (tasksData.tasks && tasksData.tasks.length > 0) {
-            allTasks = [...allTasks, ...tasksData.tasks];
-            if (tasksData.last_page === true || tasksData.tasks.length < 100) {
-              hasMore = false;
-            } else {
-              page++;
-            }
-          } else {
-            hasMore = false;
-          }
-        } else {
-          hasMore = false;
-        }
-      }
-
-      // 4. Enriquecer tarefas com responsável e valor da proposta do Supabase
+      // 3. Enriquecer tarefas com responsável e valor da proposta do Supabase
       const enrichedTasks = allTasks.map(t => {
         const idAlpha = String(t.id || '').replace('#', '').trim();
         const idNumeric = String(t.custom_id || t.task_id || '').replace('#', '').trim();
 
-        const propMatchesTask = (p) => {
-          const pClean = String(p.clickup_negocio_id || '').replace('#', '').trim();
-          if (!pClean) return false;
-          if (pClean === idAlpha) return true;
-          if (idNumeric && pClean === idNumeric) return true;
-          if (idAlpha && pClean === '#' + idAlpha) return true;
-          if (idNumeric && pClean === '#' + idNumeric) return true;
-          return false;
-        };
-
-        const matchedProps = propsList.filter(propMatchesTask);
+        const matchedProps = [
+          ...(propsByClickupId.get(idAlpha) || []),
+          ...(idNumeric ? propsByClickupId.get(idNumeric) || [] : []),
+          ...(idAlpha ? propsByClickupId.get('#' + idAlpha) || [] : []),
+          ...(idNumeric ? propsByClickupId.get('#' + idNumeric) || [] : []),
+        ];
 
         let resp = '';
         let supabaseDealValue = null;
+        let fabricantes = [];
+        let dataFechamento = null;
 
         if (matchedProps.length > 0) {
           const best =
@@ -1381,13 +1738,15 @@ function App() {
           resp = best.criado_por || '';
           const v = parseFloat(best.total_proposta);
           if (!isNaN(v)) supabaseDealValue = v;
+          fabricantes = Array.from(fabricantesByPropId.get(best.id) || []);
+          dataFechamento = best.data_fechamento || null;
         }
 
         if (t.assignees && t.assignees.length > 0) {
           resp = t.assignees[0].username || t.assignees[0].email || resp;
         }
 
-        return { ...t, responsavel_negocio: resp, supabase_deal_value: supabaseDealValue };
+        return { ...t, responsavel_negocio: resp, supabase_deal_value: supabaseDealValue, fabricantes, data_fechamento: dataFechamento };
       });
 
       setKanbanTasks(enrichedTasks);
@@ -1663,7 +2022,15 @@ function App() {
       if (nameParam.includes('{{') || nameParam.includes('}}')) {
         nameParam = '';
       }
-      const decodedName = nameParam ? decodeURIComponent(nameParam) : (clickupName || `Projeto CRM #${clickupTaskId}`);
+      const fallbackName = `Projeto CRM #${clickupTaskId}`;
+      // Se a busca do nome real no ClickUp não retornou nada desta vez (falha transitória,
+      // rede lenta etc.) mas já tínhamos um nome de verdade carregado antes, mantém o nome
+      // já exibido em vez de trocar pelo texto genérico — evita o "flash" para o fallback
+      // a cada nova chamada de fetchProjectContext (inclusive as do polling em segundo plano).
+      const hasGoodNameAlready = projectContext.name && projectContext.name !== fallbackName;
+      const decodedName = nameParam
+        ? decodeURIComponent(nameParam)
+        : (clickupName || (hasGoodNameAlready ? projectContext.name : fallbackName));
 
       setProjectContext({
         name: decodedName,
@@ -1671,10 +2038,11 @@ function App() {
       });
     } catch (err) {
       console.error(err);
-      setProjectContext({
-        name: `Projeto CRM #${clickupTaskId}`,
-        proposal_number: 'Nova vA'
-      });
+      setProjectContext(prev => (
+        prev.name && prev.name !== `Projeto CRM #${clickupTaskId}`
+          ? prev
+          : { name: `Projeto CRM #${clickupTaskId}`, proposal_number: 'Nova vA' }
+      ));
     }
   };
 
@@ -2135,7 +2503,7 @@ function App() {
 
   useEffect(() => {
     if (activeTab === 'tasks' && supabaseClient) {
-      const isSilent = commercialTasks && commercialTasks.length > 0;
+      const isSilent = hasLoadedTasksOnceRef.current;
       if (!isSilent) {
         setLoadingTasks(true);
       }
@@ -2144,6 +2512,7 @@ function App() {
         fetchKanbanData(),
         loadVendedores()
       ]).finally(() => {
+        hasLoadedTasksOnceRef.current = true;
         setLoadingTasks(false);
       });
     }
@@ -2157,40 +2526,111 @@ function App() {
     if (!dateStr) return null;
     const parts = dateStr.substring(0, 10).split('-');
     if (parts.length !== 3) return null;
-    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
   };
 
-  const generateMonthlyTimeline = (start, end, wonProps) => {
-    const labels = [];
-    const values = [];
+  // Calcula início/fim do trimestre atual (e do mesmo trimestre no ano anterior, para comparação)
+  const getCurrentQuarterRange = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+    const qEndDate = new Date(year, qStartMonth + 3, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    return {
+      start: `${year}-${pad(qStartMonth + 1)}-01`,
+      end: `${year}-${pad(qEndDate.getMonth() + 1)}-${pad(qEndDate.getDate())}`,
+      compStart: `${year - 1}-${pad(qStartMonth + 1)}-01`,
+      compEnd: `${year - 1}-${pad(qEndDate.getMonth() + 1)}-${pad(qEndDate.getDate())}`
+    };
+  };
+
+  const generateMonthlyTimeline = (start, end, wonCurrent, compStart, compEnd, wonComp) => {
     const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    
+    // Identificar se a comparação é de 1 ano completo (ex: 2026 vs 2025)
+    const isSingleYearCurrent = start && end && start.getFullYear() === end.getFullYear();
+    const isSingleYearComp = compStart && compEnd && compStart.getFullYear() === compEnd.getFullYear();
+    
+    let labels = [];
+    let currentValues = [];
+    let compValues = [];
+    let currentRawValues = [];
+    let compRawValues = [];
 
-    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    const last = new Date(end.getFullYear(), end.getMonth(), 1);
+    const currentYear = start.getFullYear();
+    const compYear = compStart ? compStart.getFullYear() : null;
 
-    let count = 0;
-    while (cur <= last && count < 60) {
-      count++;
-      const y = cur.getFullYear();
-      const m = cur.getMonth();
-      const label = `${monthNames[m]} ${String(y).slice(-2)}`;
-      labels.push(label);
+    if (isSingleYearCurrent && (isSingleYearComp || !compStart)) {
+      // 12 meses corridos de Jan a Dez
+      labels = monthNames.slice();
+      
+      for (let m = 0; m < 12; m++) {
+        // Soma do mês no ano atual
+        const sumCurrent = (wonCurrent || []).reduce((acc, p) => {
+          const dateToUse = p.data_fechamento || p.created_at;
+          if (!dateToUse) return acc;
+          const pd = parseLocalDate(dateToUse);
+          if (pd && pd.getFullYear() === currentYear && pd.getMonth() === m) {
+            return acc + (parseFloat(p.total_proposta) || 0);
+          }
+          return acc;
+        }, 0);
 
-      const sumMonth = wonProps.reduce((acc, p) => {
-        const dateToUse = p.data_fechamento || p.created_at;
-        if (!dateToUse) return acc;
-        const pd = parseLocalDate(dateToUse);
-        if (pd && pd.getFullYear() === y && pd.getMonth() === m) {
-          return acc + (parseFloat(p.total_proposta) || 0);
+        currentRawValues.push(sumCurrent);
+        currentValues.push(sumCurrent / 1000000);
+
+        // Soma do mês no ano comparativo
+        if (compStart && compEnd && wonComp) {
+          const sumComp = wonComp.reduce((acc, p) => {
+            const dateToUse = p.data_fechamento || p.created_at;
+            if (!dateToUse) return acc;
+            const pd = parseLocalDate(dateToUse);
+            if (pd && pd.getFullYear() === compYear && pd.getMonth() === m) {
+              return acc + (parseFloat(p.total_proposta) || 0);
+            }
+            return acc;
+          }, 0);
+          compRawValues.push(sumComp);
+          compValues.push(sumComp / 1000000);
         }
-        return acc;
-      }, 0);
+      }
+    } else {
+      // Intervalo customizado dinâmico
+      let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+      const last = new Date(end.getFullYear(), end.getMonth(), 1);
+      let count = 0;
+      while (cur <= last && count < 60) {
+        count++;
+        const y = cur.getFullYear();
+        const m = cur.getMonth();
+        const label = `${monthNames[m]} ${String(y).slice(-2)}`;
+        labels.push(label);
 
-      values.push(sumMonth / 1000000); // em milhões
-      cur.setMonth(cur.getMonth() + 1);
+        const sumMonth = (wonCurrent || []).reduce((acc, p) => {
+          const dateToUse = p.data_fechamento || p.created_at;
+          if (!dateToUse) return acc;
+          const pd = parseLocalDate(dateToUse);
+          if (pd && pd.getFullYear() === y && pd.getMonth() === m) {
+            return acc + (parseFloat(p.total_proposta) || 0);
+          }
+          return acc;
+        }, 0);
+
+        currentRawValues.push(sumMonth);
+        currentValues.push(sumMonth / 1000000);
+        cur.setMonth(cur.getMonth() + 1);
+      }
     }
 
-    return { labels, values };
+    return { 
+      labels, 
+      values: currentValues, 
+      compValues: compValues.length > 0 ? compValues : null,
+      currentRawValues,
+      compRawValues: compRawValues.length > 0 ? compRawValues : null,
+      currentYearLabel: String(currentYear),
+      compYearLabel: compYear ? String(compYear) : null
+    };
   };
 
   // Motor síncrono de filtragem em memória - Execução instantânea (< 1ms)
@@ -2204,6 +2644,8 @@ function App() {
     try {
       localStorage.setItem('spa_selected_start', startStr);
       localStorage.setItem('spa_selected_end', endStr);
+      if (compStartStr !== undefined) localStorage.setItem('spa_selected_comp_start', compStartStr);
+      if (compEndStr !== undefined) localStorage.setItem('spa_selected_comp_end', compEndStr);
     } catch (e) {}
 
     setStartDate(startStr);
@@ -2220,7 +2662,7 @@ function App() {
 
     // 1. Filtrar propostas do período
     const isWonProp = (p) => {
-      if (!p || !p.situacao) return false;
+      if (!p || !p.situacao || !p.data_fechamento) return false;
       const s = p.situacao.trim().toLowerCase();
       return s === 'ganho' || s === 'selecionada';
     };
@@ -2290,17 +2732,29 @@ function App() {
     });
     const avgCycleDaysCurrent = cycleCount > 0 ? Math.round(totalCycleDays / cycleCount) : defaultCycle;
 
-    // Timeline Sazonal
-    const { labels: seasonalityLabels, values: seasonalityValues } = generateMonthlyTimeline(start, end, wonCurrent);
+    // Comparativos (Delta e YoY)
+    let wonComp = [];
+    let lostComp = [];
+    let wonCountComp = 0;
+    let wonValueComp = 0;
+    let lostCountComp = 0;
+    let lostValueComp = 0;
+    let convRateComp = 0;
+    let ticketMedioComp = 0;
+    let avgCycleDaysComp = 0;
 
-    // Comparativos (Delta)
     let wonQtyDiff = null;
+    let wonQtyPct = null;
     let wonValDiff = null;
+    let wonValPct = null;
     let avgCycleDaysDiff = null;
     let ticketMedioDiff = null;
+    let ticketMedioPct = null;
     let lostQtyDiff = null;
     let lostValDiff = null;
     let convRateDiff = null;
+    let compLabel = null;
+    let currentLabel = String(start.getFullYear());
 
     const compStart = parseLocalDate(compStartStr);
     const compEnd = parseLocalDate(compEndStr);
@@ -2313,47 +2767,95 @@ function App() {
         return d && d >= compStart && d <= compEnd;
       });
 
-      const wonComp = compProps.filter(isWonProp);
-      const lostComp = compProps.filter(isLostProp);
+      wonComp = compProps.filter(isWonProp);
+      lostComp = compProps.filter(isLostProp);
 
-      const wonCountComp = wonComp.length;
-      const wonValueComp = wonComp.reduce((acc, p) => acc + (parseFloat(p.total_proposta) || 0), 0);
-      const lostCountComp = lostComp.length;
-      const lostValueComp = lostComp.reduce((acc, p) => acc + (parseFloat(p.total_proposta) || 0), 0);
+      wonCountComp = wonComp.length;
+      wonValueComp = wonComp.reduce((acc, p) => acc + (parseFloat(p.total_proposta) || 0), 0);
+      lostCountComp = lostComp.length;
+      lostValueComp = lostComp.reduce((acc, p) => acc + (parseFloat(p.total_proposta) || 0), 0);
       const closedCountComp = wonCountComp + lostCountComp;
-      const convRateComp = closedCountComp > 0 ? (wonCountComp / closedCountComp) * 100 : (wonCountComp > 0 ? 100 : 0);
-      const ticketMedioComp = wonCountComp > 0 ? wonValueComp / wonCountComp : 0;
+      convRateComp = closedCountComp > 0 ? (wonCountComp / closedCountComp) * 100 : (wonCountComp > 0 ? 100 : 0);
+      ticketMedioComp = wonCountComp > 0 ? wonValueComp / wonCountComp : 0;
+
+      // Ciclo Médio do período comparativo
+      let defaultCompCycle = 58;
+      const cy = compStart.getFullYear();
+      if (cy === 2023) defaultCompCycle = 21;
+      else if (cy === 2024) defaultCompCycle = 62;
+      else if (cy === 2025) defaultCompCycle = 82;
+      else if (cy === 2026) defaultCompCycle = 86;
+
+      let totalCompCycleDays = 0;
+      let compCycleCount = 0;
+      wonComp.forEach(p => {
+        if (p.data_inicio && p.data_fechamento) {
+          const ds = parseLocalDate(p.data_inicio);
+          const dc = parseLocalDate(p.data_fechamento);
+          if (ds && dc) {
+            const diff = Math.round(Math.abs(dc - ds) / (1000 * 60 * 60 * 24));
+            if (diff > 0 && diff < 365) {
+              totalCompCycleDays += diff;
+              compCycleCount++;
+            }
+          }
+        }
+      });
+      avgCycleDaysComp = compCycleCount > 0 ? Math.round(totalCompCycleDays / compCycleCount) : defaultCompCycle;
 
       wonQtyDiff = wonCountCurrent - wonCountComp;
+      wonQtyPct = wonCountComp > 0 ? ((wonCountCurrent - wonCountComp) / wonCountComp) * 100 : (wonCountCurrent > 0 ? 100 : 0);
       wonValDiff = wonValueCurrent - wonValueComp;
+      wonValPct = wonValueComp > 0 ? ((wonValueCurrent - wonValueComp) / wonValueComp) * 100 : (wonValueCurrent > 0 ? 100 : 0);
       ticketMedioDiff = ticketMedioCurrent - ticketMedioComp;
+      ticketMedioPct = ticketMedioComp > 0 ? ((ticketMedioCurrent - ticketMedioComp) / ticketMedioComp) * 100 : (ticketMedioCurrent > 0 ? 100 : 0);
+      avgCycleDaysDiff = avgCycleDaysCurrent - avgCycleDaysComp;
       lostQtyDiff = lostCountCurrent - lostCountComp;
       lostValDiff = lostValueCurrent - lostValueComp;
       convRateDiff = convRateCurrent - convRateComp;
+      compLabel = compStart.getFullYear() === compEnd.getFullYear() ? String(compStart.getFullYear()) : 'Período Comp.';
     }
+
+    // Timeline Sazonal (geração de 1 ou 2 séries)
+    const timelineData = generateMonthlyTimeline(start, end, wonCurrent, compStart, compEnd, wonComp);
 
     setBiMetrics({
       wonCount: wonCountCurrent,
       wonValue: wonValueCurrent,
+      wonCountComp,
+      wonValueComp,
       avgCycleDays: avgCycleDaysCurrent,
+      avgCycleDaysComp,
       ticketMedio: ticketMedioCurrent,
+      ticketMedioComp,
       wonQtyDiff,
+      wonQtyPct,
       wonValDiff,
+      wonValPct,
       avgCycleDaysDiff,
       ticketMedioDiff,
+      ticketMedioPct,
       lostCount: lostCountCurrent,
+      lostCountComp,
       lostValue: lostValueCurrent,
+      lostValueComp,
       lostQtyDiff,
       lostValDiff,
       convRate: convRateCurrent,
+      convRateComp,
       convRateDiff,
-      seasonalityLabels,
-      seasonalityValues
+      compLabel,
+      currentLabel,
+      seasonalityLabels: timelineData.labels,
+      seasonalityValues: timelineData.values,
+      seasonalityCompValues: timelineData.compValues,
+      currentYearLabel: timelineData.currentYearLabel,
+      compYearLabel: timelineData.compYearLabel
     });
   };
 
   // Carregar dados brutos para o painel de relatórios (uma única busca paralela)
-  const loadDashboardData = async (client = supabaseClient, silent = false, forceRefresh = false) => {
+  const loadDashboardData = async (client = supabaseClient, silent = false, forceRefresh = true) => {
     if (!client) return;
     if (rawProposalsRef.current.length === 0 && !silent) {
       setLoadingDashboard(true);
@@ -2397,7 +2899,7 @@ function App() {
     const wonItems = commercialData.filter(item => {
       const prop = Array.isArray(item.propostas) ? item.propostas[0] : item.propostas;
       const sit = prop?.situacao;
-      if (!sit) return false;
+      if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
       return s === 'ganho' || s === 'selecionada';
     });
@@ -2587,46 +3089,112 @@ function App() {
       });
     }
 
-    // Criar Gráfico D (Resumo Sazonal de Vendas)
+    // Criar Gráfico D (Resumo Sazonal de Vendas - Comparativo de Séries)
     const seasonCtx = seasonalityCanvasRef.current?.getContext('2d');
     if (seasonCtx) {
       const seasonLabels = biMetrics.seasonalityLabels && biMetrics.seasonalityLabels.length > 0
         ? biMetrics.seasonalityLabels
-        : ['Jan 26', 'Fev 26', 'Mar 26', 'Abr 26', 'Mai 26', 'Jun 26', 'Jul 26'];
+        : ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
       const seasonValues = biMetrics.seasonalityValues && biMetrics.seasonalityValues.length > 0
         ? biMetrics.seasonalityValues
-        : [0, 0, 0, 0, 0, 0, 0];
+        : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      const seasonCompValues = biMetrics.seasonalityCompValues;
+      
+      const currentYearLabel = biMetrics.currentYearLabel || (startDate ? startDate.slice(0, 4) : 'Atual');
+      const compYearLabel = biMetrics.compYearLabel || (compareStartDate ? compareStartDate.slice(0, 4) : 'Comparativo');
+
+      const datasets = [
+        {
+          label: `${currentYearLabel} (Atual)`,
+          data: seasonValues,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.08)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointBackgroundColor: '#10b981',
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          pointHoverRadius: 6,
+          order: 1
+        }
+      ];
+
+      if (seasonCompValues && seasonCompValues.length > 0) {
+        datasets.push({
+          label: `${compYearLabel} (Comparativo)`,
+          data: seasonCompValues,
+          borderColor: '#6366f1',
+          backgroundColor: 'rgba(99, 102, 241, 0.03)',
+          borderWidth: 2.5,
+          borderDash: [6, 6],
+          fill: false,
+          tension: 0.4,
+          pointRadius: 4,
+          pointBackgroundColor: '#6366f1',
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          pointHoverRadius: 6,
+          order: 2
+        });
+      }
 
       seasonalityChartInst.current = new Chart(seasonCtx, {
         type: 'line',
         data: {
           labels: seasonLabels,
-          datasets: [{
-            label: 'Vendas (R$)',
-            data: seasonValues,
-            borderColor: '#10b981',
-            backgroundColor: 'rgba(16, 185, 129, 0.08)',
-            borderWidth: 3,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: '#10b981',
-            pointBorderColor: '#ffffff',
-            pointBorderWidth: 2,
-            pointHoverRadius: 6
-          }]
+          datasets: datasets
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false
+          },
           plugins: {
-            legend: { display: false },
+            legend: { 
+              display: datasets.length > 1,
+              position: 'top',
+              align: 'end',
+              labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                color: '#475569',
+                font: { size: 11, weight: 'bold' },
+                padding: 15
+              }
+            },
             tooltip: {
+              backgroundColor: '#0f172a',
+              titleColor: '#ffffff',
+              bodyColor: '#e2e8f0',
+              padding: 12,
+              cornerRadius: 10,
+              boxPadding: 6,
+              usePointStyle: true,
               callbacks: {
                 label: function(context) {
                   const valInMillions = context.raw || 0;
                   const realVal = valInMillions * 1000000;
-                  return ` Vendas: R$ ${realVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                  return ` ${context.dataset.label}: R$ ${realVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                },
+                afterBody: function(items) {
+                  if (items.length >= 2) {
+                    const val0 = (items[0].raw || 0) * 1000000;
+                    const val1 = (items[1].raw || 0) * 1000000;
+                    const diff = val0 - val1;
+                    const pct = val1 > 0 ? ((diff / val1) * 100).toFixed(1) : (val0 > 0 ? '100.0' : '0.0');
+                    const sign = diff >= 0 ? '+' : '';
+                    return [
+                      `────────────────────────────`,
+                      ` Variação: ${sign}R$ ${diff.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${sign}${pct}%)`
+                    ];
+                  }
+                  return [];
                 }
               }
             }
@@ -2673,7 +3241,7 @@ function App() {
         seasonalityChartInst.current = null;
       }
     };
-  }, [activeTab, loadingDashboard, distributorTotals, manufacturerTotals, topProductsFilterMode, biMetrics.seasonalityLabels, biMetrics.seasonalityValues, topProductsAggregated]);
+  }, [activeTab, loadingDashboard, distributorTotals, manufacturerTotals, topProductsFilterMode, biMetrics.seasonalityLabels, biMetrics.seasonalityValues, biMetrics.seasonalityCompValues, topProductsAggregated]);
 
   useEffect(() => {
     if (activeTab === 'relatorios' && dbConnected) {
@@ -2775,6 +3343,14 @@ function App() {
   };
 
   const loadProposalDetails = async (proposalId, silent = false) => {
+    // Se houver itens ainda não salvos (id temporário, criado por handleAddItem mas nunca
+    // persistido no banco), uma atualização silenciosa em segundo plano (polling) NÃO pode
+    // recarregar a proposta: isso apagaria o que o usuário está digitando antes de salvar.
+    // Lê de itensRef (não do estado `itens` direto) porque o polling roda dentro de um
+    // setInterval de closure antiga — ver comentário na declaração de itensRef.
+    if (silent && itensRef.current.some(it => String(it.id).startsWith('temp-'))) {
+      return;
+    }
     // Instant Hydration: se a proposta já estiver no array local, atualiza imediatamente a UI sem delay
     const existingProp = propostas.find(p => p.id === proposalId);
     if (existingProp) {
@@ -2811,33 +3387,31 @@ function App() {
       if (itemsErr) throw itemsErr;
       setItens(items || []);
 
-      // 3. Sincronização assíncrona não-bloqueante de datas do ClickUp (em segundo plano)
+      // 3. Sincronização assíncrona não-bloqueante da data de início do ClickUp (em segundo plano).
+      // IMPORTANTE: data_fechamento NUNCA é auto-preenchida a partir do due_date do ClickUp.
+      // due_date é só o prazo/vencimento da tarefa, não confirmação de negócio fechado — e
+      // data_fechamento é exatamente o campo que todo o resto do sistema usa para decidir se
+      // um negócio conta como "ganho" nos relatórios. Preenchê-la automaticamente a partir do
+      // due_date fazia negócios reabertos (situacao voltando a 'Ativa'/'Selecionada', sem
+      // data_fechamento) serem contados como ganhos de novo assim que a proposta era recarregada,
+      // mesmo sem ninguém clicar em "Ganho". Só o fluxo explícito de Ganho/Perdido pode setar
+      // data_fechamento.
       const cuId = updatedProp.clickup_negocio_id || clickupTaskId;
-      if (cuId && (!updatedProp.data_inicio || !updatedProp.data_fechamento)) {
+      if (cuId && !updatedProp.data_inicio) {
         const cleanCuId = cuId.startsWith('#') ? cuId.substring(1) : cuId;
         fetch(`/clickup-api/task/${cleanCuId}`).then(res => {
           if (res.ok) return res.json();
           return null;
         }).then(taskData => {
           if (!taskData) return;
-          let autoUpdated = false;
-          let newInicio = updatedProp.data_inicio;
-          let newFechamento = updatedProp.data_fechamento;
-          if (!newInicio) {
-            const startMs = taskData.start_date || taskData.date_created;
-            if (startMs) { newInicio = formatDateMsToYMD(startMs); autoUpdated = true; }
-          }
-          if (!newFechamento && taskData.due_date) {
-            newFechamento = formatDateMsToYMD(taskData.due_date); autoUpdated = true;
-          }
-          if (autoUpdated && updatedProp.id) {
-            setCurrentProposta(prev => prev && prev.id === updatedProp.id ? { ...prev, data_inicio: newInicio, data_fechamento: newFechamento } : prev);
-            supabaseClient.from('propostas').update({
-              data_inicio: newInicio || null,
-              data_fechamento: newFechamento || null
-            }).eq('id', updatedProp.id).then(() => {});
-          }
-        }).catch(err => console.error("Erro ao importar datas do ClickUp em segundo plano:", err));
+          const startMs = taskData.start_date || taskData.date_created;
+          if (!startMs) return;
+          const newInicio = formatDateMsToYMD(startMs);
+          setCurrentProposta(prev => prev && prev.id === updatedProp.id ? { ...prev, data_inicio: newInicio } : prev);
+          supabaseClient.from('propostas').update({
+            data_inicio: newInicio
+          }).eq('id', updatedProp.id).then(() => {}).catch(() => {});
+        }).catch(err => console.error("Erro ao importar data de início do ClickUp em segundo plano:", err));
       }
     } catch (err) {
       console.error(err);
@@ -3179,7 +3753,9 @@ function App() {
         criado_por: currentProposta.criado_por,
         situacao: currentProposta.situacao,
         total_proposta: realTimeGrandTotal,
-        data_fechamento: currentProposta.data_fechamento || clickupTaskDates?.due_date || null,
+        // data_fechamento NUNCA herda o due_date do ClickUp (prazo da tarefa, não confirmação
+        // de negócio fechado) — só é gravada aqui se já vier preenchida (fluxo de Ganho/Perdido).
+        data_fechamento: currentProposta.data_fechamento || null,
         motivo_perda: currentProposta.situacao === 'Perdido' ? currentProposta.motivo_perda : null
       };
 
@@ -3211,7 +3787,7 @@ function App() {
         const cleanCuId = String(cuId).replace('#', '').trim();
         const idWithHash = '#' + cleanCuId;
         const propUpdates = {
-          data_fechamento: currentProposta.data_fechamento || clickupTaskDates?.due_date || null
+          data_fechamento: currentProposta.data_fechamento || null
         };
         if (currentProposta.data_inicio || clickupTaskDates?.start_date) {
           propUpdates.data_inicio = currentProposta.data_inicio || clickupTaskDates?.start_date;
@@ -3236,7 +3812,7 @@ function App() {
         // Sincroniza diretamente as datas (start_date e due_date) na tarefa do ClickUp
         const datesPayload = {};
         const startDateVal = currentProposta.data_inicio || clickupTaskDates?.start_date;
-        const endDateVal = currentProposta.data_fechamento || clickupTaskDates?.due_date;
+        const endDateVal = currentProposta.data_fechamento;
         if (startDateVal) {
           const startMs = new Date(`${startDateVal}T12:00:00.000Z`).getTime();
           if (!isNaN(startMs)) datesPayload.start_date = startMs;
@@ -3310,6 +3886,25 @@ function App() {
   const handleGerarNovaVersao = async () => {
     if (!clickupTaskId) return;
     if (!currentProposta || propostas.length === 0) {
+      // Confere direto no banco antes de assumir que não existe proposta: o estado local
+      // (propostas/currentProposta) pode ainda não ter carregado por uma condição de corrida,
+      // e criar uma proposta em branco aqui duplicaria a que já existe.
+      const idWithoutHash = clickupTaskId.startsWith('#') ? clickupTaskId.substring(1) : clickupTaskId.trim();
+      const idWithHash = '#' + idWithoutHash;
+      const { data: existingProps } = await supabaseClient
+        .from('propostas')
+        .select('*')
+        .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
+        .order('created_at', { ascending: false });
+
+      if (existingProps && existingProps.length > 0) {
+        setPropostas(existingProps);
+        const selected = existingProps.find(p => p.versao === 'vA') || existingProps[0];
+        await loadProposalDetails(selected.id);
+        showToast('Proposta já existente carregada — nenhuma versão nova foi criada.', 'info');
+        return;
+      }
+
       await handleCreateInitialProposal();
       return;
     }
@@ -3374,7 +3969,8 @@ function App() {
           total_proposta: finalBaseTotal,
           criado_por: currentResponsavel,
           data_inicio: basePropData.data_inicio || currentProposta?.data_inicio || clickupTaskDates?.start_date || null,
-          data_fechamento: basePropData.data_fechamento || currentProposta?.data_fechamento || clickupTaskDates?.due_date || null
+          // Nunca herda due_date do ClickUp como data_fechamento (ver comentário em loadProposalDetails).
+          data_fechamento: null
         })
         .select()
         .single();
@@ -3505,60 +4101,6 @@ function App() {
       } finally {
         setSaving(false);
       }
-    }
-  };
-
-  // 8.8. Alterar Situação Manualmente (Ativa, Selecionada ou Desconsiderada)
-  const handleSituationChange = async (newSituacao) => {
-    if (!currentProposta || !supabaseClient) return;
-    if (newSituacao === 'Selecionada') {
-      await handleSelectProposal();
-      return;
-    }
-    if (newSituacao === 'Ganho') {
-      setCloseDate(new Date().toISOString().split('T')[0]);
-      setShowCloseModal('win');
-      return;
-    }
-    if (newSituacao === 'Perdido') {
-      setCloseDate(new Date().toISOString().split('T')[0]);
-      setSelectedLossReason('');
-      setShowCloseModal('loss');
-      return;
-    }
-
-    setSaving(true);
-    const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : '';
-    try {
-      const { error } = await supabaseClient
-        .from('propostas')
-        .update({ 
-          situacao: newSituacao,
-          motivo_perda: null,
-          criado_por: currentResponsavel
-        })
-        .eq('id', currentProposta.id);
-
-      if (error) throw error;
-
-      showToast(`Situação alterada para ${newSituacao}!`, 'success');
-      
-      setCurrentProposta({
-        ...currentProposta,
-        situacao: newSituacao,
-        motivo_perda: null,
-        criado_por: currentResponsavel
-      });
-
-      loadPropostas(currentProposta.id);
-      await refreshSupabaseProposalsList();
-      loadDashboardData();
-      fetchKanbanData();
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao atualizar situação.', 'error');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -3789,7 +4331,11 @@ function App() {
         updateData.data_fechamento = null;
         updateData.motivo_perda = null;
         if (newStatus === 'Selecionada') {
-          updateData.total_proposta = realTimeGrandTotal;
+          // Só sobrescreve o total com o valor calculado em tempo real se ele for > 0.
+          // Se os itens ainda não carregaram no editor (condição de corrida), realTimeGrandTotal
+          // fica 0 — nesse caso preserva o total já salvo da própria proposta, em vez de zerá-lo.
+          const existingTotal = parseFloat((propostas.find(p => p.id === versionId) || currentProposta || {}).total_proposta) || 0;
+          updateData.total_proposta = realTimeGrandTotal > 0 ? realTimeGrandTotal : existingTotal;
         }
       }
 
@@ -4725,7 +5271,7 @@ function App() {
                 <input
                   type="date"
                   className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
-                  value={currentProposta?.data_fechamento ? currentProposta.data_fechamento.substring(0, 10) : (clickupTaskDates?.due_date || '')}
+                  value={currentProposta?.data_fechamento ? currentProposta.data_fechamento.substring(0, 10) : ''}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, data_fechamento: e.target.value })}
                   disabled={isReadOnly}
                 />
@@ -5038,7 +5584,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
+    <div className="flex-1 min-h-0 flex flex-col bg-slate-50 text-slate-800 overflow-hidden">
       
       {/* 1. Header do Sistema */}
       <header className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between z-10">
@@ -5225,118 +5771,119 @@ function App() {
           <main className="flex-1 flex flex-col bg-slate-50 p-6 space-y-6">
             
             {/* ELEMENTO 1 (TOPO ABSOLUTO): Barra de Filtro de Datas */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 tracking-tight">Relatórios</h2>
                 <p className="text-xs text-slate-500 font-medium">Distribuição de faturamento acumulado por distribuidor e fabricante.</p>
               </div>
 
               {/* Seletor de Período e Comparativo */}
-              <div className="flex flex-wrap items-center gap-3 bg-white backdrop-blur-md border border-slate-200/80 rounded-2xl p-2.5 shadow-lg">
-                {/* Botões Rápidos de Período */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex flex-wrap items-center gap-2 bg-white backdrop-blur-md border border-slate-200/80 rounded-2xl p-2.5 shadow-lg">
+                  {/* Botões Rápidos de Período */}
+                  {(() => {
+                    const nowYear = new Date().getFullYear();
+                    const q = getCurrentQuarterRange();
+                    const yearStart = `${nowYear}-01-01`;
+                    const yearEnd = `${nowYear}-12-31`;
+                    return (
+                      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => applyFilterRange(yearStart, yearEnd, `${nowYear - 1}-01-01`, `${nowYear - 1}-12-31`)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === yearStart && endDate === yearEnd ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+                        >
+                          Ano Atual
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyFilterRange(q.start, q.end, q.compStart, q.compEnd)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === q.start && endDate === q.end ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+                        >
+                          Trimestre Atual
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyFilterRange('2023-01-01', new Date().toISOString().split('T')[0], '', '')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2023-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+                        >
+                          Todo o Histórico
+                        </button>
+                      </div>
+                    );
+                  })()}
+
                   <button
                     type="button"
-                    onClick={() => {
-                      applyFilterRange('2022-01-01', new Date().toISOString().split('T')[0]);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2022-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+                    onClick={() => setShowCustomRange(v => !v)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-500 hover:text-indigo-600 hover:bg-slate-50 transition-all cursor-pointer"
                   >
-                    Todo o Histórico
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      applyFilterRange('2026-01-01', '2026-12-31');
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2026-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
-                  >
-                    2026
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      applyFilterRange('2025-01-01', '2025-12-31');
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2025-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
-                  >
-                    2025
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      applyFilterRange('2024-01-01', '2024-12-31');
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2024-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
-                  >
-                    2024
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      applyFilterRange('2023-01-01', '2023-12-31');
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2023-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
-                  >
-                    2023
+                    Personalizar período
+                    <svg className={`w-3 h-3 transition-transform ${showCustomRange ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Início</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      applyFilterRange(v, endDate);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Fim</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      applyFilterRange(startDate, v);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Início Comp.</label>
-                  <input
-                    type="date"
-                    value={compareStartDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      applyFilterRange(startDate, endDate, v, compareEndDate);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Fim Comp.</label>
-                  <input
-                    type="date"
-                    value={compareEndDate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      applyFilterRange(startDate, endDate, compareStartDate, v);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
-                  />
-                </div>
-                <button
-                  onClick={() => applyFilterRange(startDate, endDate, compareStartDate, compareEndDate)}
-                  disabled={loadingDashboard}
-                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-950/30 active:scale-95 cursor-pointer"
-                >
-                  {loadingDashboard ? '...' : 'Filtrar'}
-                </button>
+                {showCustomRange && (
+                  <div className="flex flex-wrap items-center gap-3 bg-white backdrop-blur-md border border-slate-200/80 rounded-2xl p-2.5 shadow-lg">
+                    <div className="flex items-center space-x-2">
+                      <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Início</label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          applyFilterRange(v, endDate);
+                        }}
+                        className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Fim</label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          applyFilterRange(startDate, v);
+                        }}
+                        className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Início Comp.</label>
+                      <input
+                        type="date"
+                        value={compareStartDate}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          applyFilterRange(startDate, endDate, v, compareEndDate);
+                        }}
+                        className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-[10px] font-bold text-slate-800 uppercase tracking-wider">Fim Comp.</label>
+                      <input
+                        type="date"
+                        value={compareEndDate}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          applyFilterRange(startDate, endDate, compareStartDate, v);
+                        }}
+                        className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
+                      />
+                    </div>
+                    <button
+                      onClick={() => applyFilterRange(startDate, endDate, compareStartDate, compareEndDate)}
+                      disabled={loadingDashboard}
+                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-950/30 active:scale-95 cursor-pointer"
+                    >
+                      {loadingDashboard ? '...' : 'Filtrar'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -5358,138 +5905,163 @@ function App() {
 
             {/* BLOCO 1: RESUMO SAZONAL DE VENDAS */}
             <div className="bg-white border border-slate-200/80 rounded-xl p-6 flex flex-col transition-all duration-300 hover:border-slate-200 shadow-sm shadow-slate-100/50">
-              <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Resumo Sazonal de Vendas</h3>
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-2">
+                    <span>Resumo Sazonal de Vendas</span>
+                    {biMetrics.compLabel && (
+                      <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md normal-case tracking-normal">
+                        Comparativo {biMetrics.currentLabel || 'Atual'} vs {biMetrics.compLabel}
+                      </span>
+                    )}
+                  </h3>
                   <p className="text-xs text-slate-500">Evolução temporal e inteligência sazonal de negócios ganhos</p>
                 </div>
-                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Visão Anual
-                </span>
+                
+                {/* Badges de Comparação no Topo */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 shadow-sm">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    <span>{biMetrics.currentLabel || 'Atual'}:</span>
+                    <span className="text-slate-900 font-extrabold">R$ {((biMetrics?.wonValue || 0) / 1000000).toFixed(2)} MI</span>
+                    <span className="text-[10px] text-emerald-700 font-medium">({biMetrics?.wonCount || 0} deals)</span>
+                  </div>
+                  {biMetrics.compLabel && compareStartDate && compareEndDate && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-bold text-indigo-800 shadow-sm">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 border border-white"></span>
+                      <span>{biMetrics.compLabel}:</span>
+                      <span className="text-slate-900 font-extrabold">R$ {((biMetrics?.wonValueComp || 0) / 1000000).toFixed(2)} MI</span>
+                      <span className="text-[10px] text-indigo-700 font-medium">({biMetrics?.wonCountComp || 0} deals)</span>
+                    </div>
+                  )}
+                  {biMetrics.compLabel && biMetrics?.wonValDiff !== null && (
+                    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                      biMetrics.wonValDiff >= 0 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}>
+                      <span>{biMetrics.wonValDiff >= 0 ? '▲ +' : '▼ -'}R$ {(Math.abs(biMetrics.wonValDiff) / 1000000).toFixed(2)} MI</span>
+                      <span className="text-[10px]">({biMetrics.wonValDiff >= 0 ? '+' : ''}{(biMetrics.wonValPct || 0).toFixed(1)}%)</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Grid de 6 KPIs no Topo (Resumo Sazonal) */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
                 {/* 1. Negócios Ganhos */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between">
-                  <span className="text-[11px] text-slate-500 font-semibold mb-1 truncate">Negócios Ganhos</span>
-                  <div className="flex items-baseline justify-between mt-1 flex-wrap gap-1">
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                  <div>
+                    <span className="text-[11px] text-slate-500 font-semibold mb-1 block truncate">Negócios Ganhos</span>
                     <span className="text-2xl font-extrabold text-slate-900">{biMetrics?.wonCount || 0}</span>
-                    {compareStartDate && compareEndDate && biMetrics?.wonQtyDiff !== null && biMetrics?.wonQtyDiff !== undefined && (
-                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded-full ${
-                        biMetrics.wonQtyDiff >= 0 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {biMetrics.wonQtyDiff >= 0 ? `+${biMetrics.wonQtyDiff}` : biMetrics.wonQtyDiff}
-                      </span>
-                    )}
                   </div>
+                  {compareStartDate && compareEndDate && biMetrics?.wonQtyDiff !== null && (
+                    <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.wonCountComp || 0}</strong></span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded ${
+                        biMetrics.wonQtyDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}>
+                        {biMetrics.wonQtyDiff >= 0 ? `+${biMetrics.wonQtyDiff}` : biMetrics.wonQtyDiff} ({biMetrics.wonQtyDiff >= 0 ? '+' : ''}{(biMetrics.wonQtyPct || 0).toFixed(0)}%)
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 2. Valor em Vendas */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between">
-                  <span className="text-[11px] text-slate-500 font-semibold mb-1 truncate">Valor em Vendas</span>
-                  <div className="flex items-baseline justify-between mt-1 flex-wrap gap-1">
-                    <span className="text-base font-bold text-slate-900 truncate">
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                  <div>
+                    <span className="text-[11px] text-slate-500 font-semibold mb-1 block truncate">Valor em Vendas</span>
+                    <span className="text-base font-extrabold text-slate-900 truncate block">
                       R$ {(biMetrics?.wonValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
-                    {compareStartDate && compareEndDate && biMetrics?.wonValDiff !== null && biMetrics?.wonValDiff !== undefined && (
-                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded-full ${
-                        biMetrics.wonValDiff >= 0 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {biMetrics.wonValDiff >= 0 
-                          ? `+R$ ${(biMetrics.wonValDiff / 1000).toFixed(0)}k` 
-                          : `-R$ ${(Math.abs(biMetrics.wonValDiff) / 1000).toFixed(0)}k`}
-                      </span>
-                    )}
                   </div>
+                  {compareStartDate && compareEndDate && biMetrics?.wonValDiff !== null && (
+                    <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>R$ {((biMetrics.wonValueComp || 0) / 1000000).toFixed(2)}M</strong></span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded ${
+                        biMetrics.wonValDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}>
+                        {biMetrics.wonValDiff >= 0 ? '▲ +' : '▼ '}{(biMetrics.wonValPct || 0).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {/* 3. Ciclo Médio de Vendas */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between">
-                  <span className="text-[11px] text-slate-500 font-semibold mb-1 truncate">Ciclo Médio</span>
-                  <div className="flex items-baseline justify-between mt-1 flex-wrap gap-1">
-                    <span className="text-lg font-bold text-slate-900">
-                      {biMetrics?.avgCycleDays || (startDate?.startsWith('2023') ? 21 : (startDate?.startsWith('2024') ? 62 : (startDate?.startsWith('2025') ? 82 : (startDate?.startsWith('2026') ? 86 : 58))))} dias
-                    </span>
-                    {compareStartDate && compareEndDate && biMetrics?.avgCycleDaysDiff !== null && biMetrics?.avgCycleDaysDiff !== undefined && (
-                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded-full ${
-                        biMetrics.avgCycleDaysDiff <= 0 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {biMetrics.avgCycleDaysDiff <= 0 
-                          ? `${biMetrics.avgCycleDaysDiff}d` 
-                          : `+${biMetrics.avgCycleDaysDiff}d`}
-                      </span>
-                    )}
+                {/* 3. Ciclo Médio */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                  <div>
+                    <span className="text-[11px] text-slate-500 font-semibold mb-1 block truncate">Ciclo Médio</span>
+                    <span className="text-xl font-extrabold text-slate-900">{biMetrics?.avgCycleDays || 58} dias</span>
                   </div>
+                  {compareStartDate && compareEndDate && biMetrics?.avgCycleDaysDiff !== null && (
+                    <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.avgCycleDaysComp || 58}d</strong></span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded ${
+                        biMetrics.avgCycleDaysDiff <= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}>
+                        {biMetrics.avgCycleDaysDiff <= 0 ? `${biMetrics.avgCycleDaysDiff}d` : `+${biMetrics.avgCycleDaysDiff}d`}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 4. Ticket Médio */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between">
-                  <span className="text-[11px] text-slate-500 font-semibold mb-1 truncate">Ticket Médio</span>
-                  <div className="flex items-baseline justify-between mt-1 flex-wrap gap-1">
-                    <span className="text-base font-bold text-slate-900 truncate">
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                  <div>
+                    <span className="text-[11px] text-slate-500 font-semibold mb-1 block truncate">Ticket Médio</span>
+                    <span className="text-base font-extrabold text-slate-900 truncate block">
                       R$ {(biMetrics?.ticketMedio || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
-                    {compareStartDate && compareEndDate && biMetrics?.ticketMedioDiff !== null && biMetrics?.ticketMedioDiff !== undefined && (
-                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded-full ${
-                        biMetrics.ticketMedioDiff >= 0 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {biMetrics.ticketMedioDiff >= 0 
-                          ? `+R$ ${(biMetrics.ticketMedioDiff / 1000).toFixed(0)}k` 
-                          : `-R$ ${(Math.abs(biMetrics.ticketMedioDiff) / 1000).toFixed(0)}k`}
-                      </span>
-                    )}
                   </div>
+                  {compareStartDate && compareEndDate && biMetrics?.ticketMedioDiff !== null && (
+                    <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>R$ {((biMetrics.ticketMedioComp || 0) / 1000).toFixed(1)}k</strong></span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded ${
+                        biMetrics.ticketMedioDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}>
+                        {biMetrics.ticketMedioDiff >= 0 ? '▲ +' : '▼ '}{(biMetrics.ticketMedioPct || 0).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 5. Negócios Perdidos */}
-                <div className="bg-rose-50/50 border border-rose-200/80 rounded-xl p-3.5 flex flex-col justify-between">
-                  <span className="text-[11px] text-rose-700 font-semibold mb-1 truncate">Negócios Perdidos</span>
-                  <div className="flex items-baseline justify-between mt-1 flex-wrap gap-1">
-                    <div>
+                <div className="bg-rose-50/50 border border-rose-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 transition-colors">
+                  <div>
+                    <span className="text-[11px] text-rose-700 font-semibold mb-1 block truncate">Negócios Perdidos</span>
+                    <div className="flex items-baseline gap-1">
                       <span className="text-xl font-extrabold text-rose-950">{biMetrics?.lostCount || 0}</span>
-                      <span className="text-[10px] font-medium text-rose-700/80 ml-1">
+                      <span className="text-[10px] font-medium text-rose-700/80">
                         (R$ {(biMetrics?.lostValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})
                       </span>
                     </div>
-                    {compareStartDate && compareEndDate && biMetrics?.lostValDiff !== null && biMetrics?.lostValDiff !== undefined && (
-                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded-full ${
-                        biMetrics.lostValDiff <= 0 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {biMetrics.lostValDiff <= 0 ? '▼' : '▲'}
-                      </span>
-                    )}
                   </div>
+                  {compareStartDate && compareEndDate && (
+                    <div className="mt-2 pt-2 border-t border-rose-200/60 flex items-center justify-between text-[10px]">
+                      <span className="text-rose-700/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.lostCountComp || 0}</strong></span>
+                      <span className="font-bold text-rose-800">
+                        {biMetrics.lostQtyDiff <= 0 ? '0' : `+${biMetrics.lostQtyDiff}`}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {/* 6. Taxa de Conversão Geral */}
-                <div className="bg-indigo-50/50 border border-indigo-200/80 rounded-xl p-3.5 flex flex-col justify-between">
-                  <span className="text-[11px] text-indigo-700 font-semibold mb-1 truncate">Taxa Conversão</span>
-                  <div className="flex items-baseline justify-between mt-1 flex-wrap gap-1">
-                    <span className="text-xl font-extrabold text-indigo-950">
-                      {(biMetrics?.convRate || 0).toFixed(1)}%
-                    </span>
-                    {compareStartDate && compareEndDate && biMetrics?.convRateDiff !== null && biMetrics?.convRateDiff !== undefined && (
-                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded-full ${
-                        biMetrics.convRateDiff >= 0 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                {/* 6. Taxa de Conversão */}
+                <div className="bg-indigo-50/50 border border-indigo-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-300 transition-colors">
+                  <div>
+                    <span className="text-[11px] text-indigo-700 font-semibold mb-1 block truncate">Taxa Conversão</span>
+                    <span className="text-xl font-extrabold text-indigo-950">{(biMetrics?.convRate || 0).toFixed(1)}%</span>
+                  </div>
+                  {compareStartDate && compareEndDate && biMetrics?.convRateDiff !== null && (
+                    <div className="mt-2 pt-2 border-t border-indigo-200/60 flex items-center justify-between text-[10px]">
+                      <span className="text-indigo-700/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{(biMetrics.convRateComp || 0).toFixed(1)}%</strong></span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded ${
+                        biMetrics.convRateDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                       }`}>
                         {biMetrics.convRateDiff >= 0 ? `+${biMetrics.convRateDiff.toFixed(1)}pp` : `${biMetrics.convRateDiff.toFixed(1)}pp`}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -5541,12 +6113,12 @@ function App() {
                         >
                           <option value="all">Todos</option>
                           {Array.from(new Set(
-                            commercialData
+                            (commercialData || [])
                               .map(item => {
                                 const distObj = Array.isArray(item.distribuidores) ? item.distribuidores[0] : item.distribuidores;
                                 return (distObj?.nome || 'NÃO INFORMADO').trim().toUpperCase();
                               })
-                              .filter(Boolean)
+                              .filter(f => f && f !== 'NÃO INFORMADO')
                           )).sort((a, b) => a.localeCompare(b)).map(dist => (
                             <option key={dist} value={dist}>{dist}</option>
                           ))}
@@ -5599,12 +6171,12 @@ function App() {
                         >
                           <option value="all">Todos</option>
                           {Array.from(new Set(
-                            commercialData
+                            (commercialData || [])
                               .map(item => {
                                 const prodObj = Array.isArray(item.produtos) ? item.produtos[0] : item.produtos;
-                                return (prodObj?.fabricante || 'NÃO INFORMADO').trim().toUpperCase();
+                                return (prodObj?.fabricante || '').trim().toUpperCase();
                               })
-                              .filter(Boolean)
+                              .filter(f => f && f !== 'NÃO INFORMADO')
                           )).sort((a, b) => a.localeCompare(b)).map(fab => (
                             <option key={fab} value={fab}>{fab}</option>
                           ))}
@@ -5725,35 +6297,45 @@ function App() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between px-6 py-3 bg-white border-b border-slate-200/80 flex-shrink-0 space-y-3 md:space-y-0 shadow-sm shadow-slate-100/50">
                   <div className="flex items-center space-x-3 flex-wrap gap-y-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Exibir Estágios:</span>
-                    <button 
-                      onClick={() => setShowGanhoCol(!showGanhoCol)}
+                    <button
+                      onClick={() => { setDealsListStatus('Ganho'); setShowDealsList(true); setShowForecast(false); }}
                       className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showGanhoCol 
-                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
+                        showDealsList && dealsListStatus === 'Ganho'
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
                           : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
                       }`}
                     >
                       <span>🏆 Ganho</span>
                     </button>
-                    <button 
-                      onClick={() => setShowPerdidoCol(!showPerdidoCol)}
+                    <button
+                      onClick={() => { setDealsListStatus('Perdido'); setShowDealsList(true); setShowForecast(false); }}
                       className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showPerdidoCol 
-                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400' 
+                        showDealsList && dealsListStatus === 'Perdido'
+                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
                           : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
                       }`}
                     >
                       <span>😞 Perdido</span>
                     </button>
-                    <button 
-                      onClick={() => setShowCongeladoCol(!showCongeladoCol)}
+                    <button
+                      onClick={() => { setDealsListStatus('Congelado'); setShowDealsList(true); setShowForecast(false); }}
                       className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showCongeladoCol 
-                          ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                        showDealsList && dealsListStatus === 'Congelado'
+                          ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
                           : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
                       }`}
                     >
                       <span>❄️ Congelado</span>
+                    </button>
+                    <button
+                      onClick={() => { setDealsListStatus('Todos'); setShowDealsList(true); setShowForecast(false); }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
+                        showDealsList && dealsListStatus === 'Todos'
+                          ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-500'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
+                      }`}
+                    >
+                      <span>📋 Lista Completa</span>
                     </button>
 
                     {/* Lupa de Busca Expansível no Kanban */}
@@ -5819,10 +6401,13 @@ function App() {
                         const nextVal = !showForecast;
                         console.log("[DEBUG] Forecast clicked, state is now:", nextVal);
                         setShowForecast(nextVal);
-                        if (!nextVal) {
+                        if (nextVal) {
+                          setShowDealsList(false);
+                        } else {
                           setFilterStage(null);
+                          setFilterFabricante(null);
                         }
-                      }} 
+                      }}
                       className={`mr-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showForecast ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-700'}`}
                     >
                       📈 Forecast
@@ -5830,31 +6415,41 @@ function App() {
                   </div>
                 </div>
 
-                {showForecast && (
-                  <ForecastFunnelPanel 
+                {showDealsList && (
+                  <DealsListView
+                    kanbanTasks={kanbanTasks}
+                    kanbanColumns={kanbanColumns}
+                    getTaskOptionId={getTaskOptionId}
+                    getOpportunityValue={getOpportunityValue}
+                    onCardClick={handleCardClick}
+                    statusFilter={dealsListStatus}
+                    setStatusFilter={setDealsListStatus}
+                    onClose={() => setShowDealsList(false)}
+                  />
+                )}
+
+                {!showDealsList && showForecast && (
+                  <ForecastFunnelPanel
                     kanbanColumns={kanbanColumns}
                     kanbanTasks={kanbanTasks}
-                    showGanhoCol={showGanhoCol}
-                    showPerdidoCol={showPerdidoCol}
-                    showCongeladoCol={showCongeladoCol}
                     filterStage={filterStage}
                     setFilterStage={setFilterStage}
+                    filterFabricante={filterFabricante}
+                    setFilterFabricante={setFilterFabricante}
                     getTaskOptionId={getTaskOptionId}
                     getOpportunityValue={getOpportunityValue}
                     onCardClick={handleCardClick}
                   />
                 )}
 
-                {/* Kanban Board: oculto quando Split View do Forecast está ativo */}
-                {!(showForecast && filterStage) && (
+                {/* Kanban Board: oculto quando Split View do Forecast ou Lista de Negócios está ativa */}
+                {!showDealsList && !(showForecast && filterStage) && (
                 <div className="kanban-board flex-1 min-h-0 overflow-x-auto">
                   {kanbanColumns.map(col => {
                     if (filterStage && col.id !== filterStage) return null;
                     const colName = col.name.toLowerCase();
-                    if (colName.includes("ganho") && !showGanhoCol) return null;
-                    if (colName.includes("perdido") && !showPerdidoCol) return null;
-                    if (colName.includes("congelado") && !showCongeladoCol) return null;
-                    
+                    if (colName.includes("ganho") || colName.includes("perdido") || colName.includes("congelado")) return null;
+
                     const tasksInCol = kanbanTasks.filter(t => {
                       const inCol = getTaskOptionId(t, kanbanColumns) === col.id;
                       if (!inCol) return false;
