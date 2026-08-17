@@ -9,7 +9,10 @@
 const resolveNegocioValor = (negocio, propostasPorNegocio) => {
   const key = String(negocio.clickup_negocio_id || '').replace('#', '').trim();
   const props = propostasPorNegocio.get(key) || [];
-  if (props.length === 0) return 0;
+  if (props.length === 0) {
+    const fallback = parseFloat(negocio.valor_clickup_fallback);
+    return isNaN(fallback) ? 0 : fallback;
+  }
   const best =
     props.find(p => p.situacao === 'Selecionada') ||
     props.find(p => p.situacao === 'Ganho') ||
@@ -132,7 +135,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
     setLoading(true);
     const [{ data: contasData }, { data: negociosData }, { data: propostasData }, { data: contatosData }] = await Promise.all([
       supabaseClient.from('contas').select('id, clickup_account_id, nome, cnpj, cidade, estado, status, account_tier, industry, billing_cycle, razao_social, rua, cep, email, telefone'),
-      supabaseClient.from('negocios').select('id, clickup_negocio_id, nome, conta_id, estagio, numero_proposta_oficial, sync_status, sync_error'),
+      supabaseClient.from('negocios').select('id, clickup_negocio_id, nome, conta_id, estagio, numero_proposta_oficial, sync_status, sync_error, valor_clickup_fallback'),
       supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, data_fechamento'),
       supabaseClient.from('contatos').select('id, clickup_contact_id, nome, cargo, email, celular, whatsapp, champion, conta_id, sync_status'),
     ]);
@@ -351,7 +354,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
             {negocios.map(n => (
               <div
                 key={n.id}
-                onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: n.clickup_negocio_id, name: n.nome })}
+                onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: String(n.clickup_negocio_id).replace('#', '').trim(), name: n.nome })}
                 className="border border-slate-200 rounded-xl p-3 flex items-center justify-between cursor-pointer hover:border-indigo-300"
               >
                 <div>

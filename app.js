@@ -915,7 +915,7 @@ function App() {
   // Função para obter a aba inicial com base na Hash URL (SPA Hash Routing)
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '').trim();
-    if (['kanban', 'relatorios', 'tasks', 'propostas'].includes(hash)) {
+    if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
       return hash;
     }
     return safeStorage.getItem('crm_active_view') || 'kanban';
@@ -935,7 +935,7 @@ function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').trim();
-      if (['kanban', 'relatorios', 'tasks', 'propostas'].includes(hash)) {
+      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -1273,9 +1273,9 @@ function App() {
       .then(({ data }) => setNumeracao(data));
   }, [showSettingsModal, supabaseClient]);
 
-  const salvarNumeracao = async (novoAtivo) => {
+  const salvarNumeracao = async (novoAtivo, incluirNumero) => {
     const payload = {};
-    if (novoNumeroInput.trim()) payload.novo_numero = parseInt(novoNumeroInput.trim(), 10);
+    if (incluirNumero && novoNumeroInput.trim()) payload.novo_numero = parseInt(novoNumeroInput.trim(), 10);
     if (novoAtivo !== undefined) payload.novo_ativo = novoAtivo;
     const { data } = await supabaseClient.rpc('ajustar_numeracao_proposta', payload);
     if (data && data[0]) setNumeracao(data[0]);
@@ -1717,7 +1717,7 @@ function App() {
       }
 
       // Enriquecer negócios com responsável e valor da proposta do Supabase
-      const enrichedTasks = (negociosData || []).map(n => {
+      const enrichedTasks = (negociosData || []).filter(n => n.clickup_negocio_id).map(n => {
         const idClean = String(n.clickup_negocio_id || '').replace('#', '').trim();
         const matchedProps = [
           ...(propsByClickupId.get(idClean) || []),
@@ -6370,7 +6370,7 @@ function App() {
                     </button>
                     <button
                       onClick={() => setShowNovaOportunidadeKanban(true)}
-                      className="px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-600 text-white flex items-center gap-1.5"
+                      className="px-3 py-1.5 rounded-full text-xs font-bold border border-indigo-600 transition-all flex items-center space-x-1.5 bg-indigo-600 text-white cursor-pointer"
                     >
                       <span>+ Nova Oportunidade</span>
                     </button>
@@ -6558,13 +6558,19 @@ function App() {
                 )}
 
                 {showNovaOportunidadeKanban && (
-                  <NovaOportunidadeModal
-                    supabaseClient={supabaseClient}
-                    contaFixa={null}
-                    contas={contasParaBusca}
-                    onClose={() => setShowNovaOportunidadeKanban(false)}
-                    onCriado={() => { setShowNovaOportunidadeKanban(false); fetchKanbanData(); }}
-                  />
+                  typeof NovaOportunidadeModal !== 'undefined'
+                    ? <NovaOportunidadeModal
+                        supabaseClient={supabaseClient}
+                        contaFixa={null}
+                        contas={contasParaBusca}
+                        onClose={() => setShowNovaOportunidadeKanban(false)}
+                        onCriado={() => { setShowNovaOportunidadeKanban(false); fetchKanbanData(); }}
+                      />
+                    : <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4" onClick={() => setShowNovaOportunidadeKanban(false)}>
+                        <div className="bg-white border border-slate-200/90 rounded-2xl shadow-2xl p-6 text-sm text-rose-500">
+                          Erro ao carregar o formulário de nova oportunidade (empresas.js). Recarregue a página.
+                        </div>
+                      </div>
                 )}
               </React.Fragment>
             )}
@@ -7011,7 +7017,9 @@ function App() {
         })()}
 
         {activeTab === 'empresas' && (
-          <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+          typeof EmpresasTab !== 'undefined'
+            ? <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+            : <div className="flex-1 flex items-center justify-center text-sm text-rose-500">Erro ao carregar a aba Empresas (empresas.js). Recarregue a página.</div>
         )}
 
       </div>
@@ -7609,7 +7617,7 @@ function App() {
                         <h4 className="font-bold text-sm text-slate-800">Numeração de Propostas</h4>
                         <p className="text-xs text-slate-500">Próximo número: <span className="font-bold">{numeracao.ultimo_numero + 1}/{new Date().getFullYear()}</span></p>
                         <label className="flex items-center gap-2 text-sm">
-                          <input type="checkbox" checked={numeracao.ativo} onChange={(e) => salvarNumeracao(e.target.checked)} />
+                          <input type="checkbox" checked={numeracao.ativo} onChange={(e) => salvarNumeracao(e.target.checked, false)} />
                           Numeração automática ativa
                         </label>
                         <div className="flex gap-2">
@@ -7620,7 +7628,7 @@ function App() {
                             onChange={(e) => setNovoNumeroInput(e.target.value)}
                             className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm"
                           />
-                          <button onClick={() => salvarNumeracao(undefined)} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold">Salvar</button>
+                          <button onClick={() => salvarNumeracao(undefined, true)} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold">Salvar</button>
                         </div>
                       </div>
                     )}
