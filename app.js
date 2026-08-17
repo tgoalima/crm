@@ -1263,6 +1263,25 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showSettingsModal, showNewTaskModal, openMenuVersionId, showCloseModal, showProductModal, showDrawer, drawerTab]);
 
+  // Numeração de Propostas (Configurações → aba "Numeração de Propostas")
+  const [numeracao, setNumeracao] = useState(null);
+  const [novoNumeroInput, setNovoNumeroInput] = useState('');
+
+  useEffect(() => {
+    if (!showSettingsModal || !supabaseClient) return;
+    supabaseClient.from('config_numeracao_propostas').select('ultimo_numero, ativo').eq('id', 1).single()
+      .then(({ data }) => setNumeracao(data));
+  }, [showSettingsModal, supabaseClient]);
+
+  const salvarNumeracao = async (novoAtivo) => {
+    const payload = {};
+    if (novoNumeroInput.trim()) payload.novo_numero = parseInt(novoNumeroInput.trim(), 10);
+    if (novoAtivo !== undefined) payload.novo_ativo = novoAtivo;
+    const { data } = await supabaseClient.rpc('ajustar_numeracao_proposta', payload);
+    if (data && data[0]) setNumeracao(data[0]);
+    setNovoNumeroInput('');
+  };
+
   // Listener para fechar o menu dos 3 pontinhos ao rolar a página ou container
   useEffect(() => {
     if (openMenuVersionId !== null) {
@@ -7068,6 +7087,16 @@ function App() {
                 >
                   Tipos de Tarefas
                 </button>
+                <button
+                  onClick={() => setSettingsActiveTab('numeracao')}
+                  className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
+                    settingsActiveTab === 'numeracao'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  Numeração de Propostas
+                </button>
               </aside>
 
               {/* Área de Conteúdo da Aba Ativa */}
@@ -7564,6 +7593,37 @@ function App() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+
+                {/* 6. ABA NUMERAÇÃO DE PROPOSTAS */}
+                {settingsActiveTab === 'numeracao' && (
+                  <div className="space-y-6">
+                    <div className="mb-4">
+                      <h2 className="text-base font-bold text-slate-900">Numeração de Propostas</h2>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">Controle a numeração automática usada na criação de novas oportunidades.</p>
+                    </div>
+
+                    {numeracao && (
+                      <div className="border border-slate-200 rounded-xl p-4 space-y-2">
+                        <h4 className="font-bold text-sm text-slate-800">Numeração de Propostas</h4>
+                        <p className="text-xs text-slate-500">Próximo número: <span className="font-bold">{numeracao.ultimo_numero + 1}/{new Date().getFullYear()}</span></p>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={numeracao.ativo} onChange={(e) => salvarNumeracao(e.target.checked)} />
+                          Numeração automática ativa
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            placeholder="Ajustar último número usado"
+                            value={novoNumeroInput}
+                            onChange={(e) => setNovoNumeroInput(e.target.value)}
+                            className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                          />
+                          <button onClick={() => salvarNumeracao(undefined)} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold">Salvar</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </main>
