@@ -189,3 +189,92 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
     </div>
   );
 };
+
+const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, onClose, onOpenNegocio, onNovaOportunidade, onNovoContato }) => {
+  const [aba, setAba] = React.useState('visao_geral');
+  const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <div className="w-full max-w-2xl bg-white h-full overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-200 pb-4 mb-4">
+          <div>
+            <h3 className="text-lg font-extrabold text-slate-900">{conta.nome}</h3>
+            <p className="text-xs text-slate-500">{conta.cnpj}</p>
+            <div className="flex gap-2 mt-2">
+              {conta.status && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{conta.status}</span>}
+              {conta.account_tier && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{conta.account_tier}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+        </div>
+
+        <div className="flex gap-2 border-b border-slate-200 mb-4">
+          {[['visao_geral', 'Visão Geral'], ['contatos', `Contatos (${contatos.length})`], ['oportunidades', `Oportunidades (${negocios.length})`]].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setAba(key)}
+              className={`px-3 py-2 text-sm font-bold border-b-2 -mb-px ${aba === key ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {aba === 'visao_geral' && (
+          <div className="space-y-2 text-sm">
+            <p><span className="font-bold text-slate-600">Razão Social:</span> {conta.razao_social || '—'}</p>
+            <p><span className="font-bold text-slate-600">Endereço:</span> {conta.rua || '—'}, {conta.cidade || '—'} - {conta.estado || '—'}, {conta.cep || '—'}</p>
+            <p><span className="font-bold text-slate-600">Segmento:</span> {conta.industry || '—'}</p>
+            <p><span className="font-bold text-slate-600">Ciclo de Faturamento:</span> {conta.billing_cycle || '—'}</p>
+            <p><span className="font-bold text-slate-600">Email:</span> {conta.email || '—'}</p>
+            <p><span className="font-bold text-slate-600">Telefone:</span> {conta.telefone || '—'}</p>
+          </div>
+        )}
+
+        {aba === 'contatos' && (
+          <div className="space-y-3">
+            <button onClick={onNovoContato} className="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold">+ Adicionar Contato</button>
+            {contatos.map(c => (
+              <div key={c.id} className="border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm text-slate-800">{c.nome} {c.champion && <span title="Champion">⭐</span>}</p>
+                  <p className="text-xs text-slate-500">{c.cargo || '—'}</p>
+                  <p className="text-xs text-slate-500">{c.email || '—'}</p>
+                </div>
+                {c.whatsapp && (
+                  <a href={`https://wa.me/${c.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-emerald-600 text-xs font-bold">WhatsApp</a>
+                )}
+                {c.sync_status === 'pending' && <span className="text-[10px] text-amber-500">sincronizando...</span>}
+                {c.sync_status === 'failed' && <span className="text-[10px] text-rose-500">falha ao sincronizar</span>}
+              </div>
+            ))}
+            {contatos.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Nenhum contato cadastrado.</p>}
+          </div>
+        )}
+
+        {aba === 'oportunidades' && (
+          <div className="space-y-3">
+            <button onClick={onNovaOportunidade} className="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold">+ Nova Oportunidade</button>
+            {negocios.map(n => (
+              <div
+                key={n.id}
+                onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: n.clickup_negocio_id, name: n.nome })}
+                className="border border-slate-200 rounded-xl p-3 flex items-center justify-between cursor-pointer hover:border-indigo-300"
+              >
+                <div>
+                  <p className="font-bold text-sm text-slate-800">{n.nome}</p>
+                  <p className="text-xs text-slate-500">{n.estagio || '—'} {n.numero_proposta_oficial ? `· ${n.numero_proposta_oficial}` : ''}</p>
+                </div>
+                <span className="text-sm font-bold text-emerald-600">{formatBRL(resolveNegocioValor(n, propostasPorNegocio))}</span>
+                {n.sync_status === 'pending' && <span className="text-[10px] text-amber-500 ml-2">sincronizando...</span>}
+                {n.sync_status === 'failed' && <span className="text-[10px] text-rose-500 ml-2" title={n.sync_error}>falha ao sincronizar</span>}
+              </div>
+            ))}
+            {negocios.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Nenhuma oportunidade cadastrada.</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
