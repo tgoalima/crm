@@ -5716,12 +5716,22 @@ function App() {
           <button
             onClick={() => setActiveTab('tasks')}
             className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
-              activeTab === 'tasks' 
-                ? 'bg-slate-900 text-white shadow-sm font-semibold' 
+              activeTab === 'tasks'
+                ? 'bg-slate-900 text-white shadow-sm font-semibold'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
           >
             Tarefas Comerciais
+          </button>
+          <button
+            onClick={() => setActiveTab('empresas')}
+            className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
+              activeTab === 'empresas'
+                ? 'bg-slate-900 text-white shadow-sm font-semibold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            Empresas
           </button>
         </div>
       </div>
@@ -6945,6 +6955,9 @@ function App() {
           );
         })()}
 
+        {activeTab === 'empresas' && (
+          <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+        )}
 
       </div>
 
