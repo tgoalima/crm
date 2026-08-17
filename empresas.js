@@ -22,6 +22,98 @@ const resolveNegocioValor = (negocio, propostasPorNegocio) => {
 
 const ESTAGIOS_FORA_DO_PIPELINE = new Set(['Ganho', 'Perdido', 'Congelado']);
 
+const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas, onClose, onCriado }) => {
+  const [nome, setNome] = React.useState('');
+  const [buscaConta, setBuscaConta] = React.useState('');
+  const [contaEscolhida, setContaEscolhida] = React.useState(contaFixa || null);
+  const [salvando, setSalvando] = React.useState(false);
+  const [erro, setErro] = React.useState('');
+
+  const contasFiltradas = React.useMemo(() => {
+    if (contaFixa || !buscaConta.trim()) return [];
+    const termo = buscaConta.trim().toLowerCase();
+    return (contas || []).filter(c => (c.nome || '').toLowerCase().includes(termo)).slice(0, 8);
+  }, [contas, buscaConta, contaFixa]);
+
+  const salvar = async () => {
+    if (!nome.trim()) {
+      setErro('Informe o nome do negócio.');
+      return;
+    }
+    if (!contaEscolhida) {
+      setErro('Escolha a conta.');
+      return;
+    }
+    setSalvando(true);
+    setErro('');
+
+    const { data: numeroData, error: numeroErr } = await supabaseClient.rpc('gerar_numero_proposta');
+    if (numeroErr) {
+      setSalvando(false);
+      setErro('Erro ao gerar número: ' + numeroErr.message);
+      return;
+    }
+
+    const { error } = await supabaseClient.from('negocios').insert({
+      clickup_negocio_id: null,
+      nome: nome.trim(),
+      conta_id: contaEscolhida.id,
+      estagio: 'Registro',
+      numero_proposta_oficial: numeroData || null,
+      sync_status: 'pending',
+    });
+    setSalvando(false);
+    if (error) {
+      setErro('Erro ao salvar: ' + error.message);
+      return;
+    }
+    onCriado();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-lg text-slate-900">Nova Oportunidade</h3>
+        <input placeholder="Nome do negócio *" value={nome} onChange={(e) => setNome(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+
+        {contaFixa ? (
+          <p className="text-sm text-slate-600">Conta: <span className="font-bold">{contaFixa.nome}</span></p>
+        ) : (
+          <div className="relative">
+            <input
+              placeholder="Buscar conta *"
+              value={contaEscolhida ? contaEscolhida.nome : buscaConta}
+              onChange={(e) => { setContaEscolhida(null); setBuscaConta(e.target.value); }}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            />
+            {contasFiltradas.length > 0 && (
+              <div className="absolute z-10 bg-white border border-slate-200 rounded-lg mt-1 w-full max-h-48 overflow-y-auto shadow-lg">
+                {contasFiltradas.map(c => (
+                  <div
+                    key={c.id}
+                    onClick={() => { setContaEscolhida(c); setBuscaConta(''); }}
+                    className="px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer"
+                  >
+                    {c.nome}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {erro && <p className="text-xs text-rose-500">{erro}</p>}
+        <div className="flex gap-2 pt-2">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-slate-200 text-sm font-bold">Cancelar</button>
+          <button onClick={salvar} disabled={salvando} className="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold disabled:opacity-50">
+            {salvando ? 'Salvando...' : 'Criar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
   const [contas, setContas] = React.useState([]);
   const [negocios, setNegocios] = React.useState([]);

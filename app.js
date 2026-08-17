@@ -983,6 +983,8 @@ function App() {
   const [filterFabricante, setFilterFabricante] = useState(null);
   const [showDealsList, setShowDealsList] = useState(false);
   const [dealsListStatus, setDealsListStatus] = useState('Todos');
+  const [showNovaOportunidadeKanban, setShowNovaOportunidadeKanban] = useState(false);
+  const [contasParaBusca, setContasParaBusca] = useState([]);
   const [hasTime, setHasTime] = useState(false);
   const [newTaskTime, setNewTaskTime] = useState('09:00');
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
@@ -1755,6 +1757,24 @@ function App() {
       fetchKanbanData();
     }
   }, [activeTab, supabaseClient]);
+
+  // Busca as contas (só id + nome) pro autocomplete do modal "Nova Oportunidade"
+  // aberto direto do Kanban — só na primeira vez que o modal abre, não recarrega
+  // a cada reabertura.
+  useEffect(() => {
+    if (showNovaOportunidadeKanban && supabaseClient && contasParaBusca.length === 0) {
+      supabaseClient
+        .from('contas')
+        .select('id, nome')
+        .then(({ data, error }) => {
+          if (error) {
+            console.error("Erro ao carregar contas para busca:", error);
+            return;
+          }
+          setContasParaBusca(data || []);
+        });
+    }
+  }, [showNovaOportunidadeKanban, supabaseClient]);
 
   // Pré-carrega tarefas comerciais na montagem inicial para o drawer não iniciar vazio
   useEffect(() => {
@@ -6329,6 +6349,12 @@ function App() {
                     >
                       <span>📋 Lista Completa</span>
                     </button>
+                    <button
+                      onClick={() => setShowNovaOportunidadeKanban(true)}
+                      className="px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-600 text-white flex items-center gap-1.5"
+                    >
+                      <span>+ Nova Oportunidade</span>
+                    </button>
 
                     {/* Lupa de Busca Expansível no Kanban */}
                     <div className="relative flex items-center ml-1">
@@ -6510,6 +6536,16 @@ function App() {
                     );
                   })}
                 </div>
+                )}
+
+                {showNovaOportunidadeKanban && (
+                  <NovaOportunidadeModal
+                    supabaseClient={supabaseClient}
+                    contaFixa={null}
+                    contas={contasParaBusca}
+                    onClose={() => setShowNovaOportunidadeKanban(false)}
+                    onCriado={() => { setShowNovaOportunidadeKanban(false); fetchKanbanData(); }}
+                  />
                 )}
               </React.Fragment>
             )}
