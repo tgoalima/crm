@@ -278,3 +278,63 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
     </div>
   );
 };
+
+const NovoContatoModal = ({ supabaseClient, conta, onClose, onCriado }) => {
+  const [nome, setNome] = React.useState('');
+  const [cargo, setCargo] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [celular, setCelular] = React.useState('');
+  const [whatsapp, setWhatsapp] = React.useState('');
+  const [champion, setChampion] = React.useState(false);
+  const [salvando, setSalvando] = React.useState(false);
+  const [erro, setErro] = React.useState('');
+
+  const salvar = async () => {
+    if (!nome.trim()) {
+      setErro('Informe o nome.');
+      return;
+    }
+    setSalvando(true);
+    setErro('');
+    const { error } = await supabaseClient.from('contatos').insert({
+      clickup_contact_id: null,
+      nome: nome.trim(),
+      cargo: cargo.trim() || null,
+      email: email.trim() || null,
+      celular: celular.trim() || null,
+      whatsapp: whatsapp.trim() || null,
+      champion,
+      conta_id: conta.id,
+      sync_status: 'pending',
+    });
+    setSalvando(false);
+    if (error) {
+      setErro('Erro ao salvar: ' + error.message);
+      return;
+    }
+    onCriado();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-lg text-slate-900">Novo Contato — {conta.nome}</h3>
+        <input placeholder="Nome *" value={nome} onChange={(e) => setNome(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+        <input placeholder="Cargo" value={cargo} onChange={(e) => setCargo(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+        <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+        <input placeholder="Celular" value={celular} onChange={(e) => setCelular(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+        <input placeholder="WhatsApp" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={champion} onChange={(e) => setChampion(e.target.checked)} /> Champion
+        </label>
+        {erro && <p className="text-xs text-rose-500">{erro}</p>}
+        <div className="flex gap-2 pt-2">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-slate-200 text-sm font-bold">Cancelar</button>
+          <button onClick={salvar} disabled={salvando} className="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold disabled:opacity-50">
+            {salvando ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
