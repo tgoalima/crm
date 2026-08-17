@@ -23,8 +23,13 @@ A solução foi projetada sob uma arquitetura de baixo custo e alta performance:
 │       │   └── 📄 index.ts
 │       ├── 📁 clickup-status-webhook/ # Valida se há 1 proposta selecionada ao fechar como Ganho
 │       │   └── 📄 index.ts
-│       └── 📁 get-clickup-task/      # Proxy seguro para puxar contexto de tarefas do ClickUp
-│           └── 📄 index.ts
+│       ├── 📁 get-clickup-task/      # Proxy seguro para puxar contexto de tarefas do ClickUp
+│       │   └── 📄 index.ts
+│       └── 📁 mcp-brain/             # Servidor MCP: expõe o banco ao ClickUp Brain (somente leitura)
+│           ├── 📄 index.ts           # Protocolo MCP (JSON-RPC): initialize / tools.list / tools.call
+│           ├── 📄 tools.ts           # As 7 tools (propostas, forecast, fabricante, cliente, etc.)
+│           ├── 📄 clickup.ts         # Resolução de cliente via lista "Contas" do ClickUp
+│           └── 📄 supabase.ts        # Cliente Supabase (anon key, somente leitura)
 ├── 📄 index.html                     # Entrypoint do frontend SPA
 ├── 📄 styles.css                     # Estilos customizados, glassmorphism e timeline
 └── 📄 app.js                         # Interface interativa e lógica React (Babel runtime)
@@ -99,6 +104,50 @@ curl -X POST https://api.clickup.com/api/v2/team/SEU_TEAM_ID/webhook \
     "events": ["taskStatusUpdated"]
   }'
 ```
+
+---
+
+## 🧠 Integração com o ClickUp Brain (MCP Server)
+
+Expõe o banco Supabase (somente leitura) como um servidor MCP para o ClickUp Brain, permitindo que o diretor pergunte em linguagem natural sobre propostas, produtos, distribuidores e histórico de clientes.
+
+### 1. Deploy da Function
+
+```bash
+supabase functions deploy mcp-brain
+```
+
+### 2. Segredos adicionais
+
+```bash
+supabase secrets set SUPABASE_ANON_KEY="sua_anon_key"
+supabase secrets set MCP_AUTH_KEY="uma_chave_forte_gerada_por_voce"
+# CLICKUP_API_TOKEN já deve estar configurado (usado pelas outras functions)
+```
+
+> A function usa a **anon key**, não a service_role — as tabelas consultadas (`propostas`, `itens_proposta`, `produtos`, `distribuidores`) já têm policy de SELECT liberada para o role `anon` (ver `supabase/migrations/20260712_enable_rls.sql`).
+
+### 3. Configuração no ClickUp
+
+1. **Workspace Settings** → **Apps** → **MCP Servers** → **Add Custom MCP Server**.
+2. **Nome**: `Supabase CRM Suprimatica`.
+3. **URL**: `https://seu-projeto.supabase.co/functions/v1/mcp-brain`.
+4. **Header customizado**: `X-MCP-Key: <mesma chave definida em MCP_AUTH_KEY>`.
+5. **Escopo**: defina quem no workspace pode usar o servidor (ex.: apenas o diretor, ou todos os membros).
+
+### Tools disponíveis para o Brain
+
+| Tool | Uso |
+|---|---|
+| `buscar_proposta_por_negocio` | "Detalhe da proposta do negócio X" |
+| `listar_propostas_por_situacao` | "Quais são as propostas ativas?" |
+| `resumo_forecast` | "Qual é o forecast atual?" |
+| `analise_por_fabricante` | "Quais negócios temos com a Dell?" |
+| `analise_por_distribuidor` | "Quanto passamos pela Ingram Micro?" |
+| `historico_cliente` | "Qual é o histórico da Minerva?" |
+| `ranking_clientes` | "Quais são nossos 10 maiores clientes?" |
+
+`historico_cliente` e `ranking_clientes` resolvem o cliente pela lista **Contas** do ClickUp (não existe tabela `clientes`/`contas` no Supabase hoje), reaproveitando a mesma lógica de casamento de nomes de `scripts/migracao_agendor_perdidos.py`.
 
 ---
 

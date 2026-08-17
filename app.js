@@ -12,6 +12,23 @@ const DEAL_VALUE_FIELD_ID = 'ee65221a-029d-4d0a-a981-b71b5a29b4b4';
 const RESPONSAVEL_FIELD_ID = ''; // Mapeado via assignees nativos do ClickUp
 const API_KEY = '';
 
+// Mesmas opções (id/nome/cor) do custom field "Estágio da Venda" no ClickUp,
+// hardcoded aqui pra não precisar mais buscar isso do ClickUp toda vez que o
+// Kanban carrega (a SPA passou a ser a fonte de verdade do estágio — ver
+// docs/resumo.md, tabela `negocios`). Se as opções mudarem no ClickUp, tem
+// que atualizar aqui e em supabase/functions/mcp-brain/clickup.ts também.
+const ESTAGIO_OPTIONS = [
+  { id: '3c4bcf81-91d3-40e7-97ae-a67b6bccea0c', name: 'Registro', color: '#96c7f2' },
+  { id: '1cc9d0c7-cbee-45ff-8bbe-ac4a29ec9f46', name: 'Qualificação', color: '#96c7f2' },
+  { id: '5366c82c-2317-4978-8f4d-b41cb953be35', name: 'Proposta', color: '#8dcec3' },
+  { id: '97c5f286-e054-4351-b368-25977e8c429d', name: 'Desenvolvimento', color: '#92ceac' },
+  { id: '4863ea9f-ccd7-4b49-9aa5-685ee479e091', name: 'Negociação', color: '#12a594' },
+  { id: '22e91843-d067-4358-8238-6e619fc66653', name: 'Termo de aceite', color: '#30a46c' },
+  { id: 'c59ad408-ae8e-45d7-804f-eb9e6cd2935b', name: 'Ganho', color: '#2ecd6f' },
+  { id: '7520c5bc-95a4-47aa-8b12-0711f5bc9bfe', name: 'Perdido', color: '#E65100' },
+  { id: 'c231299c-44f8-4f5e-ad8e-58f7b8e01213', name: 'Congelado', color: '#0091ff' },
+];
+
 const chartColors = [
   'rgba(79, 70, 229, 0.8)',   // Indigo (#4f46e5)
   'rgba(16, 185, 129, 0.8)',   // Emerald (#10b981)
@@ -55,7 +72,7 @@ const safeStorage = {
       localStorage.setItem(key, val);
     } catch (e) {
       try {
-        localStorage.removeItem('crm_cache_kanban_tasks');
+        localStorage.removeItem('crm_cache_kanban_tasks_v2');
         localStorage.removeItem('crm_cache_vendedores');
         localStorage.setItem(key, val);
       } catch (err) {}
@@ -189,6 +206,16 @@ const getStageWidth = (name) => {
   return '100%';
 };
 
+// Mesmo predicado usado para filtrar os cards do Kanban pela busca — compartilhado
+// aqui também com o ForecastFunnelPanel para que o forecast reflita exatamente
+// os mesmos negócios que a busca já mostra nos cards.
+const taskMatchesSearchTerm = (task, term) => {
+  if (!term) return true;
+  const nameMatch = (task.name || '').toLowerCase().includes(term);
+  const customFieldsStr = (task.custom_fields || []).map(f => String(f.value || '')).join(' ').toLowerCase();
+  return nameMatch || customFieldsStr.includes(term);
+};
+
 const ForecastFunnelPanel = ({
   kanbanColumns,
   kanbanTasks,
@@ -196,6 +223,7 @@ const ForecastFunnelPanel = ({
   setFilterStage,
   filterFabricante,
   setFilterFabricante,
+  kanbanSearchTerm,
   getTaskOptionId,
   getOpportunityValue,
   onCardClick
@@ -209,9 +237,11 @@ const ForecastFunnelPanel = ({
     new Set(allTasks.flatMap(t => Array.isArray(t.fabricantes) ? t.fabricantes : []))
   ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
-  const safeTasks = filterFabricante
-    ? allTasks.filter(t => Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante))
-    : allTasks;
+  const searchTermNormalized = (kanbanSearchTerm || '').toLowerCase().trim();
+
+  const safeTasks = allTasks
+    .filter(t => !filterFabricante || (Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante)))
+    .filter(t => taskMatchesSearchTerm(t, searchTermNormalized));
 
   const activeCols = safeColumns.filter(col => {
     if (!col || typeof col.name !== 'string') return false;
@@ -882,8 +912,6 @@ function App() {
   const [clickupTaskId, setClickupTaskId] = useState('');
   const [clickupListId, setClickupListId] = useState('');
   
-  // Constante e Estados do Kanban & Drawer
-  const TARGET_LIST_ID = '901326185457';
   // Função para obter a aba inicial com base na Hash URL (SPA Hash Routing)
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '').trim();
@@ -915,7 +943,10 @@ function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
   const [kanbanTasks, setKanbanTasks] = useState(() => {
-    const cached = localStorage.getItem('crm_cache_kanban_tasks');
+    // v2: formato mudou de custom_fields (ClickUp) pra estagio (Supabase) em 17/08 —
+    // chave nova pra não reidratar com cache antigo incompatível (fazia getTaskOptionId
+    // não achar nenhum estágio e o Kanban parecer vazio até a busca nova completar).
+    const cached = localStorage.getItem('crm_cache_kanban_tasks_v2');
     return cached ? JSON.parse(cached) : [];
   });
   const [kanbanColumns, setKanbanColumns] = useState([]);
@@ -1466,24 +1497,14 @@ function App() {
   };
 
   // Funções do Kanban
+  // `task.estagio` é o nome do estágio direto da tabela `negocios` do Supabase
+  // (não mais um custom field do ClickUp) — só resolvemos o "id" da coluna
+  // (kanbanColumns) pra manter compatibilidade com todo o código existente
+  // que casa cards com colunas por id.
   const getTaskOptionId = (task, options) => {
-    const field = task.custom_fields ? task.custom_fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63') : null;
-    if (!field || field.value === undefined || field.value === null) return null;
-    
-    const valStr = String(field.value);
-    
-    const optById = options.find(o => o.id === valStr);
-    if (optById) return optById.id;
-
-    const idx = parseInt(field.value, 10);
-    if (!isNaN(idx) && options[idx]) {
-      return options[idx].id;
-    }
-
-    const optByName = options.find(o => o.name.toLowerCase() === valStr.toLowerCase());
-    if (optByName) return optByName.id;
-
-    return valStr;
+    if (!task || !task.estagio) return null;
+    const opt = options.find(o => o.name.toLowerCase() === task.estagio.toLowerCase());
+    return opt ? opt.id : null;
   };
 
   const getOpportunityValue = (task) => {
@@ -1521,17 +1542,16 @@ function App() {
       if (!isNaN(ve)) return ve;
     }
 
-    // 3. Fallback: Deal Value custom field do ClickUp
-    const dealValField = task.custom_fields
-      ? task.custom_fields.find(f => f.id === DEAL_VALUE_FIELD_ID)
-      : null;
-    if (dealValField && dealValField.value !== undefined && dealValField.value !== null) {
-      const raw = parseFloat(dealValField.value);
+    // 3. Fallback: valor_clickup_fallback (negocios.valor_clickup_fallback — espelho
+    // do campo "Valor do negócio" do ClickUp, só usado quando o negócio ainda não
+    // tem nenhuma proposta no Supabase)
+    if (task.valor_clickup_fallback !== undefined && task.valor_clickup_fallback !== null) {
+      const raw = parseFloat(task.valor_clickup_fallback);
       if (!isNaN(raw)) {
         return raw;
       }
     }
-    
+
     return null;
   };
 
@@ -1615,47 +1635,18 @@ function App() {
     }
   };
 
-  // Busca uma página de tarefas do ClickUp; retorna { tasks, lastPage }
-  const fetchClickUpTaskPage = async (page) => {
-    const res = await fetch(`/clickup-api/list/${TARGET_LIST_ID}/task?include_closed=true&page=${page}`);
-    if (!res.ok) return { tasks: [], lastPage: true };
-    const data = await res.json();
-    const tasks = data.tasks || [];
-    return { tasks, lastPage: data.last_page === true || tasks.length < 100 };
-  };
-
-  // Busca todas as páginas de tarefas do ClickUp em lotes paralelos (em vez de uma
-  // página por vez): busca a página 0 para saber se há mais, depois dispara um lote
-  // de páginas simultâneas até encontrar last_page, ao invés de esperar cada página
-  // terminar para pedir a próxima.
-  const fetchAllClickUpTasks = async () => {
-    const first = await fetchClickUpTaskPage(0);
-    let allTasks = [...first.tasks];
-    if (first.lastPage) return allTasks;
-
-    let nextPage = 1;
-    let done = false;
-    const BATCH_SIZE = 10;
-    while (!done) {
-      const batchPages = Array.from({ length: BATCH_SIZE }, (_, i) => nextPage + i);
-      const results = await Promise.all(batchPages.map(p => fetchClickUpTaskPage(p)));
-      for (const r of results) {
-        allTasks = allTasks.concat(r.tasks);
-        if (r.lastPage) done = true;
-      }
-      nextPage += BATCH_SIZE;
-      if (results.every(r => r.tasks.length === 0)) done = true;
-    }
-    return allTasks;
-  };
-
   const fetchKanbanData = async (silent = false) => {
     if (kanbanTasks.length === 0 && !silent) {
       setLoadingKanban(true);
     }
     try {
-      // 1. Carregar propostas do Supabase, colunas do ClickUp e tarefas do ClickUp
-      // em paralelo (antes eram 3 chamadas em sequência, uma esperando a outra).
+      // Negócios, propostas e itens_proposta — tudo direto do Supabase agora.
+      // O Kanban não faz mais nenhuma chamada ao ClickUp pra se popular (a
+      // SPA é a fonte de verdade; ver docs/resumo.md, tabela `negocios`).
+      const negociosPromise = supabaseClient
+        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback')
+        : Promise.resolve({ data: [], error: null });
+
       const propsPromise = supabaseClient
         ? supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, criado_por, data_fechamento')
         : Promise.resolve({ data: [], error: null });
@@ -1664,16 +1655,17 @@ function App() {
         ? supabaseClient.from('itens_proposta').select('proposta_id, produtos(fabricante)')
         : Promise.resolve({ data: [], error: null });
 
-      const fieldsPromise = fetch(`/clickup-api/list/${TARGET_LIST_ID}/field`)
-        .then(res => (res.ok ? res.json() : null))
-        .catch(() => null);
-
-      const [{ data: props, error: propsErr }, { data: itensData, error: itensErr }, fieldsData, allTasks] = await Promise.all([
+      const [{ data: negociosData, error: negociosErr }, { data: props, error: propsErr }, { data: itensData, error: itensErr }] = await Promise.all([
+        negociosPromise,
         propsPromise,
         itensPromise,
-        fieldsPromise,
-        fetchAllClickUpTasks(),
       ]);
+
+      if (negociosErr) {
+        console.error("Erro ao carregar negócios do Supabase:", negociosErr);
+      }
+
+      setKanbanColumns(ESTAGIO_OPTIONS);
 
       // Índice proposta_id -> lista de fabricantes distintos dos itens da proposta
       const fabricantesByPropId = new Map();
@@ -1693,15 +1685,8 @@ function App() {
         setSupabaseProposalsList(props);
       }
 
-      if (fieldsData && fieldsData.fields) {
-        const stageField = fieldsData.fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63');
-        if (stageField && stageField.type_config && stageField.type_config.options) {
-          setKanbanColumns(stageField.type_config.options);
-        }
-      }
-
-      // 2. Índice das propostas por clickup_negocio_id (uma vez, O(m)) em vez de
-      // filtrar a lista inteira de propostas para cada uma das tarefas (O(n*m)).
+      // Índice das propostas por clickup_negocio_id (uma vez, O(m)) em vez de
+      // filtrar a lista inteira de propostas para cada um dos negócios (O(n*m)).
       const propsByClickupId = new Map();
       for (const p of propsList) {
         const pClean = String(p.clickup_negocio_id || '').replace('#', '').trim();
@@ -1710,16 +1695,12 @@ function App() {
         propsByClickupId.get(pClean).push(p);
       }
 
-      // 3. Enriquecer tarefas com responsável e valor da proposta do Supabase
-      const enrichedTasks = allTasks.map(t => {
-        const idAlpha = String(t.id || '').replace('#', '').trim();
-        const idNumeric = String(t.custom_id || t.task_id || '').replace('#', '').trim();
-
+      // Enriquecer negócios com responsável e valor da proposta do Supabase
+      const enrichedTasks = (negociosData || []).map(n => {
+        const idClean = String(n.clickup_negocio_id || '').replace('#', '').trim();
         const matchedProps = [
-          ...(propsByClickupId.get(idAlpha) || []),
-          ...(idNumeric ? propsByClickupId.get(idNumeric) || [] : []),
-          ...(idAlpha ? propsByClickupId.get('#' + idAlpha) || [] : []),
-          ...(idNumeric ? propsByClickupId.get('#' + idNumeric) || [] : []),
+          ...(propsByClickupId.get(idClean) || []),
+          ...(idClean ? propsByClickupId.get('#' + idClean) || [] : []),
         ];
 
         let resp = '';
@@ -1742,22 +1723,28 @@ function App() {
           dataFechamento = best.data_fechamento || null;
         }
 
-        if (t.assignees && t.assignees.length > 0) {
-          resp = t.assignees[0].username || t.assignees[0].email || resp;
-        }
-
-        return { ...t, responsavel_negocio: resp, supabase_deal_value: supabaseDealValue, fabricantes, data_fechamento: dataFechamento };
+        return {
+          id: idClean,
+          name: n.nome,
+          estagio: n.estagio,
+          valor_clickup_fallback: n.valor_clickup_fallback,
+          custom_fields: [],
+          responsavel_negocio: resp,
+          supabase_deal_value: supabaseDealValue,
+          fabricantes,
+          data_fechamento: dataFechamento,
+        };
       });
 
       setKanbanTasks(enrichedTasks);
       try {
-        safeStorage.setItem('crm_cache_kanban_tasks', JSON.stringify(enrichedTasks));
+        safeStorage.setItem('crm_cache_kanban_tasks_v2', JSON.stringify(enrichedTasks));
       } catch (storageErr) {
         // Ignora cota excedida do Safari silenciosamente
       }
     } catch (err) {
       console.error("Erro ao carregar dados do Kanban:", err);
-      showToast("Erro ao carregar dados do Kanban do ClickUp.", "error");
+      showToast("Erro ao carregar dados do Kanban.", "error");
     } finally {
       if (!silent) setLoadingKanban(false);
     }
@@ -1815,35 +1802,30 @@ function App() {
       }
 
       // 1. Atualização otimista local do estado do React (move card no Kanban e no SelectedTask)
-      setKanbanTasks(prev => prev.map(t => {
-        if (t.id === taskId) {
-          const updatedFields = t.custom_fields 
-            ? t.custom_fields.map(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63' ? { ...f, value: targetOptionId } : f)
-            : [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: targetOptionId }];
-          return { ...t, custom_fields: updatedFields };
-        }
-        return t;
-      }));
+      setKanbanTasks(prev => prev.map(t => (t.id === taskId ? { ...t, estagio: targetOption.name } : t)));
       if (selectedTask && selectedTask.id === taskId) {
-        setSelectedTask(prev => {
-          if (!prev) return prev;
-          const updatedFields = prev.custom_fields 
-            ? prev.custom_fields.map(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63' ? { ...f, value: targetOptionId } : f)
-            : [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: targetOptionId }];
-          return { ...prev, custom_fields: updatedFields };
-        });
+        setSelectedTask(prev => (prev ? { ...prev, estagio: targetOption.name } : prev));
       }
 
-      // 2. Chamar APIs do ClickUp em paralelo
       const cleanTaskId = String(taskId).replace('#', '').trim();
       const idWithHash = '#' + cleanTaskId;
 
+      // 2. Supabase é a fonte de verdade do estágio agora — grava lá primeiro.
+      if (supabaseClient) {
+        const { error: estagioErr } = await supabaseClient
+          .from('negocios')
+          .update({ estagio: targetOption.name })
+          .or(`clickup_negocio_id.eq.${cleanTaskId},clickup_negocio_id.eq.${idWithHash}`);
+        if (estagioErr) throw estagioErr;
+      }
+
+      // 3. Propaga pro ClickUp (espelho, pra quem ainda consulta o negócio por lá)
       await Promise.all([
         updateTaskStage(cleanTaskId, targetOptionId),
         updateTaskClickupStatus(cleanTaskId, clickupStatus)
       ]);
 
-      // 3. REGRA DE REABERTURA: Se o estágio escolhido for do pipeline ativo (não Ganho e não Perdido),
+      // 4. REGRA DE REABERTURA: Se o estágio escolhido for do pipeline ativo (não Ganho e não Perdido),
       // reabrir propostas associadas em Supabase limpando data_fechamento e motivo_perda
       if (!targetName.includes("ganho") && !targetName.includes("perdido") && supabaseClient) {
         await supabaseClient
@@ -1872,10 +1854,10 @@ function App() {
         }));
       }
 
-      showToast(`Oportunidade atualizada no ClickUp!`, "success");
+      showToast(`Oportunidade atualizada!`, "success");
     } catch (err) {
       console.error("Erro na sincronização de estado:", err);
-      showToast("Não foi possível atualizar o ClickUp.", "error");
+      showToast("Não foi possível atualizar a oportunidade.", "error");
       fetchKanbanData();
     }
   };
@@ -6436,6 +6418,7 @@ function App() {
                     setFilterStage={setFilterStage}
                     filterFabricante={filterFabricante}
                     setFilterFabricante={setFilterFabricante}
+                    kanbanSearchTerm={kanbanSearchTerm}
                     getTaskOptionId={getTaskOptionId}
                     getOpportunityValue={getOpportunityValue}
                     onCardClick={handleCardClick}
@@ -6453,11 +6436,7 @@ function App() {
                     const tasksInCol = kanbanTasks.filter(t => {
                       const inCol = getTaskOptionId(t, kanbanColumns) === col.id;
                       if (!inCol) return false;
-                      if (!kanbanSearchTerm.trim()) return true;
-                      const term = kanbanSearchTerm.toLowerCase().trim();
-                      const nameMatch = (t.name || '').toLowerCase().includes(term);
-                      const customFieldsStr = (t.custom_fields || []).map(f => String(f.value || '')).join(' ').toLowerCase();
-                      return nameMatch || customFieldsStr.includes(term);
+                      return taskMatchesSearchTerm(t, kanbanSearchTerm.toLowerCase().trim());
                     });
                     
                     const sortedTasks = [...tasksInCol].sort((a, b) => {
@@ -8119,10 +8098,7 @@ function App() {
 
                     {/* Grid de Estágios com Ganho e Perdido acendendo apenas quando fechados */}
                     {(() => {
-                      const stageField = selectedTask && selectedTask.custom_fields 
-                        ? selectedTask.custom_fields.find(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63') 
-                        : null;
-                      const rawOptions = (stageField && stageField.type_config && stageField.type_config.options) || kanbanColumns || [];
+                      const rawOptions = kanbanColumns || [];
                       const options = rawOptions.filter(o => {
                         const n = (o.name || '').toLowerCase();
                         return !n.includes('congelad') && !n.includes('ganho') && !n.includes('perdido');
@@ -8158,13 +8134,7 @@ function App() {
                                   key={col.id || idx}
                                   onClick={async () => {
                                     if (selectedTask) {
-                                      setSelectedTask(prev => {
-                                        if (!prev) return prev;
-                                        const updatedFields = prev.custom_fields 
-                                          ? prev.custom_fields.map(f => f.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63' ? { ...f, value: col.id } : f)
-                                          : [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: col.id }];
-                                        return { ...prev, custom_fields: updatedFields };
-                                      });
+                                      setSelectedTask(prev => (prev ? { ...prev, estagio: col.name } : prev));
                                       await handleOpportunityStateChange(selectedTask.id, col.id);
                                     }
                                   }}
