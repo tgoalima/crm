@@ -121,7 +121,8 @@ Deno.serve(async (req) => {
       .eq("id", record.id);
 
     if (updateErr) {
-      throw new Error(`Falha ao atualizar negocios no Supabase: ${updateErr.message}`);
+      await marcarFalha(supabase, record.id, `Tarefa ClickUp criada (id=${novoClickupId}) mas falha ao atualizar Supabase: ${updateErr.message}`);
+      return new Response(JSON.stringify({ success: false }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     }
 
     return new Response(JSON.stringify({ success: true, clickup_negocio_id: novoClickupId }), {
