@@ -7,7 +7,8 @@
 // (getOpportunityValue em app.js) — mas operando direto sobre negocio/propostas
 // do Supabase, sem precisar do formato enriquecido do Kanban.
 const resolveNegocioValor = (negocio, propostasPorNegocio) => {
-  const props = propostasPorNegocio.get(negocio.clickup_negocio_id) || propostasPorNegocio.get(negocio.id) || [];
+  const key = String(negocio.clickup_negocio_id || '').replace('#', '').trim();
+  const props = propostasPorNegocio.get(key) || [];
   if (props.length === 0) return 0;
   const best =
     props.find(p => p.situacao === 'Selecionada') ||
@@ -46,9 +47,10 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
 
     const propsMap = new Map();
     for (const p of propostasData || []) {
-      const lista = propsMap.get(p.clickup_negocio_id) || [];
+      const key = String(p.clickup_negocio_id || '').replace('#', '').trim();
+      const lista = propsMap.get(key) || [];
       lista.push(p);
-      propsMap.set(p.clickup_negocio_id, lista);
+      propsMap.set(key, lista);
     }
 
     setContas(contasData || []);
