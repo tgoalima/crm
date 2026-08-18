@@ -40,7 +40,7 @@ function resolveEstagioNome(rawValue: unknown): string | null {
   return byName ? byName.nome : null;
 }
 
-async function clickupGet(endpoint: string): Promise<any | null> {
+export async function clickupGet(endpoint: string): Promise<any | null> {
   const res = await fetch(`https://api.clickup.com/api/v2/${endpoint}`, {
     headers: { Authorization: CLICKUP_API_TOKEN },
   });

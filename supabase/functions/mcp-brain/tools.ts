@@ -3,7 +3,15 @@
 // e estágio do negócio no funil).
 
 import { supabase } from "./supabase.ts";
-import { ESTAGIOS_FORA_DO_PIPELINE } from "./clickup.ts";
+import { ESTAGIOS_FORA_DO_PIPELINE, clickupGet } from "./clickup.ts";
+
+// Pasta técnica onde sync-proposta-tecnica-clickup cria a lista/tarefa
+// "Enviar Proposta vX" (ver supabase/functions/sync-proposta-tecnica-clickup).
+// O "vínculo" entre a proposta do Supabase e a tarefa técnica no ClickUp não é
+// uma coluna gravada em lugar nenhum — é a própria convenção de nomes
+// determinística ("{numero_proposta_oficial} - {nome}" / "Enviar Proposta vX"),
+// reconstruída aqui só para leitura.
+const FOLDER_PROJETOS_ID = "90134052120";
 
 // Resolve uma Conta pelo nome direto na tabela `contas` do Supabase (populada
 // por scripts/migracao_contas_contatos_clickup.py a partir da lista Contas do
@@ -141,6 +149,25 @@ export const TOOLS = [
       },
     },
   },
+  {
+    name: "detalhes_versao_proposta",
+    description:
+      "Detalhes completos de UMA versão específica de uma proposta (ex: 'versão C da proposta do negócio X'), juntando os dados do CRM (Supabase: itens, produtos, valores, situação) com o status e os comentários da tarefa técnica correspondente no ClickUp ('Enviar Proposta vX', criada na automação de Pré-Vendas). Use esta tool sempre que a pergunta mencionar uma letra/versão específica de proposta.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        identificador: {
+          type: "string",
+          description: "Nome do negócio ou número oficial da proposta (ex: '13205/2026') — usado para achar o negócio no Supabase.",
+        },
+        versao: {
+          type: "string",
+          description: "Letra ou versão (ex: 'C', 'vC') — case-insensitive, o prefixo 'v' é opcional.",
+        },
+      },
+      required: ["identificador", "versao"],
+    },
+  },
 ];
 
 export async function callTool(name: string, args: Record<string, unknown>) {
@@ -170,6 +197,8 @@ export async function callTool(name: string, args: Record<string, unknown>) {
         args.data_inicio ? String(args.data_inicio) : undefined,
         args.data_fim ? String(args.data_fim) : undefined,
       );
+    case "detalhes_versao_proposta":
+      return detalhesVersaoProposta(String(args.identificador || ""), String(args.versao || ""));
     default:
       throw new Error(`Tool desconhecida: ${name}`);
   }
@@ -463,5 +492,113 @@ async function rankingClientes(topN: number, dataInicio?: string, dataFim?: stri
   return {
     periodo: { data_inicio: dataInicio || null, data_fim: dataFim || null },
     ranking,
+  };
+}
+
+function normalizarVersao(v: string): string {
+  const t = v.trim();
+  return t.toLowerCase().startsWith("v") ? "v" + t.slice(1).toUpperCase() : "v" + t.toUpperCase();
+}
+
+async function detalhesVersaoProposta(identificador: string, versao: string) {
+  if (!identificador) throw new Error("identificador é obrigatório");
+  if (!versao) throw new Error("versao é obrigatória");
+  const versaoNorm = normalizarVersao(versao);
+
+  // 1) Resolve o negócio no Supabase (por número oficial ou nome parcial)
+  const { data: candidatos, error: negError } = await supabase
+    .from("negocios")
+    .select("id, nome, numero_proposta_oficial, clickup_negocio_id, estagio")
+    .or(`numero_proposta_oficial.eq.${identificador},nome.ilike.%${identificador}%`)
+    .limit(5);
+  if (negError) throw new Error(negError.message);
+
+  if (!candidatos || candidatos.length === 0) {
+    return { encontrado: false, mensagem: `Nenhum negócio encontrado para "${identificador}".` };
+  }
+  if (candidatos.length > 1) {
+    return {
+      encontrado: false,
+      ambiguo: true,
+      mensagem: "Mais de um negócio bate com esse identificador — peça pro usuário especificar qual.",
+      candidatos: candidatos.map((n) => ({ nome: n.nome, numero_proposta_oficial: n.numero_proposta_oficial })),
+    };
+  }
+  const negocio = candidatos[0];
+
+  // 2) Resolve a versão específica da proposta no Supabase
+  const { data: proposta, error: propError } = await supabase
+    .from("propostas")
+    .select(PROPOSTA_SELECT)
+    .eq("clickup_negocio_id", negocio.clickup_negocio_id)
+    .ilike("versao", versaoNorm)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (propError) throw new Error(propError.message);
+
+  if (!proposta) {
+    return {
+      encontrado: false,
+      mensagem: `Negócio "${negocio.nome}" encontrado, mas não existe a versão ${versaoNorm} no CRM.`,
+      negocio: { nome: negocio.nome, numero_proposta_oficial: negocio.numero_proposta_oficial },
+    };
+  }
+
+  // 3) Reconstrói o "vínculo" com o ClickUp pela convenção de nomes (não é
+  // uma coluna gravada em lugar nenhum — ver sync-proposta-tecnica-clickup).
+  let clickupTecnico: Record<string, unknown> = { encontrado: false };
+  if (negocio.numero_proposta_oficial) {
+    const nomeLista = `${negocio.numero_proposta_oficial} - ${negocio.nome}`;
+    const listasRes = await clickupGet(`folder/${FOLDER_PROJETOS_ID}/list`);
+    const lista = (listasRes?.lists || []).find((l: any) => (l.name || "").trim() === nomeLista);
+
+    if (lista) {
+      const nomeTarefa = `Enviar Proposta ${versaoNorm}`;
+      const tarefasRes = await clickupGet(`list/${lista.id}/task?include_closed=true`);
+      const tarefa = (tarefasRes?.tasks || []).find(
+        (t: any) => (t.name || "").trim().toLowerCase() === nomeTarefa.toLowerCase(),
+      );
+
+      if (tarefa) {
+        const comentariosRes = await clickupGet(`task/${tarefa.id}/comment`);
+        clickupTecnico = {
+          encontrado: true,
+          lista_tecnica: { id: lista.id, nome: lista.name },
+          tarefa_tecnica: {
+            id: tarefa.id,
+            nome: tarefa.name,
+            status: tarefa.status?.status || null,
+            url: `https://app.clickup.com/t/${tarefa.id}`,
+            data_criacao: tarefa.date_created ? new Date(Number(tarefa.date_created)).toISOString() : null,
+            data_fechamento: tarefa.date_closed ? new Date(Number(tarefa.date_closed)).toISOString() : null,
+          },
+          comentarios: (comentariosRes?.comments || []).map((c: any) => ({
+            autor: c.user?.username || null,
+            texto: c.comment_text || null,
+            data: c.date ? new Date(Number(c.date)).toISOString() : null,
+          })),
+        };
+      } else {
+        clickupTecnico = { encontrado: false, mensagem: `Lista técnica existe, mas a tarefa "${nomeTarefa}" não foi encontrada nela.` };
+      }
+    } else {
+      clickupTecnico = { encontrado: false, mensagem: `Lista técnica "${nomeLista}" ainda não existe no ClickUp.` };
+    }
+  }
+
+  return {
+    negocio: { nome: negocio.nome, numero_proposta_oficial: negocio.numero_proposta_oficial, estagio: negocio.estagio },
+    proposta: {
+      versao: proposta.versao,
+      cenario: proposta.cenario,
+      situacao: proposta.situacao,
+      total_proposta: proposta.total_proposta,
+      criado_por: proposta.criado_por,
+      data_fechamento: proposta.data_fechamento,
+      motivo_perda: proposta.motivo_perda,
+      itens: proposta.itens_proposta,
+    },
+    clickup_tecnico: clickupTecnico,
   };
 }
