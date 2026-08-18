@@ -17,6 +17,8 @@ const OPT_TIPO_PROJETO = "fa509e92-7528-4a8b-a9bc-11f2f5da3350";
 const CF_CRM_ITEM_TYPE = "bc39138f-fe02-4480-9c08-f1a8a4eefd5d";
 const OPT_CRM_ITEM_NEGOCIO = "cd6922b0-34f4-45e3-853a-cba995a2591c";
 const CF_NUMERO_PROPOSTA = "c44cc05d-303f-47e2-b243-40c6b26b732f";
+const CF_VALOR = "ee65221a-029d-4d0a-a981-b71b5a29b4b4";
+const CF_PROBABILIDADE = "2c667b12-79c6-4949-b995-5c3938e7ff51";
 
 const ESTAGIO_NOME_PARA_ID: Record<string, string> = {
   "Registro": "3c4bcf81-91d3-40e7-97ae-a67b6bccea0c",
@@ -28,6 +30,23 @@ const ESTAGIO_NOME_PARA_ID: Record<string, string> = {
   "Ganho": "c59ad408-ae8e-45d7-804f-eb9e6cd2935b",
   "Perdido": "7520c5bc-95a4-47aa-8b12-0711f5bc9bfe",
   "Congelado": "c231299c-44f8-4f5e-ad8e-58f7b8e01213",
+};
+
+const TIPO_OPORTUNIDADE_CLICKUP: Record<string, string> = {
+  "Projeto": "fa509e92-7528-4a8b-a9bc-11f2f5da3350",
+  "Garantias": "52b4285a-1e92-4ecb-b8b9-7a2348461882",
+  "Serviços": "2e351ad7-2af5-4532-be83-fe24423a1994",
+  "SSU": "62c6d78c-fa67-44d8-b594-66ed63264df1",
+  "Volumes": "62f161bc-b78b-46b7-a73b-1d8faa1a1246",
+  "Upgrade": "e55ef41f-51e6-436e-bb53-79ff688960c7",
+};
+
+const RO_CLICKUP_IDS: Record<string, string> = {
+  roInfra: "673b8e3f-f6b2-4b09-b536-fe881b9e5780",
+  roSw1: "769281a2-dade-47ae-8867-453fbac6adb3",
+  roSw2: "e1a271ac-107d-4131-b63c-87dfb2e2396d",
+  roSw3: "a940746a-b869-4bb7-8f7c-81775c169022",
+  roSw4: "cf2a09b3-a85a-43cb-8e2e-0f1bdfc243f5",
 };
 
 const corsHeaders = {
@@ -70,30 +89,58 @@ Deno.serve(async (req) => {
       .eq("id", record.conta_id)
       .single();
 
-    if (contaErr || !conta?.clickup_account_id) {
-      await marcarFalha(supabase, record.id, `Conta não encontrada ou sem clickup_account_id (conta_id=${record.conta_id})`);
+    if (contaErr) {
+      await marcarFalha(supabase, record.id, `Conta não encontrada (conta_id=${record.conta_id})`);
       return new Response(JSON.stringify({ success: false }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     }
+    // A conta pode ainda estar com clickup_account_id NULL (criada há pouco pela SPA,
+    // ainda não sincronizada com o ClickUp — mesmo padrão async deste negócio). Não é
+    // motivo pra falhar: cria a tarefa do negócio mesmo assim, só não dá pra vincular
+    // à tarefa da conta ainda (o passo de vínculo já é não-bloqueante logo abaixo).
 
     // 2) Criar a tarefa no ClickUp
     const estagioId = ESTAGIO_NOME_PARA_ID[record.estagio] || ESTAGIO_NOME_PARA_ID["Registro"];
+    const tipoId = TIPO_OPORTUNIDADE_CLICKUP[record.tipo_oportunidade] || OPT_TIPO_PROJETO;
     const customFields: Record<string, unknown>[] = [
       { id: CF_ESTAGIO_VENDA, value: estagioId },
-      { id: CF_TIPO_OPORTUNIDADE, value: OPT_TIPO_PROJETO },
+      { id: CF_TIPO_OPORTUNIDADE, value: tipoId },
       { id: CF_CRM_ITEM_TYPE, value: OPT_CRM_ITEM_NEGOCIO },
     ];
     if (record.numero_proposta_oficial) {
       customFields.push({ id: CF_NUMERO_PROPOSTA, value: record.numero_proposta_oficial });
     }
+    if (record.valor_clickup_fallback) {
+      customFields.push({ id: CF_VALOR, value: record.valor_clickup_fallback });
+    }
+    if (record.probabilidade) {
+      customFields.push({ id: CF_PROBABILIDADE, value: record.probabilidade });
+    }
+    const RO_COLUNAS: Record<string, string> = {
+      roInfra: "ro_infra",
+      roSw1: "ro_sw1",
+      roSw2: "ro_sw2",
+      roSw3: "ro_sw3",
+      roSw4: "ro_sw4",
+    };
+    for (const [campo, cfId] of Object.entries(RO_CLICKUP_IDS)) {
+      const valor = record[RO_COLUNAS[campo]];
+      if (valor) customFields.push({ id: cfId, value: valor });
+    }
+
+    const createBody: Record<string, unknown> = {
+      name: record.nome,
+      custom_item_id: CUSTOM_ITEM_ID_NEGOCIO,
+      custom_fields: customFields,
+    };
+    if (record.descricao) createBody.description = record.descricao;
+    if (record.data_previsao) {
+      createBody.due_date = new Date(`${record.data_previsao}T12:00:00Z`).getTime();
+    }
 
     const createRes = await fetch(`https://api.clickup.com/api/v2/list/${NEGOCIOS_LIST_ID}/task`, {
       method: "POST",
       headers: { Authorization: CLICKUP_API_TOKEN, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: record.nome,
-        custom_item_id: CUSTOM_ITEM_ID_NEGOCIO,
-        custom_fields: customFields,
-      }),
+      body: JSON.stringify(createBody),
     });
 
     if (!createRes.ok) {
@@ -105,13 +152,18 @@ Deno.serve(async (req) => {
     const created = await createRes.json();
     const novoClickupId = created.id;
 
-    // 3) Vincular à Conta (não bloqueia — se falhar, o negócio já existe e fica sem vínculo visual no ClickUp)
-    const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
-      method: "POST",
-      headers: { Authorization: CLICKUP_API_TOKEN },
-    });
-    if (!linkRes.ok) {
-      console.error(`[sync-negocio-clickup] Falha ao vincular ${novoClickupId} -> ${conta.clickup_account_id}: ${linkRes.status}`);
+    // 3) Vincular à Conta (não bloqueia — se falhar ou a conta ainda não tiver
+    // clickup_account_id, o negócio já existe e fica sem vínculo visual no ClickUp)
+    if (conta?.clickup_account_id) {
+      const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
+        method: "POST",
+        headers: { Authorization: CLICKUP_API_TOKEN },
+      });
+      if (!linkRes.ok) {
+        console.error(`[sync-negocio-clickup] Falha ao vincular ${novoClickupId} -> ${conta.clickup_account_id}: ${linkRes.status}`);
+      }
+    } else {
+      console.warn(`[sync-negocio-clickup] Conta ${record.conta_id} ainda sem clickup_account_id — negócio ${novoClickupId} criado sem vínculo.`);
     }
 
     // 4) Confirmar no Supabase

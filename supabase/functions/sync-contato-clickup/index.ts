@@ -66,10 +66,12 @@ Deno.serve(async (req) => {
       .eq("id", record.conta_id)
       .single();
 
-    if (contaErr || !conta?.clickup_account_id) {
+    if (contaErr) {
       await marcarFalha(supabase, record.id, `Conta não encontrada (conta_id=${record.conta_id})`);
       return new Response(JSON.stringify({ success: false }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     }
+    // A conta pode ainda estar com clickup_account_id NULL (criada há pouco pela SPA,
+    // ainda não sincronizada) — não é motivo pra falhar, só não dá pra vincular ainda.
 
     const fieldIds = await buscarCamposDaLista();
     const customFields: Record<string, unknown>[] = [{ id: CF_CRM_ITEM_TYPE, value: OPT_CRM_ITEM_CONTATO }];
@@ -98,12 +100,16 @@ Deno.serve(async (req) => {
     const created = await createRes.json();
     const novoClickupId = created.id;
 
-    const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
-      method: "POST",
-      headers: { Authorization: CLICKUP_API_TOKEN },
-    });
-    if (!linkRes.ok) {
-      console.error(`[sync-contato-clickup] Falha ao vincular ${novoClickupId} -> ${conta.clickup_account_id}: ${linkRes.status}`);
+    if (conta?.clickup_account_id) {
+      const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
+        method: "POST",
+        headers: { Authorization: CLICKUP_API_TOKEN },
+      });
+      if (!linkRes.ok) {
+        console.error(`[sync-contato-clickup] Falha ao vincular ${novoClickupId} -> ${conta.clickup_account_id}: ${linkRes.status}`);
+      }
+    } else {
+      console.warn(`[sync-contato-clickup] Conta ${record.conta_id} ainda sem clickup_account_id — contato ${novoClickupId} criado sem vínculo.`);
     }
 
     const { error: updateErr } = await supabase
