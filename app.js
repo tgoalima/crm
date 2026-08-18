@@ -1177,6 +1177,7 @@ function App() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
   const [filterStage, setFilterStage] = useState(null);
+  const [filterFabricante, setFilterFabricante] = useState(null);
   const [showDealsList, setShowDealsList] = useState(false);
   const [dealsListStatus, setDealsListStatus] = useState('Todos');
   const [showEditNegocioDrawerModal, setShowEditNegocioDrawerModal] = useState(false);
