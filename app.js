@@ -6742,26 +6742,6 @@ function App() {
                   <div className="flex items-center space-x-3 flex-wrap gap-y-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Exibir Estágios:</span>
                     <button
-                      onClick={() => { setDealsListStatus('Ganho'); setShowDealsList(true); setShowForecast(false); }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showDealsList && dealsListStatus === 'Ganho'
-                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
-                      }`}
-                    >
-                      <span>🏆 Ganho</span>
-                    </button>
-                    <button
-                      onClick={() => { setDealsListStatus('Perdido'); setShowDealsList(true); setShowForecast(false); }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showDealsList && dealsListStatus === 'Perdido'
-                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
-                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
-                      }`}
-                    >
-                      <span>😞 Perdido</span>
-                    </button>
-                    <button
                       onClick={() => { setDealsListStatus('Congelado'); setShowDealsList(true); setShowForecast(false); }}
                       className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
                         showDealsList && dealsListStatus === 'Congelado'
