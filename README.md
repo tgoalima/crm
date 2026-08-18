@@ -35,7 +35,7 @@ A solução foi projetada sob uma arquitetura de baixo custo e alta performance:
 │       │   └── 📄 index.ts
 │       └── 📁 mcp-brain/             # Servidor MCP: expõe o banco ao ClickUp Brain (somente leitura)
 │           ├── 📄 index.ts           # Protocolo MCP (JSON-RPC): initialize / tools.list / tools.call
-│           ├── 📄 tools.ts           # As 7 tools (propostas, forecast, fabricante, cliente, etc.)
+│           ├── 📄 tools.ts           # As 9 tools (propostas, forecast, fabricante, cliente, versão de proposta, etc.)
 │           ├── 📄 clickup.ts         # Resolução de cliente via lista "Contas" do ClickUp
 │           └── 📄 supabase.ts        # Cliente Supabase (anon key, somente leitura)
 ├── 📄 index.html                     # Entrypoint do frontend SPA
@@ -200,6 +200,8 @@ supabase secrets set MCP_AUTH_KEY="uma_chave_forte_gerada_por_voce"
 | `analise_por_distribuidor` | "Quanto passamos pela Ingram Micro?" |
 | `historico_cliente` | "Qual é o histórico da Minerva?" |
 | `ranking_clientes` | "Quais são nossos 10 maiores clientes?" |
+| `negocios_fechados` | "Quantos negócios ganhamos esse mês?" |
+| `detalhes_versao_proposta` | "Como está a versão C da proposta do negócio X?" — junta os dados da proposta no Supabase com o status/comentários da tarefa técnica "Enviar Proposta vX" no ClickUp. |
 
 `historico_cliente` e `ranking_clientes` resolvem o cliente pela lista **Contas** do ClickUp (não existe tabela `clientes`/`contas` no Supabase hoje), reaproveitando a mesma lógica de casamento de nomes de `scripts/migracao_agendor_perdidos.py`.
 
