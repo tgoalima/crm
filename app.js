@@ -7064,12 +7064,12 @@ function App() {
           };
 
           const typeConfig = {
-            'Ligação':   { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',   text: 'text-indigo-700',   border: 'border-indigo-200', icon: '📞' },
-            'Reunião':   { dot: 'bg-emerald-500', bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200', icon: '🤝' },
-            'E-mail':    { dot: 'bg-amber-500',   bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',   icon: '✉️' },
-            'Follow-up': { dot: 'bg-rose-500',    bg: 'bg-rose-50',     text: 'text-rose-700',     border: 'border-rose-200',    icon: '🔄' },
-            'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  icon: '📍' },
-            'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     icon: '📄' },
+            'Ligação':   { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',   text: 'text-indigo-700',   border: 'border-indigo-200', Icon: (typeof IconPhone !== 'undefined' ? IconPhone : null) },
+            'Reunião':   { dot: 'bg-emerald-500', bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200', Icon: (typeof IconUsers !== 'undefined' ? IconUsers : null) },
+            'E-mail':    { dot: 'bg-amber-500',   bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',   Icon: (typeof IconMail !== 'undefined' ? IconMail : null) },
+            'Follow-up': { dot: 'bg-rose-500',    bg: 'bg-rose-50',     text: 'text-rose-700',     border: 'border-rose-200',    Icon: (typeof IconRefresh !== 'undefined' ? IconRefresh : null) },
+            'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  Icon: (typeof IconMapPin !== 'undefined' ? IconMapPin : null) },
+            'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) },
           };
 
           const formatTaskDate = (dateStr) => {
@@ -7086,10 +7086,9 @@ function App() {
 
           const TaskCard = ({ task }) => {
             const isDone = task.status === 'concluida';
-            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200', icon: '📌' };
+            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
             const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
             const assigneeName = matchedUser ? matchedUser.nome : '—';
-            const initials = assigneeName !== '—' ? assigneeName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?';
             const negocio = getTaskNegocio(task);
             const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento);
 
@@ -7144,7 +7143,7 @@ function App() {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {/* Badge de tipo */}
                         <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${tc.bg} ${tc.text} ${tc.border}`}>
-                          <span>{tc.icon}</span>
+                          {tc.Icon && <tc.Icon size={10} />}
                           <span>{task.tipo}</span>
                         </span>
 
@@ -7163,11 +7162,15 @@ function App() {
                           {dateLabel}
                         </span>
 
-                        {/* Avatar do responsável */}
+                        {/* Avatar do responsável — mesmo componente colorido por pessoa usado no Kanban/Empresas */}
                         <div className="flex items-center gap-1.5" title={assigneeName}>
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0 shadow-sm">
-                            {initials}
-                          </div>
+                          {typeof AvatarInicial !== 'undefined' ? (
+                            <AvatarInicial nome={assigneeName !== '—' ? assigneeName : ''} size="xs" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0 shadow-sm">
+                              {assigneeName !== '—' ? assigneeName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?'}
+                            </div>
+                          )}
                         </div>
 
                         {/* Ações */}
@@ -8237,8 +8240,8 @@ function App() {
             {/* Cabeçalho do Modal */}
             <div className="border-b border-slate-200/80 px-6 py-4 bg-slate-50/80 flex items-center justify-between">
               <h3 className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-                <span className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg flex items-center justify-center text-xs shadow-sm">
-                  📋
+                <span className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg flex items-center justify-center shadow-sm">
+                  {typeof IconDocument !== 'undefined' ? <IconDocument size={14} /> : null}
                 </span>
                 <span>{editingTask ? 'Editar Tarefa Comercial' : 'Nova Tarefa Comercial'}</span>
               </h3>
