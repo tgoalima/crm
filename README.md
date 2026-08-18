@@ -92,6 +92,8 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY="sua_chave_service_role_do_supaba
 
 ### 3. Configuração dos Webhooks
 
+> **Atalho por SQL:** em instâncias self-hosted, "Database Webhook" no painel nada mais é do que um trigger Postgres `AFTER INSERT/UPDATE` chamando `supabase_functions.http_request()` via `pg_net`. Em vez de usar a UI abaixo, dá pra criar direto via SQL — ver `supabase/migrations/20260818g_webhooks_empresa_360.sql` como exemplo (é exatamente assim que os webhooks C/D/E abaixo foram configurados nesta instância).
+
 #### A. Database Webhook (Sincronização de Valor):
 1. No dashboard do Supabase, acesse **Database** > **Webhooks**.
 2. Clique em **Create a new webhook**.
