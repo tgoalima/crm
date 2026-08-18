@@ -158,6 +158,7 @@ Mesmo processo do item C, com:
    - **Events**: apenas **Insert**.
    - **Edge Function**: `sync-proposta-tecnica-clickup`.
    - **Method**: `POST`.
+   - **Autocorreção de versão**: antes de criar a tarefa "Enviar Proposta vX", a function consulta a maior versão já existente na lista técnica do negócio no ClickUp e usa a próxima depois dela caso seja maior que a calculada pelo CRM (`negocios.propostas.versao`), corrigindo esse campo de volta no Supabase — protege negócios que já eram controlados manualmente pelo ClickUp antes do CRM existir. Depende de `negocios.numero_proposta_oficial` estar preenchido (gerado automaticamente para negócios novos criados pelo CRM; para negócios legados sem esse campo, é preciso um backfill pontual a partir do custom field "Nº de Proposta" do ClickUp).
 
 ---
 
