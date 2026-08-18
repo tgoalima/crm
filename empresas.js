@@ -24,6 +24,15 @@ const formatCNPJ = (cnpj) => {
   const d = cnpj.replace(/\D/g, '');
   return d.length === 14 ? d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : cnpj;
 };
+// Máscara progressiva de CNPJ aplicada durante a digitação (onChange)
+const maskCNPJ = (v) => {
+  const d = (v || '').replace(/\D/g, '').slice(0, 14);
+  if (d.length <= 2) return d;
+  if (d.length <= 5) return `${d.slice(0, 2)}.${d.slice(2)}`;
+  if (d.length <= 8) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5)}`;
+  if (d.length <= 12) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8)}`;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+};
 const formatPhone = (phone) => {
   if (!phone) return null;
   const d = phone.replace(/\D/g, '');
@@ -36,9 +45,9 @@ const formatCurrency = (v) =>
 
 const normalizeTier = (t) => {
   if (!t || t === '0' || t === 'none' || t === '') return null;
-  if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', Icon: IconDiamond, color: 'bg-violet-50 text-violet-700 border-violet-200', cardColor: 'bg-violet-50 text-violet-700 border-violet-200' };
-  if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', Icon: IconStar, color: 'bg-amber-50 text-amber-700 border-amber-200', cardColor: 'bg-amber-50 text-amber-700 border-amber-200' };
-  if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', Icon: IconPackage, color: 'bg-slate-100 text-slate-500 border-slate-200', cardColor: 'bg-slate-50 text-slate-500 border-slate-200' };
+  if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', Icon: IconDiamond, color: 'bg-violet-50 text-violet-700 border-violet-200', cardColor: 'bg-violet-50 text-violet-700 border-violet-200', accentBorder: 'border-l-violet-400' };
+  if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', Icon: IconStar, color: 'bg-amber-50 text-amber-700 border-amber-200', cardColor: 'bg-amber-50 text-amber-700 border-amber-200', accentBorder: 'border-l-amber-400' };
+  if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', Icon: IconPackage, color: 'bg-slate-100 text-slate-500 border-slate-200', cardColor: 'bg-slate-50 text-slate-500 border-slate-200', accentBorder: 'border-l-slate-300' };
   return null;
 };
 
@@ -257,13 +266,13 @@ const IconRefresh = ({ size = 13, className = '' }) => (
 // ─────────────────────────────────────────────
 // COMPONENTES DE CAMPO (globais — sem bug de foco)
 // ─────────────────────────────────────────────
-const CRMInput = ({ label, name, value, onChange, type = 'text', placeholder, mono, required, className = '' }) => (
+const CRMInput = ({ label, name, value, onChange, type = 'text', placeholder, mono, required, className = '', mask }) => (
   <div className={className}>
     <label className="block text-xs font-bold text-slate-600 mb-1">{label}{required && ' *'}</label>
     <input
       type={type} required={required} placeholder={placeholder} value={value}
-      onChange={e => onChange(name, e.target.value)}
-      className={`w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm ${mono ? 'font-mono' : 'font-medium'} text-slate-900 placeholder:text-slate-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
+      onChange={e => onChange(name, mask ? mask(e.target.value) : e.target.value)}
+      className={`w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
     />
   </div>
 );
@@ -271,13 +280,13 @@ const CRMInput = ({ label, name, value, onChange, type = 'text', placeholder, mo
 const CRMSelect = ({ label, name, value, onChange, children, className = '' }) => (
   <div className={className}>
     <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>
-    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
+    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 shadow-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
   </div>
 );
 
 const DadoCampo = ({ label, value, href, mono }) => (
   <div>
-    <dt className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{label}</dt>
+    <dt className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">{label}</dt>
     <dd className={`text-sm font-semibold ${mono ? 'font-mono tracking-wide' : ''} ${value ? 'text-slate-900' : 'text-slate-300'}`}>
       {href && value ? <a href={href} className="text-indigo-600 hover:underline">{value}</a> : (value || '—')}
     </dd>
@@ -288,12 +297,16 @@ const DadoCampo = ({ label, value, href, mono }) => (
 const SegmentoCombobox = ({ value, onChange }) => {
   const [open, setOpen] = React.useState(false);
   const [busca, setBusca] = React.useState('');
+  const [highlight, setHighlight] = React.useState(-1);
+  const listRef = React.useRef(null);
   const segmentos = React.useMemo(() => carregarSegmentos(), []);
   const filtered = React.useMemo(() => {
     const q = busca.trim() || value || '';
     if (!q) return segmentos;
     return segmentos.filter(s => s.toLowerCase().includes(q.toLowerCase()));
   }, [busca, value, segmentos]);
+
+  React.useEffect(() => { setHighlight(-1); }, [filtered]);
 
   const handleInputChange = React.useCallback((e) => {
     setBusca(e.target.value);
@@ -306,16 +319,44 @@ const SegmentoCombobox = ({ value, onChange }) => {
     setOpen(false);
   }, [onChange]);
 
+  const handleKeyDown = React.useCallback((e) => {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { setOpen(true); return; }
+    if (!filtered.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight(i => {
+        const next = i < filtered.length - 1 ? i + 1 : 0;
+        listRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
+        return next;
+      });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight(i => {
+        const next = i > 0 ? i - 1 : filtered.length - 1;
+        listRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
+        return next;
+      });
+    } else if (e.key === 'Enter') {
+      if (highlight >= 0 && highlight < filtered.length) {
+        e.preventDefault();
+        handleSelect(filtered[highlight]);
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  }, [open, filtered, highlight, handleSelect]);
+
   return (
     <div className="relative">
       <label className="block text-xs font-bold text-slate-600 mb-1">Segmento de Atuação</label>
-      <input type="text" placeholder="Digite ou selecione..." value={value || busca} onChange={handleInputChange} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+      <input type="text" placeholder="Digite ou selecione..." value={value || busca} onChange={handleInputChange} onKeyDown={handleKeyDown} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
         className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
       {open && filtered.length > 0 && (
         <div className="absolute z-[110] top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
-          <div className="max-h-44 overflow-y-auto divide-y divide-slate-50">
-            {filtered.map(s => (
-              <button key={s} type="button" onMouseDown={() => handleSelect(s)} className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">{s}</button>
+          <div ref={listRef} className="max-h-44 overflow-y-auto divide-y divide-slate-50">
+            {filtered.map((s, i) => (
+              <button key={s} type="button" onMouseDown={() => handleSelect(s)} onMouseEnter={() => setHighlight(i)}
+                className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-800 hover:bg-indigo-50 hover:text-indigo-700'}`}>{s}</button>
             ))}
           </div>
         </div>
@@ -422,9 +463,10 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
   };
 
   const SectionTitle = ({ children }) => (
-    <div className="flex items-center gap-3 mb-3">
-      <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">{children}</span>
-      <div className="flex-1 h-px bg-slate-100"></div>
+    <div className="flex items-center gap-2.5 mb-3">
+      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{children}</span>
+      <div className="flex-1 h-px bg-slate-200"></div>
     </div>
   );
 
@@ -446,7 +488,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="Nome Fantasia / Comercial" name="nome" value={form.nome} onChange={handleChange} placeholder="Ex: Hospital do Câncer de Londrina" required className="col-span-2" />
               <CRMInput label="Razão Social" name="razao_social" value={form.razao_social} onChange={handleChange} placeholder="Ex: Fundação Hospitalar Ltda" />
-              <CRMInput label="CNPJ" name="cnpj" value={form.cnpj} onChange={handleChange} placeholder="00.000.000/0000-00" mono />
+              <CRMInput label="CNPJ" name="cnpj" value={form.cnpj} onChange={handleChange} placeholder="00.000.000/0000-00" mono mask={maskCNPJ} />
               <CRMInput label="Inscrição Estadual" name="inscricao_estadual" value={form.inscricao_estadual} onChange={handleChange} placeholder="Ex: 123.456.789.012" mono />
               <CRMSelect label="Status da Conta" name="status" value={form.status} onChange={handleChange}>
                 <option value="customer base">Customer Base</option>
@@ -855,9 +897,10 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
   };
 
   const SectionTitle = ({ children }) => (
-    <div className="flex items-center gap-3 pt-1">
-      <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">{children}</span>
-      <div className="flex-1 h-px bg-slate-100"></div>
+    <div className="flex items-center gap-2.5 pt-1">
+      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{children}</span>
+      <div className="flex-1 h-px bg-slate-200"></div>
     </div>
   );
 
@@ -1124,9 +1167,10 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
   };
 
   const SectionTitle = ({ children }) => (
-    <div className="flex items-center gap-3 pt-1">
-      <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">{children}</span>
-      <div className="flex-1 h-px bg-slate-100"></div>
+    <div className="flex items-center gap-2.5 pt-1">
+      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{children}</span>
+      <div className="flex-1 h-px bg-slate-200"></div>
     </div>
   );
 
@@ -1413,12 +1457,12 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           {/* ABA VISÃO GERAL */}
           {aba === 'visao_geral' && (
             <div className="p-5 space-y-4">
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><IconBuilding size={11} /> Dados Corporativos</h4>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-100/80">
+                  <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconBuilding size={12} className="text-indigo-500" /> Dados Corporativos</h4>
                   <button onClick={() => onEditarEmpresa(conta)} className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"><IconEdit size={11} /> Editar</button>
                 </div>
-                <dl className="grid grid-cols-2 divide-x divide-y divide-slate-100">
+                <dl className="grid grid-cols-2 divide-x divide-y divide-slate-200">
                   <div className="px-5 py-3.5"><DadoCampo label="Razão Social" value={conta.razao_social} /></div>
                   <div className="px-5 py-3.5"><DadoCampo label="CNPJ" value={formatCNPJ(conta.cnpj)} mono /></div>
                   <div className="px-5 py-3.5"><DadoCampo label="Insc. Estadual" value={conta.inscricao_estadual} mono /></div>
@@ -1429,18 +1473,18 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-                  <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><IconPhone size={11} /> Contato Corporativo</h4>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-slate-200 bg-slate-100/80">
+                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconPhone size={12} className="text-indigo-500" /> Contato Corporativo</h4>
                   </div>
                   <dl className="px-5 py-4 space-y-3">
                     <DadoCampo label="E-mail" value={conta.email} href={conta.email ? `mailto:${conta.email}` : null} />
                     <DadoCampo label="Telefone" value={formatPhone(conta.telefone)} href={conta.telefone ? `tel:${conta.telefone}` : null} />
                   </dl>
                 </div>
-                <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-                  <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><IconMapPin size={11} /> Localização</h4>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-slate-200 bg-slate-100/80">
+                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconMapPin size={12} className="text-indigo-500" /> Localização</h4>
                   </div>
                   <div className="px-5 py-4 space-y-1.5">
                     <p className="text-sm font-bold text-slate-900">{conta.rua || '—'}</p>
@@ -1761,20 +1805,20 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       </div>
 
       {/* FILTROS */}
-      <div className="shrink-0 px-6 py-2.5 bg-white/70 border-b border-slate-200/60 flex flex-wrap items-center gap-2.5">
+      <div className="shrink-0 px-6 py-3 bg-white border-b border-slate-200 shadow-sm shadow-slate-200/40 flex flex-wrap items-center gap-2.5 relative z-10">
         <div className="flex-1 min-w-[220px] relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconSearch size={13} /></span>
-          <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400" />
+          <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400" />
           {busca && <button onClick={() => setBusca('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"><IconX size={11} /></button>}
         </div>
-        <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:border-indigo-500 cursor-pointer">
+        <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Todos os status</option>
           <option value="customer base">Customer Base</option>
           <option value="active">Active</option>
           <option value="prospect">Prospect</option>
           <option value="at risk">At Risk</option>
         </select>
-        <select value={filtroTier} onChange={e => setFiltroTier(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:border-indigo-500 cursor-pointer">
+        <select value={filtroTier} onChange={e => setFiltroTier(e.target.value)} className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Todos os Tiers</option>
           <option value="Tier 1">💎 Tier 1</option>
           <option value="Tier 2">⭐ Tier 2</option>
@@ -1783,7 +1827,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       </div>
 
       {/* GRID DE CARDS v3.2 */}
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-5 bg-slate-100/70">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {contasFiltradas.map(conta => {
             const numC = mapaMetricas.contMap.get(conta.id) || 0;
@@ -1795,7 +1839,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
             const status = normalizeStatus(conta.status);
 
             return (
-              <div key={conta.id} onClick={() => setContaSelecionada(conta)} className="bg-white rounded-2xl border border-slate-200/80 cursor-pointer hover:border-indigo-300 hover:shadow-xl hover:-translate-y-0.5 transition-all group shadow-xs overflow-hidden">
+              <div key={conta.id} onClick={() => setContaSelecionada(conta)} className={`bg-white rounded-2xl border border-slate-200 border-l-4 ${tier ? tier.accentBorder : 'border-l-indigo-200'} cursor-pointer hover:border-indigo-300 hover:shadow-xl hover:-translate-y-0.5 transition-all group shadow-sm shadow-slate-200/60 overflow-hidden`}>
                 <div className="p-4">
                   {/* Linha 1: Avatar + Nome + Tier */}
                   <div className="flex items-start gap-3 mb-2.5">
