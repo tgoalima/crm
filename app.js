@@ -1129,7 +1129,18 @@ function App() {
   };
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
-  
+  // EmpresasTab é um componente próprio (empresas.js) com seu próprio
+  // fetch/estado interno — sem isso, cada troca de aba para "Empresas"
+  // desmontava e remontava o componente do zero, refazendo a consulta
+  // completa ao Supabase (444+ contas, negócios, contatos) toda vez.
+  // Mantemos montado (só oculto via CSS) depois da primeira visita, para
+  // que voltar à aba seja instantâneo — mesmo comportamento que Kanban/
+  // Relatórios/Tarefas já têm (estado deles vive no componente pai).
+  const [empresasTabMounted, setEmpresasTabMounted] = useState(activeTab === 'empresas');
+  useEffect(() => {
+    if (activeTab === 'empresas' && !empresasTabMounted) setEmpresasTabMounted(true);
+  }, [activeTab, empresasTabMounted]);
+
   // Sincroniza activeTab com a Hash URL e safeStorage
   useEffect(() => {
     safeStorage.setItem('crm_active_view', activeTab);
@@ -1264,7 +1275,14 @@ function App() {
   // Dashboard de Relatórios
   const [wonProposals, setWonProposals] = useState([]);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
-  
+  // Separado de loadingDashboard (que só liga o spinner de tela cheia na
+  // primeira carga): fica true durante QUALQUER refetch em segundo plano,
+  // inclusive ao reentrar na aba com dados já em cache. Usado para segurar
+  // a recriação dos gráficos até os dados frescos chegarem, evitando
+  // desenhar com o cache antigo e logo em seguida redesenhar com o dado
+  // novo (o "pisca duas vezes" reportado).
+  const [dashboardFetching, setDashboardFetching] = useState(false);
+
   // Filtros de período e dados do Painel Comercial com persistência em localStorage
   const [startDate, setStartDate] = useState(() => {
     return localStorage.getItem('spa_selected_start') || `${new Date().getFullYear()}-01-01`;
@@ -3246,6 +3264,7 @@ function App() {
     if (rawProposalsRef.current.length === 0 && !silent) {
       setLoadingDashboard(true);
     }
+    setDashboardFetching(true);
     try {
       if (forceRefresh || rawProposalsRef.current.length === 0) {
         const [propsRes, itensRes] = await Promise.all([
@@ -3274,6 +3293,7 @@ function App() {
       console.error("Erro ao carregar dados do dashboard:", err);
     } finally {
       if (!silent) setLoadingDashboard(false);
+      setDashboardFetching(false);
     }
   };
 
@@ -3331,7 +3351,7 @@ function App() {
 
   // Efeito para criar/destruir e atualizar gráficos do Chart.js
   useEffect(() => {
-    if (activeTab !== 'relatorios' || loadingDashboard) {
+    if (activeTab !== 'relatorios' || loadingDashboard || dashboardFetching) {
       return;
     }
 
@@ -3627,7 +3647,7 @@ function App() {
         seasonalityChartInst.current = null;
       }
     };
-  }, [activeTab, loadingDashboard, distributorTotals, manufacturerTotals, topProductsFilterMode, biMetrics.seasonalityLabels, biMetrics.seasonalityValues, biMetrics.seasonalityCompValues, topProductsAggregated]);
+  }, [activeTab, loadingDashboard, dashboardFetching, distributorTotals, manufacturerTotals, topProductsFilterMode, biMetrics.seasonalityLabels, biMetrics.seasonalityValues, biMetrics.seasonalityCompValues, topProductsAggregated]);
 
   useEffect(() => {
     if (activeTab === 'relatorios' && dbConnected) {
@@ -6979,8 +6999,10 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'empresas' && (
-          <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+        {empresasTabMounted && (
+          <div className={activeTab === 'empresas' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+          </div>
         )}
 
         {activeTab === 'tasks' && (() => {
