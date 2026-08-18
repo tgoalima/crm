@@ -1800,15 +1800,29 @@ function App() {
   useEffect(() => {
     const initSupabase = async () => {
       try {
-        const response = await fetch('/api/config');
-        if (!response.ok) throw new Error("Erro ao carregar configurações do servidor");
-        const data = await response.json();
-        const url = data.SUPABASE_URL;
-        const anonKey = data.SUPABASE_ANON_KEY;
+        let url = '';
+        let anonKey = '';
+        try {
+          const response = await fetch('/api/config');
+          if (response.ok) {
+            const data = await response.json();
+            url = data.SUPABASE_URL;
+            anonKey = data.SUPABASE_ANON_KEY;
+          }
+        } catch (fetchErr) {
+          console.warn("Aviso ao buscar /api/config, usando fallback:", fetchErr);
+        }
+        
+        // Fallback de produção do Supabase Suprimática
+        if (!url || !anonKey) {
+          url = 'https://supabase.llworkflow.com.br';
+          anonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgzNTMyMjQ5LCJleHAiOjIwOTg4OTIyNDl9.DYJrIfSr6jdrn-xhmc9q_wGtfdRUYrYwP2UvkpvGLl0';
+        }
         
         if (url && anonKey) {
           const client = window.supabase.createClient(url, anonKey);
           setSupabaseClient(client);
+          setConfig({ url, anonKey });
           
           // Limpa safeStorage das chaves antigas por segurança
           safeStorage.removeItem('supa_url');
@@ -1820,13 +1834,13 @@ function App() {
           
           testConnection(client);
         } else {
-          console.error("Configurações do Supabase ausentes no servidor.");
-          setErrorMsg("Configurações do Supabase ausentes no servidor (.env).");
+          console.error("Configurações do Supabase ausentes.");
+          setErrorMsg("Configurações do Supabase ausentes.");
         }
       } catch (err) {
         console.error("Erro ao inicializar Supabase:", err);
         setDbConnected(false);
-        setErrorMsg("Erro de conexão com o servidor ao buscar configurações.");
+        setErrorMsg("Erro ao inicializar conexão com o Supabase.");
       }
     };
     initSupabase();
