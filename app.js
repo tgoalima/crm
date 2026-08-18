@@ -29,6 +29,23 @@ const ESTAGIO_OPTIONS = [
   { id: 'c231299c-44f8-4f5e-ad8e-58f7b8e01213', name: 'Congelado', color: '#0091ff' },
 ];
 
+const TIPO_OPORTUNIDADE_CLICKUP = {
+  'Projeto': 'fa509e92-7528-4a8b-a9bc-11f2f5da3350',
+  'Garantias': '52b4285a-1e92-4ecb-b8b9-7a2348461882',
+  'Serviços': '2e351ad7-2af5-4532-be83-fe24423a1994',
+  'SSU': '62c6d78c-fa67-44d8-b594-66ed63264df1',
+  'Volumes': '62f161bc-b78b-46b7-a73b-1d8faa1a1246',
+  'Upgrade': 'e55ef41f-51e6-436e-bb53-79ff688960c7'
+};
+
+const RO_CLICKUP_IDS = {
+  roInfra: '673b8e3f-f6b2-4b09-b536-fe881b9e5780',
+  roSw1: '769281a2-dade-47ae-8867-453fbac6adb3',
+  roSw2: 'e1a271ac-107d-4131-b63c-87dfb2e2396d',
+  roSw3: 'a940746a-b869-4bb7-8f7c-81775c169022',
+  roSw4: 'cf2a09b3-a85a-43cb-8e2e-0f1bdfc243f5'
+};
+
 const chartColors = [
   'rgba(79, 70, 229, 0.8)',   // Indigo (#4f46e5)
   'rgba(16, 185, 129, 0.8)',   // Emerald (#10b981)
@@ -56,6 +73,62 @@ const getCleanBusinessName = (raw) => {
     .replace(/\s*-\s*v+([A-Z]{1,3}|\d+)$/i, '')
     .replace(/\s*-\s*versão\s*[A-Z0-9]+/i, '')
     .trim() || 'Projeto';
+};
+
+const calcularValidadeProposta = (prop, dealStatus = null) => {
+  if (!prop) return null;
+  
+  // 1. Propostas ou Negócios já fechados (Ganho / Perdido / Inativo) NUNCA têm tag de vencimento
+  const propSit = (prop.situacao || '').trim().toLowerCase();
+  const dealSit = (dealStatus || (typeof selectedTask !== 'undefined' && selectedTask ? (selectedTask.estagio || selectedTask.status) : '') || '').trim().toLowerCase();
+  
+  if (['ganho', 'perdido', 'substituída', 'substituida', 'descartada', 'desconsiderada', 'inativa'].includes(propSit) ||
+      ['ganho', 'perdido', 'concluido', 'concluído', 'cancelado'].includes(dealSit)) {
+    return null;
+  }
+
+  // 2. Propostas zeradas (R$ 0,00) são rascunhos em elaboração -> sem tag
+  const valorTotal = parseFloat(prop.total_proposta) || 0;
+  if (valorTotal <= 0) return null;
+
+  // 3. A validade comercial obedece à Data de Fechamento definida pelo usuário no formulário
+  const dataAlvo = prop.data_fechamento;
+  if (!dataAlvo) return null;
+
+  const parts = String(dataAlvo).substring(0, 10).split('-');
+  if (parts.length !== 3) return null;
+  
+  const dAlvo = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  const agora = new Date();
+  const hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+
+  const diffTime = dAlvo.getTime() - hoje.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+  
+  const dataAlvoStr = `${parts[2]}/${parts[1]}`;
+
+  if (diffDays < 0) {
+    return {
+      status: 'vencida',
+      diasVencidos: Math.abs(diffDays),
+      dataValidadeStr: dataAlvoStr,
+      label: `Expirada em ${dataAlvoStr}`
+    };
+  } else if (diffDays === 0) {
+    return {
+      status: 'vence_hoje',
+      diasRestantes: 0,
+      dataValidadeStr: dataAlvoStr,
+      label: `Vence hoje (${dataAlvoStr})`
+    };
+  } else {
+    return {
+      status: 'valida',
+      diasRestantes: diffDays,
+      dataValidadeStr: dataAlvoStr,
+      label: `Válida até ${dataAlvoStr} (${diffDays}d)`
+    };
+  }
 };
 
 // Utilitário seguro para localStorage blindado contra QuotaExceededError do Safari
@@ -96,6 +169,38 @@ const getInitialConfig = () => {
 const getSupabaseHeaders = () => {
   const token = safeStorage.getItem('crm_user_clickup_token');
   return token ? { 'Authorization': token } : {};
+};
+
+// Sincroniza o token pessoal e perfil do ClickUp de forma segura (criptografado com AES-GCM)
+// com as Edge Functions do Supabase para que as ações em background possam agir em nome do vendedor.
+const syncUserClickUpCredentialsToEdge = async (token, userObj, client = null, cfg = null) => {
+  try {
+    if (!token || !userObj) return;
+    if (client && client.functions) {
+      const { data, error } = await client.functions.invoke('save-clickup-credentials', {
+        body: { token, user: userObj }
+      });
+      if (error) {
+        console.warn('[Token Sync] Aviso da Edge Function:', error.message);
+      } else {
+        console.log('[Token Sync] Credenciais ClickUp sincronizadas com Edge Functions com sucesso.');
+      }
+    } else {
+      const supaUrl = cfg?.url || 'https://supabase.llworkflow.com.br';
+      const anonKey = cfg?.anonKey || '';
+      const url = `${supaUrl.replace(/\/+$/, '')}/functions/v1/save-clickup-credentials`;
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(anonKey ? { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` } : {})
+        },
+        body: JSON.stringify({ token, user: userObj })
+      }).catch(e => console.warn('[Token Sync] Aviso ao enviar credenciais:', e));
+    }
+  } catch (err) {
+    console.warn('[Token Sync] Erro ao sincronizar credenciais com Edge Functions (não bloqueante):', err);
+  }
 };
 
 // Função utilitária global: extrai o nome do estágio de forma segura.
@@ -154,27 +259,149 @@ const getNextVersionLetter = (currentVersao) => {
   }
   return prefix + charArray.join('');
 };
-const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick, hasOverdue }) => {
+
+// ─────────────────────────────────────────────
+// @MENÇÕES (Registrar Atividade) — marcador "@[Nome](clickupUserId)" no
+// texto bruto. Preserva o id numérico do ClickUp pra virar uma menção real
+// (clicável, notifica a pessoa) quando o comentário é sincronizado lá —
+// ver handle_create_atividade em server.py.
+// ─────────────────────────────────────────────
+const renderTextoComMencoes = (texto) => {
+  if (!texto) return null;
+  const re = /@\[([^\]]+)\]\((\d+)\)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = re.exec(texto)) !== null) {
+    if (match.index > lastIndex) parts.push(texto.slice(lastIndex, match.index));
+    parts.push(
+      <span key={`mencao-${key++}`} className="inline-block font-bold text-indigo-700 bg-indigo-50 px-1 rounded">@{match[1]}</span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < texto.length) parts.push(texto.slice(lastIndex));
+  return parts;
+};
+
+const MentionTextarea = ({ value, onChange, membros = [], placeholder = '', rows = 3 }) => {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const [highlight, setHighlight] = React.useState(0);
+  const [triggerPos, setTriggerPos] = React.useState(null);
+  const textareaRef = React.useRef(null);
+
+  const filtered = React.useMemo(() => {
+    if (!open) return [];
+    const q = query.trim().toLowerCase();
+    return (membros || []).filter(m => !q || (m.nome || '').toLowerCase().includes(q)).slice(0, 6);
+  }, [open, query, membros]);
+
+  React.useEffect(() => { setHighlight(0); }, [filtered]);
+
+  const handleChange = (e) => {
+    const newVal = e.target.value;
+    const cursor = e.target.selectionStart;
+    onChange(newVal);
+
+    const beforeCursor = newVal.slice(0, cursor);
+    const atIdx = beforeCursor.lastIndexOf('@');
+    if (atIdx === -1 || /\s/.test(beforeCursor.slice(atIdx + 1))) {
+      setOpen(false);
+      return;
+    }
+    setTriggerPos(atIdx);
+    setQuery(beforeCursor.slice(atIdx + 1));
+    setOpen(true);
+  };
+
+  const handleSelect = (membro) => {
+    if (triggerPos === null || !textareaRef.current) return;
+    const cursor = textareaRef.current.selectionStart;
+    const before = value.slice(0, triggerPos);
+    const after = value.slice(cursor);
+    const insertion = `@[${membro.nome}](${membro.id}) `;
+    const newVal = before + insertion + after;
+    onChange(newVal);
+    setOpen(false);
+    setQuery('');
+    setTriggerPos(null);
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const pos = (before + insertion).length;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open || filtered.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(i => (i + 1) % filtered.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(i => (i - 1 + filtered.length) % filtered.length); }
+    else if (e.key === 'Enter') { e.preventDefault(); handleSelect(filtered[highlight]); }
+    else if (e.key === 'Escape') { setOpen(false); }
+  };
+
   return (
-    <div 
-      data-id={task.id} 
+    <div className="relative">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full p-3 border border-slate-300 rounded-xl text-xs text-slate-800 bg-white shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 resize-none transition-all"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+          {filtered.map((m, i) => (
+            <button
+              key={m.id}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(m); }}
+              onMouseEnter={() => setHighlight(i)}
+              className={`w-full text-left px-3.5 py-2 text-xs font-semibold flex items-center gap-2 transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'}`}
+            >
+              <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-black flex items-center justify-center shrink-0">{(m.nome || '?').slice(0, 1).toUpperCase()}</span>
+              <span>{m.nome}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick, hasOverdue, stageColor }) => {
+  return (
+    <div
+      data-id={task.id}
       draggable={true}
       onDragStart={(e) => handleDragStart(e, task)}
       onClick={() => handleCardClick(task)}
       className="kanban-card flex flex-col relative"
+      style={{ borderLeft: `4px solid ${stageColor || '#6366f1'}` }}
     >
       <div className="flex items-start justify-between mb-2">
         <h4 className="text-sm font-semibold text-slate-800 line-clamp-2 pr-2">{task.name}</h4>
         {hasOverdue && (
-          <span 
-            className="w-2.5 h-2.5 rounded-full bg-red-500 border border-white flex-shrink-0 mt-1 animate-pulse" 
+          <span
+            className="w-2.5 h-2.5 rounded-full bg-red-500 border border-white flex-shrink-0 mt-1 animate-pulse"
             title="Possui tarefa comercial atrasada!"
           />
         )}
       </div>
       <div className="flex items-center justify-between text-xs text-slate-500 mt-auto">
-        <span>{responsavel || 'Sem Responsável'}</span>
-        <span className="text-emerald-600 font-semibold text-sm">{formattedValue}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          {responsavel && typeof AvatarInicial !== 'undefined' && (
+            <AvatarInicial nome={responsavel} size="xs" />
+          )}
+          <span className="truncate">{responsavel || 'Sem Responsável'}</span>
+        </span>
+        <span className="text-emerald-600 font-semibold text-sm shrink-0">{formattedValue}</span>
       </div>
     </div>
   );
@@ -312,19 +539,17 @@ const ForecastFunnelPanel = ({
                 <div key={stage.id} className="w-full flex justify-center">
                   <button
                     onClick={() => setFilterStage(filterStage === stage.id ? null : stage.id)}
-                    style={{ width: stage.funnelWidth }}
+                    style={{
+                      width: stage.funnelWidth,
+                      borderLeft: `4px solid ${stage.color}`,
+                      backgroundColor: isSelected ? undefined : `${stage.color}1A`,
+                    }}
                     className={`flex justify-between items-center py-2.5 px-4 rounded-lg transition-all duration-200 border cursor-pointer relative overflow-hidden ${
                       isSelected
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-200/50'
-                        : 'bg-slate-100 border-slate-200/80 hover:bg-slate-200/70 text-slate-950'
+                        : 'border-slate-200/80 hover:brightness-95 text-slate-950'
                     }`}
                   >
-                    <div 
-                      className={`absolute inset-0 transition-all duration-200 ${
-                        isSelected ? 'bg-indigo-700/20' : 'bg-indigo-500/10'
-                      }`}
-                    />
-                    
                     <div className="z-10 flex items-center gap-2 pr-2">
                       <span 
                         className="w-1.5 h-1.5 rounded-full flex-shrink-0" 
@@ -407,17 +632,23 @@ const ForecastFunnelPanel = ({
                     : 'R$ 0,00';
                   const responsavel = task.responsavel_negocio;
                   return (
-                    <div 
+                    <div
                       key={task.id}
                       onClick={() => onCardClick && onCardClick(task)}
                       className="bg-white border border-slate-200 rounded-xl p-3.5 hover:shadow-md hover:border-indigo-200 transition-all duration-200 cursor-pointer group"
+                      style={{ borderLeft: `4px solid ${selectedStageObj.color || '#6366f1'}` }}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-slate-900 leading-tight group-hover:text-indigo-700 transition-colors truncate">
                             {task.name}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1 truncate">{responsavel || 'Sem responsável'}</p>
+                          <div className="flex items-center gap-1.5 mt-1 min-w-0">
+                            {responsavel && typeof AvatarInicial !== 'undefined' && (
+                              <AvatarInicial nome={responsavel} size="xs" />
+                            )}
+                            <p className="text-xs text-slate-500 truncate">{responsavel || 'Sem responsável'}</p>
+                          </div>
                         </div>
                         <span className={`text-sm font-black flex-shrink-0 ${dealValue > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
                           {formattedValue}
@@ -904,6 +1135,151 @@ const LoginScreen = ({ onLogin, error }) => {
   );
 };
 
+// ─────────────────────────────────────────────
+// CONFIGURAÇÕES: Segmentos de Atuação
+// ─────────────────────────────────────────────
+const SEGMENTOS_DEFAULT_APP = [
+  'Saúde / Hospitalar', 'Agronegócio / Usinas', 'Indústria Metalmecânica',
+  'Construção Civil', 'Distribuição & Logística', 'Educação',
+  'Financeiro & Seguros', 'Varejo & E-commerce', 'Tecnologia',
+  'Têxtil & Moda', 'Alimentício & Bebidas', 'Energia & Utilities',
+  'Governo & Público', 'Automotivo', 'Mineração', 'Telecomunicações',
+];
+
+const SegmentosSettings = () => {
+  const [segmentos, setSegmentos] = useState(() => {
+    try {
+      const s = localStorage.getItem('crm_segmentos');
+      return s ? JSON.parse(s) : SEGMENTOS_DEFAULT_APP;
+    } catch { return SEGMENTOS_DEFAULT_APP; }
+  });
+  const [novoNome, setNovoNome] = useState('');
+  const [editandoIdx, setEditandoIdx] = useState(null);
+  const [editandoNome, setEditandoNome] = useState('');
+  const [busca, setBusca] = useState('');
+
+  const salvar = (lista) => {
+    setSegmentos(lista);
+    localStorage.setItem('crm_segmentos', JSON.stringify(lista));
+  };
+
+  const adicionar = () => {
+    const n = novoNome.trim();
+    if (!n || segmentos.includes(n)) return;
+    salvar([...segmentos, n].sort((a, b) => a.localeCompare(b)));
+    setNovoNome('');
+  };
+
+  const excluir = (idx) => {
+    if (!confirm(`Excluir o segmento "${segmentos[idx]}"?`)) return;
+    salvar(segmentos.filter((_, i) => i !== idx));
+  };
+
+  const salvarEdicao = (idx) => {
+    const n = editandoNome.trim();
+    if (!n) return;
+    const nova = [...segmentos];
+    nova[idx] = n;
+    salvar(nova.sort((a, b) => a.localeCompare(b)));
+    setEditandoIdx(null);
+    setEditandoNome('');
+  };
+
+  const resetar = () => {
+    if (!confirm('Restaurar a lista padrão de segmentos?')) return;
+    salvar([...SEGMENTOS_DEFAULT_APP]);
+  };
+
+  const filtrados = segmentos.filter(s => !busca.trim() || s.toLowerCase().includes(busca.toLowerCase()));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-base font-bold text-slate-900">Segmentos de Atuação</h2>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">
+            Gerencie os segmentos disponíveis no formulário de empresa. Salvos localmente neste navegador.
+          </p>
+        </div>
+        <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold shrink-0">
+          {segmentos.length} segmentos
+        </span>
+      </div>
+
+      {/* Adicionar novo */}
+      <div className="bg-white border border-slate-200/80 rounded-xl p-5 shadow-xs space-y-3">
+        <h3 className="text-xs font-bold text-slate-700">Adicionar Novo Segmento</h3>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Ex: Petroquímica & Refino"
+            value={novoNome}
+            onChange={e => setNovoNome(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && adicionar()}
+            className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all"
+          />
+          <button
+            onClick={adicionar}
+            disabled={!novoNome.trim()}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-200 cursor-pointer"
+          >
+            + Adicionar
+          </button>
+        </div>
+      </div>
+
+      {/* Lista */}
+      <div className="bg-white border border-slate-200/80 rounded-xl shadow-xs overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+          <input
+            type="text"
+            placeholder="🔍 Filtrar segmentos..."
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:border-indigo-400 transition-all"
+          />
+          <button onClick={resetar} className="text-[11px] font-bold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer">↺ Restaurar Padrão</button>
+        </div>
+
+        <div className="divide-y divide-slate-100 max-h-[380px] overflow-y-auto">
+          {filtrados.map((s, i) => {
+            const realIdx = segmentos.indexOf(s);
+            return (
+              <div key={s} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 group transition-colors">
+                {editandoIdx === realIdx ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={editandoNome}
+                      onChange={e => setEditandoNome(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') salvarEdicao(realIdx); if (e.key === 'Escape') { setEditandoIdx(null); setEditandoNome(''); } }}
+                      className="flex-1 px-3 py-1.5 bg-indigo-50 border border-indigo-300 rounded-lg text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+                    />
+                    <button onClick={() => salvarEdicao(realIdx)} className="px-2.5 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg cursor-pointer">✓</button>
+                    <button onClick={() => { setEditandoIdx(null); setEditandoNome(''); }} className="px-2.5 py-1 border border-slate-200 text-slate-500 text-xs font-bold rounded-lg cursor-pointer">✕</button>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 shrink-0"></div>
+                    <span className="flex-1 text-sm font-medium text-slate-800">{s}</span>
+                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => { setEditandoIdx(realIdx); setEditandoNome(s); }} className="px-2.5 py-1 text-[11px] font-bold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer">Editar</button>
+                      <button onClick={() => excluir(realIdx)} className="px-2.5 py-1 text-[11px] font-bold text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">Excluir</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {filtrados.length === 0 && (
+            <div className="px-5 py-8 text-center text-xs text-slate-400 font-medium">Nenhum segmento encontrado.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [config, setConfig] = useState(getInitialConfig);
   const [supabaseClient, setSupabaseClient] = useState(null);
@@ -915,14 +1291,25 @@ function App() {
   // Função para obter a aba inicial com base na Hash URL (SPA Hash Routing)
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '').trim();
-    if (['kanban', 'relatorios', 'tasks', 'propostas'].includes(hash)) {
+    if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
       return hash;
     }
     return safeStorage.getItem('crm_active_view') || 'kanban';
   };
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
-  
+  // EmpresasTab é um componente próprio (empresas.js) com seu próprio
+  // fetch/estado interno — sem isso, cada troca de aba para "Empresas"
+  // desmontava e remontava o componente do zero, refazendo a consulta
+  // completa ao Supabase (444+ contas, negócios, contatos) toda vez.
+  // Mantemos montado (só oculto via CSS) depois da primeira visita, para
+  // que voltar à aba seja instantâneo — mesmo comportamento que Kanban/
+  // Relatórios/Tarefas já têm (estado deles vive no componente pai).
+  const [empresasTabMounted, setEmpresasTabMounted] = useState(activeTab === 'empresas');
+  useEffect(() => {
+    if (activeTab === 'empresas' && !empresasTabMounted) setEmpresasTabMounted(true);
+  }, [activeTab, empresasTabMounted]);
+
   // Sincroniza activeTab com a Hash URL e safeStorage
   useEffect(() => {
     safeStorage.setItem('crm_active_view', activeTab);
@@ -935,7 +1322,7 @@ function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').trim();
-      if (['kanban', 'relatorios', 'tasks', 'propostas'].includes(hash)) {
+      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -949,7 +1336,7 @@ function App() {
     const cached = localStorage.getItem('crm_cache_kanban_tasks_v2');
     return cached ? JSON.parse(cached) : [];
   });
-  const [kanbanColumns, setKanbanColumns] = useState([]);
+  const [kanbanColumns, setKanbanColumns] = useState(ESTAGIO_OPTIONS);
   const [loadingKanban, setLoadingKanban] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -983,6 +1370,17 @@ function App() {
   const [filterFabricante, setFilterFabricante] = useState(null);
   const [showDealsList, setShowDealsList] = useState(false);
   const [dealsListStatus, setDealsListStatus] = useState('Todos');
+  const [showEditNegocioDrawerModal, setShowEditNegocioDrawerModal] = useState(false);
+  const [editNegocioDrawerForm, setEditNegocioDrawerForm] = useState({
+    nome: '',
+    estagio: 'Registro',
+    tipo: 'Projeto',
+    valor: '',
+    probabilidade: '50',
+    dataPrevisao: '',
+    descricao: ''
+  });
+  const [savingEditNegocioDrawer, setSavingEditNegocioDrawer] = useState(false);
   const [hasTime, setHasTime] = useState(false);
   const [newTaskTime, setNewTaskTime] = useState('09:00');
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
@@ -1027,6 +1425,10 @@ function App() {
         setUserClickUpToken(cleanToken);
         localStorage.setItem('crm_user_clickup_token', cleanToken);
         localStorage.setItem('crm_user_profile', JSON.stringify(userObj));
+        
+        // Sincroniza o token de forma segura (criptografado) com as Edge Functions em segundo plano
+        syncUserClickUpCredentialsToEdge(cleanToken, userObj, supabaseClient, config);
+
         showToast(`Bem-vindo(a), ${userObj.username || userObj.email}! Autenticado com sucesso.`, 'success');
         setShowTokenModal(false);
         return true;
@@ -1046,7 +1448,14 @@ function App() {
   // Dashboard de Relatórios
   const [wonProposals, setWonProposals] = useState([]);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
-  
+  // Separado de loadingDashboard (que só liga o spinner de tela cheia na
+  // primeira carga): fica true durante QUALQUER refetch em segundo plano,
+  // inclusive ao reentrar na aba com dados já em cache. Usado para segurar
+  // a recriação dos gráficos até os dados frescos chegarem, evitando
+  // desenhar com o cache antigo e logo em seguida redesenhar com o dado
+  // novo (o "pisca duas vezes" reportado).
+  const [dashboardFetching, setDashboardFetching] = useState(false);
+
   // Filtros de período e dados do Painel Comercial com persistência em localStorage
   const [startDate, setStartDate] = useState(() => {
     return localStorage.getItem('spa_selected_start') || `${new Date().getFullYear()}-01-01`;
@@ -1218,6 +1627,30 @@ function App() {
   const [newProduct, setNewProduct] = useState({ nome: '', fabricante: '', custo_referencia: '' });
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [showNovaOportunidadeKanban, setShowNovaOportunidadeKanban] = useState(false);
+  const [contasParaBusca, setContasParaBusca] = useState([]);
+
+  const [configNumeracao, setConfigNumeracao] = useState({ ultimo_numero: 13202, ativo: true });
+
+  const carregarConfigNumeracao = async () => {
+    if (!supabaseClient) return;
+    const { data } = await supabaseClient.from('config_numeracao_propostas').select('ultimo_numero, ativo').eq('id', 1).single();
+    if (data) setConfigNumeracao(data);
+  };
+
+  useEffect(() => {
+    if (showNovaOportunidadeKanban && supabaseClient && contasParaBusca.length === 0) {
+      supabaseClient.from('contas').select('id, nome, cnpj').order('nome').then(({ data }) => {
+        if (data) setContasParaBusca(data);
+      });
+    }
+  }, [showNovaOportunidadeKanban, supabaseClient, contasParaBusca.length]);
+
+  useEffect(() => {
+    if (showSettingsModal && settingsActiveTab === 'numeracao') {
+      carregarConfigNumeracao();
+    }
+  }, [showSettingsModal, settingsActiveTab, supabaseClient]);
 
   // Listener global de teclado para tecla ESC (executado após a inicialização de todos os estados)
   useEffect(() => {
@@ -1456,6 +1889,10 @@ function App() {
       }
 
       setSession(data.session);
+
+      // Sincroniza o token de forma segura (criptografado) com as Edge Functions
+      syncUserClickUpCredentialsToEdge(cleanToken, userObj, supabaseClient, config);
+
       return data;
     } catch (err) {
       console.error("Erro no processo de login/validação do ClickUp:", err);
@@ -1503,7 +1940,8 @@ function App() {
   // que casa cards com colunas por id.
   const getTaskOptionId = (task, options) => {
     if (!task || !task.estagio) return null;
-    const opt = options.find(o => o.name.toLowerCase() === task.estagio.toLowerCase());
+    const safeOpts = (options && options.length > 0) ? options : ESTAGIO_OPTIONS;
+    const opt = safeOpts.find(o => (o.name || '').toLowerCase().trim() === String(task.estagio || '').toLowerCase().trim());
     return opt ? opt.id : null;
   };
 
@@ -1696,7 +2134,7 @@ function App() {
       }
 
       // Enriquecer negócios com responsável e valor da proposta do Supabase
-      const enrichedTasks = (negociosData || []).map(n => {
+      const enrichedTasks = (negociosData || []).filter(n => n.clickup_negocio_id).map(n => {
         const idClean = String(n.clickup_negocio_id || '').replace('#', '').trim();
         const matchedProps = [
           ...(propsByClickupId.get(idClean) || []),
@@ -1965,66 +2403,58 @@ function App() {
     try {
       const idWithoutHash = clickupTaskId.startsWith('#') ? clickupTaskId.substring(1) : clickupTaskId;
       const idWithHash = '#' + idWithoutHash;
-      const { data, error } = await supabaseClient
-        .from('propostas')
-        .select('id')
-        .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
-        .order('created_at', { ascending: true })
-        .limit(1);
 
-      let proposalNumber = 'Nova vA';
-      if (!error && data && data.length > 0) {
-        proposalNumber = `#${data[0].id}`;
-      }
+      // 1. Busca INSTANTÂNEA no Supabase (negócios e propostas locais)
+      const [{ data: negData }, { data: propData }] = await Promise.all([
+        supabaseClient
+          .from('negocios')
+          .select('id, nome, estagio, numero_proposta_oficial, created_at')
+          .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
+          .limit(1),
+        supabaseClient
+          .from('propostas')
+          .select('id')
+          .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
+          .order('created_at', { ascending: true })
+          .limit(1)
+      ]);
 
-      let clickupName = '';
-      try {
-        const taskRes = await fetch(`/clickup-api/task/${idWithoutHash}`);
-        if (taskRes.ok) {
-          const taskData = await taskRes.json();
-          if (taskData.list && taskData.list.id) {
-            setClickupListId(taskData.list.id);
-          }
-          if (taskData.name) {
-            clickupName = taskData.name;
-          }
-          const startVal = taskData.start_date ? formatDateMsToYMD(taskData.start_date) : (taskData.date_created ? formatDateMsToYMD(taskData.date_created) : '');
-          const dueVal = taskData.due_date ? formatDateMsToYMD(taskData.due_date) : '';
-          setClickupTaskDates({
-            start_date: startVal,
-            due_date: dueVal
-          });
-        }
-      } catch (clickupErr) {
-        console.error("Erro ao obter detalhes da tarefa no ClickUp via proxy local:", clickupErr);
-      }
+      const neg = negData && negData[0];
+      const proposalNumber = (propData && propData[0]) ? `#${propData[0].id}` : (neg?.numero_proposta_oficial ? `Nº ${neg.numero_proposta_oficial}` : 'Nova vA');
+      const realName = neg?.nome || selectedTask?.nome || selectedTask?.name || `Projeto CRM #${idWithoutHash}`;
 
-      const params = new URLSearchParams(window.location.search);
-      let nameParam = params.get('task_name') || '';
-      if (nameParam.includes('{{') || nameParam.includes('}}')) {
-        nameParam = '';
-      }
-      const fallbackName = `Projeto CRM #${clickupTaskId}`;
-      // Se a busca do nome real no ClickUp não retornou nada desta vez (falha transitória,
-      // rede lenta etc.) mas já tínhamos um nome de verdade carregado antes, mantém o nome
-      // já exibido em vez de trocar pelo texto genérico — evita o "flash" para o fallback
-      // a cada nova chamada de fetchProjectContext (inclusive as do polling em segundo plano).
-      const hasGoodNameAlready = projectContext.name && projectContext.name !== fallbackName;
-      const decodedName = nameParam
-        ? decodeURIComponent(nameParam)
-        : (clickupName || (hasGoodNameAlready ? projectContext.name : fallbackName));
-
+      // Atualiza o estado da tela IMEDIATAMENTE (sem esperar ClickUp)
       setProjectContext({
-        name: decodedName,
+        name: realName,
         proposal_number: proposalNumber
       });
+
+      if (neg && neg.estagio) {
+        setSelectedTask(prev => ({
+          ...(prev || {}),
+          id: idWithoutHash,
+          estagio: neg.estagio,
+          nome: neg.nome,
+          name: neg.nome,
+          numero_proposta_oficial: neg.numero_proposta_oficial
+        }));
+      }
+
+      // 2. Busca secundária de metadados no ClickUp de forma assíncrona (não bloqueia a tela)
+      fetch(`/clickup-api/task/${idWithoutHash}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(taskData => {
+          if (!taskData) return;
+          if (taskData.list && taskData.list.id) setClickupListId(taskData.list.id);
+          const startVal = taskData.start_date ? formatDateMsToYMD(taskData.start_date) : (taskData.date_created ? formatDateMsToYMD(taskData.date_created) : '');
+          const dueVal = taskData.due_date ? formatDateMsToYMD(taskData.due_date) : '';
+          if (startVal || dueVal) {
+            setClickupTaskDates({ start_date: startVal, due_date: dueVal });
+          }
+        })
+        .catch(() => {});
     } catch (err) {
-      console.error(err);
-      setProjectContext(prev => (
-        prev.name && prev.name !== `Projeto CRM #${clickupTaskId}`
-          ? prev
-          : { name: `Projeto CRM #${clickupTaskId}`, proposal_number: 'Nova vA' }
-      ));
+      console.error("Erro em fetchProjectContext:", err);
     }
   };
 
@@ -2257,6 +2687,175 @@ function App() {
       if (supabaseClient) {
         fetchCommercialTasks(supabaseClient);
       }
+    }
+  };
+
+  const handleExcluirNegocioDrawer = async (task) => {
+    if (!task) return;
+    const nomeNegocio = task.nome || task.name || 'esta oportunidade';
+    const msg = `Excluir a oportunidade "${nomeNegocio}"?\n\nIsso irá:\n• Remover do CRM local (banco de dados)\n• Excluir a tarefa correspondente no ClickUp\n\nEsta ação não pode ser desfeita!`;
+    if (!confirm(msg)) return;
+
+    try {
+      // 1. Exclui do Supabase
+      if (supabaseClient) {
+        if (task.id && String(task.id).includes('-')) {
+          await supabaseClient.from('negocios').delete().eq('id', task.id);
+        }
+        if (task.clickup_negocio_id) {
+          await supabaseClient.from('negocios').delete().eq('clickup_negocio_id', task.clickup_negocio_id);
+        }
+        if (task.id && !String(task.id).includes('-')) {
+          await supabaseClient.from('negocios').delete().eq('clickup_negocio_id', task.id);
+        }
+      }
+
+      // 2. Exclui do ClickUp se houver ID válido
+      const cuTaskId = task.clickup_negocio_id || (task.id && !String(task.id).includes('-') ? task.id : null);
+      if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
+        try {
+          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE' });
+        } catch (e) {
+          console.warn('[ClickUp Delete] Falha ao excluir negócio no ClickUp:', e);
+        }
+      }
+
+      // 3. Fecha o drawer e recarrega
+      setShowDrawer(false);
+      setClickupTaskId('');
+      setSelectedTask(null);
+      if (supabaseClient) {
+        fetchKanbanData();
+      }
+      showToast(`Oportunidade "${nomeNegocio}" excluída com sucesso!`, "success");
+    } catch (err) {
+      console.error('Erro ao excluir oportunidade:', err);
+      showToast('Erro ao excluir oportunidade: ' + (err.message || err), "error");
+    }
+  };
+
+  const handleAbrirEditarNegocioDrawer = async (task) => {
+    if (!task) return;
+    const cuTaskId = task.clickup_negocio_id || (task.id && !String(task.id).includes('-') ? task.id : null);
+    
+    let roData = { roInfra: '', roSw1: '', roSw2: '', roSw3: '', roSw4: '' };
+    if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
+      try {
+        const res = await fetch(`/clickup-api/task/${cuTaskId}`);
+        if (res.ok) {
+          const t = await res.json();
+          const cfMap = new Map((t.custom_fields || []).map(f => [f.id, f.value]));
+          roData = {
+            roInfra: cfMap.get(RO_CLICKUP_IDS.roInfra) || '',
+            roSw1: cfMap.get(RO_CLICKUP_IDS.roSw1) || '',
+            roSw2: cfMap.get(RO_CLICKUP_IDS.roSw2) || '',
+            roSw3: cfMap.get(RO_CLICKUP_IDS.roSw3) || '',
+            roSw4: cfMap.get(RO_CLICKUP_IDS.roSw4) || '',
+          };
+        }
+      } catch (e) {}
+    }
+
+    setEditNegocioDrawerForm({
+      nome: task.nome || task.name || '',
+      estagio: task.estagio || 'Registro',
+      tipo: task.tipo_oportunidade || 'Projeto',
+      valor: task.valor_estimado ? String(task.valor_estimado) : (task.valor_clickup_fallback ? String(task.valor_clickup_fallback) : ''),
+      probabilidade: task.probabilidade ? String(task.probabilidade) : '50',
+      dataPrevisao: task.data_previsao || '',
+      descricao: task.descricao || task.description || '',
+      ...roData
+    });
+    setShowEditNegocioDrawerModal(true);
+  };
+
+  const handleSalvarEditarNegocioDrawer = async (e) => {
+    e.preventDefault();
+    if (!editNegocioDrawerForm.nome.trim()) {
+      showToast('Informe o título da oportunidade.', 'error');
+      return;
+    }
+    setSavingEditNegocioDrawer(true);
+    try {
+      const valorNum = parseFloat(editNegocioDrawerForm.valor) || 0;
+      const probNum = parseInt(editNegocioDrawerForm.probabilidade) || 50;
+      const cuTaskId = selectedTask.clickup_negocio_id || (selectedTask.id && !String(selectedTask.id).includes('-') ? selectedTask.id : null);
+
+      // 1. Atualiza no Supabase
+      if (supabaseClient) {
+        if (selectedTask.id && String(selectedTask.id).includes('-')) {
+          await supabaseClient.from('negocios').update({
+            nome: editNegocioDrawerForm.nome.trim(),
+            estagio: editNegocioDrawerForm.estagio,
+            valor_clickup_fallback: valorNum > 0 ? valorNum : null,
+            updated_at: new Date().toISOString()
+          }).eq('id', selectedTask.id);
+        } else if (cuTaskId) {
+          await supabaseClient.from('negocios').update({
+            nome: editNegocioDrawerForm.nome.trim(),
+            estagio: editNegocioDrawerForm.estagio,
+            valor_clickup_fallback: valorNum > 0 ? valorNum : null,
+            updated_at: new Date().toISOString()
+          }).eq('clickup_negocio_id', cuTaskId);
+        }
+      }
+
+      // 2. Atualiza no ClickUp
+      if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
+        try {
+          const estOpt = ESTAGIO_OPTIONS.find(o => o.name === editNegocioDrawerForm.estagio);
+          const customFields = [
+            { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: 'cd6922b0-34f4-45e3-853a-cba995a2591c' }, // Negócio
+            ...(estOpt ? [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: estOpt.id }] : []),
+            ...(valorNum > 0 ? [{ id: 'ee65221a-029d-4d0a-a981-b71b5a29b4b4', value: valorNum }] : []),
+            ...(probNum ? [{ id: '2c667b12-79c6-4949-b995-5c3938e7ff51', value: probNum }] : []),
+            ...(editNegocioDrawerForm.roInfra !== undefined ? [{ id: RO_CLICKUP_IDS.roInfra, value: editNegocioDrawerForm.roInfra.trim() }] : []),
+            ...(editNegocioDrawerForm.roSw1 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw1, value: editNegocioDrawerForm.roSw1.trim() }] : []),
+            ...(editNegocioDrawerForm.roSw2 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw2, value: editNegocioDrawerForm.roSw2.trim() }] : []),
+            ...(editNegocioDrawerForm.roSw3 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw3, value: editNegocioDrawerForm.roSw3.trim() }] : []),
+            ...(editNegocioDrawerForm.roSw4 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw4, value: editNegocioDrawerForm.roSw4.trim() }] : [])
+          ];
+
+          await fetch(`/clickup-api/task/${cuTaskId}?custom_item_id=1004`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: editNegocioDrawerForm.nome.trim(),
+              custom_item_id: 1004,
+              description: editNegocioDrawerForm.descricao || undefined,
+              custom_fields: customFields,
+              ...(editNegocioDrawerForm.dataPrevisao ? { due_date: new Date(editNegocioDrawerForm.dataPrevisao + 'T12:00:00Z').getTime() } : {})
+            })
+          });
+        } catch (cuErr) {
+          console.warn('[ClickUp Sync] Falha ao atualizar negócio no ClickUp:', cuErr);
+        }
+      }
+
+      // 3. Atualiza o estado local
+      setSelectedTask(prev => ({
+        ...prev,
+        nome: editNegocioDrawerForm.nome.trim(),
+        name: editNegocioDrawerForm.nome.trim(),
+        estagio: editNegocioDrawerForm.estagio,
+        valor_estimado: valorNum > 0 ? valorNum : prev?.valor_estimado,
+        valor_clickup_fallback: valorNum > 0 ? valorNum : prev?.valor_clickup_fallback,
+        descricao: editNegocioDrawerForm.descricao,
+        roInfra: editNegocioDrawerForm.roInfra,
+        roSw1: editNegocioDrawerForm.roSw1,
+        roSw2: editNegocioDrawerForm.roSw2,
+        roSw3: editNegocioDrawerForm.roSw3,
+        roSw4: editNegocioDrawerForm.roSw4
+      }));
+
+      setShowEditNegocioDrawerModal(false);
+      if (supabaseClient) fetchKanbanData();
+      showToast('Oportunidade atualizada com sucesso!', 'success');
+    } catch (err) {
+      console.error('Erro ao atualizar oportunidade:', err);
+      showToast('Erro ao atualizar oportunidade: ' + (err.message || err), 'error');
+    } finally {
+      setSavingEditNegocioDrawer(false);
     }
   };
 
@@ -2842,6 +3441,7 @@ function App() {
     if (rawProposalsRef.current.length === 0 && !silent) {
       setLoadingDashboard(true);
     }
+    setDashboardFetching(true);
     try {
       if (forceRefresh || rawProposalsRef.current.length === 0) {
         const [propsRes, itensRes] = await Promise.all([
@@ -2870,6 +3470,7 @@ function App() {
       console.error("Erro ao carregar dados do dashboard:", err);
     } finally {
       if (!silent) setLoadingDashboard(false);
+      setDashboardFetching(false);
     }
   };
 
@@ -2927,7 +3528,7 @@ function App() {
 
   // Efeito para criar/destruir e atualizar gráficos do Chart.js
   useEffect(() => {
-    if (activeTab !== 'relatorios' || loadingDashboard) {
+    if (activeTab !== 'relatorios' || loadingDashboard || dashboardFetching) {
       return;
     }
 
@@ -3223,7 +3824,7 @@ function App() {
         seasonalityChartInst.current = null;
       }
     };
-  }, [activeTab, loadingDashboard, distributorTotals, manufacturerTotals, topProductsFilterMode, biMetrics.seasonalityLabels, biMetrics.seasonalityValues, biMetrics.seasonalityCompValues, topProductsAggregated]);
+  }, [activeTab, loadingDashboard, dashboardFetching, distributorTotals, manufacturerTotals, topProductsFilterMode, biMetrics.seasonalityLabels, biMetrics.seasonalityValues, biMetrics.seasonalityCompValues, topProductsAggregated]);
 
   useEffect(() => {
     if (activeTab === 'relatorios' && dbConnected) {
@@ -3514,6 +4115,7 @@ function App() {
     setLoading(true);
     try {
       const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : 'Vendedor CRM';
+      const authorUserId = userProfile?.id ? String(userProfile.id) : null;
       const { data: newProp, error } = await supabaseClient
         .from('propostas')
         .insert({
@@ -3522,7 +4124,8 @@ function App() {
           cenario: '',
           situacao: 'Ativa',
           total_proposta: 0,
-          criado_por: currentResponsavel
+          criado_por: currentResponsavel,
+          criado_por_user_id: authorUserId
         })
         .select()
         .single();
@@ -3941,6 +4544,7 @@ function App() {
 
       // 6. Insere a nova proposta (vB) mantendo o valor base herdado e a situação como 'Ativa'
       const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : (basePropData.criado_por || '');
+      const authorUserId = userProfile?.id ? String(userProfile.id) : (basePropData.criado_por_user_id || null);
       const { data: newProp, error: propErr } = await supabaseClient
         .from('propostas')
         .insert({
@@ -3950,6 +4554,7 @@ function App() {
           situacao: 'Ativa',
           total_proposta: finalBaseTotal,
           criado_por: currentResponsavel,
+          criado_por_user_id: authorUserId,
           data_inicio: basePropData.data_inicio || currentProposta?.data_inicio || clickupTaskDates?.start_date || null,
           // Nunca herda due_date do ClickUp como data_fechamento (ver comentário em loadProposalDetails).
           data_fechamento: null
@@ -4873,17 +5478,48 @@ function App() {
                         )}
                       </div>
                     </div>
-                    </div>
+                  </div>
 
-                    {/* Linha 2: Data + Valor */}
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        {formatDateSafe(prop.created_at, {day: '2-digit', month: '2-digit'})} • {getFirstNameSafe(prop.criado_por)}
-                      </span>
-                      <span className="text-sm font-black text-slate-800 tabular-nums">
+                  {/* Linha 2: Data + Validade + Valor */}
+                  <div className="flex justify-between items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                          <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          {formatDateSafe(prop.created_at, {day: '2-digit', month: '2-digit'})}
+                        </span>
+
+                        {(() => {
+                          const dealEstagio = selectedTask ? (selectedTask.estagio || selectedTask.status) : null;
+                          const val = calcularValidadeProposta(prop, dealEstagio);
+                          if (!val) return null;
+                          if (val.status === 'vencida') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                <span className="w-1 h-1 rounded-full bg-rose-500"></span>
+                                Expirada
+                              </span>
+                            );
+                          }
+                          if (val.status === 'vence_hoje') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <span className="w-1 h-1 rounded-full bg-amber-500"></span>
+                                Vence hoje
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="w-1 h-1 rounded-full bg-emerald-500"></span>
+                              {val.diasRestantes}d válidos
+                            </span>
+                          );
+                        })()}
+                      </div>
+
+                      <span className="text-sm font-black text-slate-800 tabular-nums shrink-0">
                         R$ {Number(prop.total_proposta || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                       </span>
                     </div>
@@ -4905,7 +5541,7 @@ function App() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
             </svg>
-            <span>Gerar Nova Versão</span>
+            <span>+ Criar Nova Versão</span>
           </button>
         )}
       </div>
@@ -4946,9 +5582,9 @@ function App() {
     const isReadOnly = (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido') && !isEditingProposal;
 
     return (
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
+      <div className="flex-1 flex flex-col overflow-hidden bg-slate-100/70">
         {/* Barra superior de navegação */}
-        <div className="px-6 py-3 bg-white/90 backdrop-blur-md border-b border-slate-200/70 flex items-center justify-between z-10 shadow-2xs">
+        <div className="px-6 py-3 bg-white backdrop-blur-md border-b border-slate-200 flex items-center justify-between z-10 shadow-sm shadow-slate-200/40">
           <button 
             onClick={() => setDrawerTab('details')}
             className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-indigo-600 px-3 py-1.5 rounded-xl hover:bg-indigo-50/50 transition-all cursor-pointer group"
@@ -5000,6 +5636,35 @@ function App() {
                     </svg>
                     Criada em <strong className="text-slate-800 font-bold">{formatDateSafe(currentProposta.created_at)}</strong> {currentProposta.criado_por ? <span>por <strong className="text-slate-900 font-bold">{currentProposta.criado_por}</strong></span> : ''}
                   </span>
+
+                  {/* Badge Limpo de Validade dos Preços (apenas quando houver itens/valor e o negócio/proposta estiver em aberto) */}
+                  {(() => {
+                    const dealEstagio = selectedTask ? (selectedTask.estagio || selectedTask.status) : null;
+                    const val = calcularValidadeProposta(currentProposta, dealEstagio);
+                    if (!val) return null;
+                    if (val.status === 'vencida') {
+                      return (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-lg shadow-2xs">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                          <span>Expirada em {val.dataValidadeStr}</span>
+                        </span>
+                      );
+                    }
+                    if (val.status === 'vence_hoje') {
+                      return (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg shadow-2xs">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                          <span>Vence Hoje ({val.dataValidadeStr})</span>
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-lg shadow-2xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        <span>Válida até {val.dataValidadeStr} ({val.diasRestantes}d restantes)</span>
+                      </span>
+                    );
+                  })()}
 
                   {currentProposta.situacao === 'Ganho' && (
                     <span className="text-xs font-black text-emerald-800 bg-emerald-50 px-3 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 shadow-2xs">
@@ -5156,7 +5821,7 @@ function App() {
           </div>
 
           {/* Grid Premium de Metadados (Form Controls Card) */}
-          <div className="mx-7 my-5 p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+          <div className="mx-7 my-5 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5">
               <div>
                 <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
@@ -5164,7 +5829,7 @@ function App() {
                   Tipo Oportunidade
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={getTipoOportunidade()}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -5194,7 +5859,7 @@ function App() {
                   Tipo de Projeto
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.cenario || ""}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, cenario: e.target.value })}
                   disabled={isReadOnly || !isProjeto}
@@ -5213,7 +5878,7 @@ function App() {
                   Vendedor / Responsável
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.criado_por || ""}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, criado_por: e.target.value })}
                   disabled={isReadOnly}
@@ -5235,7 +5900,7 @@ function App() {
                 </label>
                 <input
                   type="date"
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_inicio ? currentProposta.data_inicio.substring(0, 10) : (clickupTaskDates?.start_date || '')}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, data_inicio: e.target.value })}
                   disabled={isReadOnly}
@@ -5252,7 +5917,7 @@ function App() {
                 </label>
                 <input
                   type="date"
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_fechamento ? currentProposta.data_fechamento.substring(0, 10) : ''}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, data_fechamento: e.target.value })}
                   disabled={isReadOnly}
@@ -5712,6 +6377,16 @@ function App() {
             }`}
           >
             Pipeline de Vendas
+          </button>
+          <button
+            onClick={() => setActiveTab('empresas')}
+            className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
+              activeTab === 'empresas' 
+                ? 'bg-slate-900 text-white shadow-sm font-semibold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            }`}
+          >
+            Empresas
           </button>
           <button
             onClick={() => setActiveTab('tasks')}
@@ -6272,33 +6947,13 @@ function App() {
             {loadingKanban ? (
               <div className="flex-1 flex flex-col items-center justify-center space-y-4">
                 <div className="w-12 h-12 border-4 border-slate-200 border-t-indigo-500 rounded-full animate-spin"></div>
-                <p className="text-slate-500 font-medium">Carregando oportunidades do ClickUp...</p>
+                <p className="text-slate-500 font-medium">Carregando oportunidades...</p>
               </div>
             ) : (
               <React.Fragment>
-                <div className="flex flex-col md:flex-row md:items-center justify-between px-6 py-3 bg-white border-b border-slate-200/80 flex-shrink-0 space-y-3 md:space-y-0 shadow-sm shadow-slate-100/50">
+                <div className="flex flex-col md:flex-row md:items-center justify-between px-6 py-3 bg-white border-b border-slate-200/80 flex-shrink-0 space-y-3 md:space-y-0 shadow-md shadow-slate-100/60">
                   <div className="flex items-center space-x-3 flex-wrap gap-y-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Exibir Estágios:</span>
-                    <button
-                      onClick={() => { setDealsListStatus('Ganho'); setShowDealsList(true); setShowForecast(false); }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showDealsList && dealsListStatus === 'Ganho'
-                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
-                      }`}
-                    >
-                      <span>🏆 Ganho</span>
-                    </button>
-                    <button
-                      onClick={() => { setDealsListStatus('Perdido'); setShowDealsList(true); setShowForecast(false); }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                        showDealsList && dealsListStatus === 'Perdido'
-                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
-                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-200'
-                      }`}
-                    >
-                      <span>😞 Perdido</span>
-                    </button>
                     <button
                       onClick={() => { setDealsListStatus('Congelado'); setShowDealsList(true); setShowForecast(false); }}
                       className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
@@ -6318,6 +6973,13 @@ function App() {
                       }`}
                     >
                       <span>📋 Lista Completa</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowNovaOportunidadeKanban(true)}
+                      className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <span>+ Nova Oportunidade</span>
                     </button>
 
                     {/* Lupa de Busca Expansível no Kanban */}
@@ -6390,7 +7052,7 @@ function App() {
                           setFilterFabricante(null);
                         }
                       }}
-                      className={`mr-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showForecast ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-700'}`}
+                      className={`mr-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showForecast ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                     >
                       📈 Forecast
                     </button>
@@ -6461,7 +7123,7 @@ function App() {
                             <span className="w-3 h-3 rounded-full" style={{ backgroundColor: col.color || '#fff' }}></span>
                             <span className="text-sm font-bold text-slate-800 uppercase tracking-wider">{col.name}</span>
                           </div>
-                          <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-500">
+                          <span className="bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full text-xs font-bold text-indigo-600">
                             {tasksInCol.length}
                           </span>
                         </div>
@@ -6483,7 +7145,7 @@ function App() {
                                return isThisDeal && t.status === 'pendente' && new Date(t.data_vencimento) < new Date();
                              });
                              return (
-                               <KanbanCard 
+                               <KanbanCard
                                  key={task.id}
                                  task={task}
                                  dealValue={dealValue}
@@ -6492,6 +7154,7 @@ function App() {
                                  handleDragStart={handleDragStart}
                                  handleCardClick={handleCardClick}
                                  hasOverdue={hasOverdue}
+                                 stageColor={col.color}
                                />
                              );
                           })}
@@ -6501,8 +7164,27 @@ function App() {
                   })}
                 </div>
                 )}
+
+                {showNovaOportunidadeKanban && (
+                  <NovaOportunidadeModal
+                    supabaseClient={supabaseClient}
+                    contaFixa={null}
+                    contas={contasParaBusca}
+                    onClose={() => setShowNovaOportunidadeKanban(false)}
+                    onCriado={() => {
+                      setShowNovaOportunidadeKanban(false);
+                      fetchKanbanData();
+                    }}
+                  />
+                )}
               </React.Fragment>
             )}
+          </div>
+        )}
+
+        {empresasTabMounted && (
+          <div className={activeTab === 'empresas' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
           </div>
         )}
 
@@ -6587,12 +7269,12 @@ function App() {
           };
 
           const typeConfig = {
-            'Ligação':   { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',   text: 'text-indigo-700',   border: 'border-indigo-200', icon: '📞' },
-            'Reunião':   { dot: 'bg-emerald-500', bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200', icon: '🤝' },
-            'E-mail':    { dot: 'bg-amber-500',   bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',   icon: '✉️' },
-            'Follow-up': { dot: 'bg-rose-500',    bg: 'bg-rose-50',     text: 'text-rose-700',     border: 'border-rose-200',    icon: '🔄' },
-            'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  icon: '📍' },
-            'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     icon: '📄' },
+            'Ligação':   { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',   text: 'text-indigo-700',   border: 'border-indigo-200', Icon: (typeof IconPhone !== 'undefined' ? IconPhone : null) },
+            'Reunião':   { dot: 'bg-emerald-500', bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200', Icon: (typeof IconUsers !== 'undefined' ? IconUsers : null) },
+            'E-mail':    { dot: 'bg-amber-500',   bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',   Icon: (typeof IconMail !== 'undefined' ? IconMail : null) },
+            'Follow-up': { dot: 'bg-rose-500',    bg: 'bg-rose-50',     text: 'text-rose-700',     border: 'border-rose-200',    Icon: (typeof IconRefresh !== 'undefined' ? IconRefresh : null) },
+            'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  Icon: (typeof IconMapPin !== 'undefined' ? IconMapPin : null) },
+            'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) },
           };
 
           const formatTaskDate = (dateStr) => {
@@ -6609,10 +7291,9 @@ function App() {
 
           const TaskCard = ({ task }) => {
             const isDone = task.status === 'concluida';
-            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200', icon: '📌' };
+            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
             const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
             const assigneeName = matchedUser ? matchedUser.nome : '—';
-            const initials = assigneeName !== '—' ? assigneeName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?';
             const negocio = getTaskNegocio(task);
             const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento);
 
@@ -6667,7 +7348,7 @@ function App() {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {/* Badge de tipo */}
                         <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${tc.bg} ${tc.text} ${tc.border}`}>
-                          <span>{tc.icon}</span>
+                          {tc.Icon && <tc.Icon size={10} />}
                           <span>{task.tipo}</span>
                         </span>
 
@@ -6686,11 +7367,15 @@ function App() {
                           {dateLabel}
                         </span>
 
-                        {/* Avatar do responsável */}
+                        {/* Avatar do responsável — mesmo componente colorido por pessoa usado no Kanban/Empresas */}
                         <div className="flex items-center gap-1.5" title={assigneeName}>
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0 shadow-sm">
-                            {initials}
-                          </div>
+                          {typeof AvatarInicial !== 'undefined' ? (
+                            <AvatarInicial nome={assigneeName !== '—' ? assigneeName : ''} size="xs" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0 shadow-sm">
+                              {assigneeName !== '—' ? assigneeName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?'}
+                            </div>
+                          )}
                         </div>
 
                         {/* Ações */}
@@ -7018,6 +7703,26 @@ function App() {
                   }`}
                 >
                   Tipos de Tarefas
+                </button>
+                <button
+                  onClick={() => setSettingsActiveTab('numeracao')}
+                  className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
+                    settingsActiveTab === 'numeracao'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  Numeração de Propostas
+                </button>
+                <button
+                  onClick={() => setSettingsActiveTab('segmentos')}
+                  className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
+                    settingsActiveTab === 'segmentos'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  Segmentos de Atuação
                 </button>
               </aside>
 
@@ -7517,6 +8222,74 @@ function App() {
                     </div>
                   </div>
                 )}
+
+                {/* 5. ABA NUMERAÇÃO DE PROPOSTAS */}
+                {settingsActiveTab === 'numeracao' && (
+                  <div className="space-y-6">
+                    <div className="mb-4">
+                      <h2 className="text-base font-bold text-slate-900">Numeração Interna de Propostas</h2>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">Controle a geração atômica de números sequenciais oficiais para novas oportunidades e propostas.</p>
+                    </div>
+
+                    <div className="bg-white border border-slate-200/80 rounded-xl p-5 shadow-xs space-y-5">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">Status da Numeração Automática</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Quando ativo, cada nova oportunidade receberá o próximo número sequencial (Ex: {(configNumeracao.ultimo_numero || 13202) + 1}/{new Date().getFullYear()}).</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={configNumeracao.ativo}
+                            onChange={async (e) => {
+                              const novoAtivo = e.target.checked;
+                              const { data, error } = await supabaseClient.rpc('ajustar_numeracao_proposta', { novo_ativo: novoAtivo });
+                              if (!error && data && data[0]) {
+                                setConfigNumeracao(data[0]);
+                                showToast(`Numeração automática ${novoAtivo ? 'ativada' : 'desativada'}!`, 'success');
+                              }
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                      </div>
+
+                      <div className="pt-2">
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">Último Número Emitido</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            value={configNumeracao.ultimo_numero || ''}
+                            onChange={(e) => setConfigNumeracao({ ...configNumeracao, ultimo_numero: parseInt(e.target.value) || 0 })}
+                            className="w-48 rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const { data, error } = await supabaseClient.rpc('ajustar_numeracao_proposta', { novo_numero: configNumeracao.ultimo_numero });
+                              if (!error && data && data[0]) {
+                                setConfigNumeracao(data[0]);
+                                showToast('Último número atualizado com sucesso!', 'success');
+                              } else {
+                                showToast('Erro ao atualizar: ' + (error?.message || ''), 'error');
+                              }
+                            }}
+                            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+                          >
+                            Salvar Número
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-2">O próximo negócio criado receberá o número: <strong className="text-indigo-600 font-mono">{(configNumeracao.ultimo_numero || 0) + 1}/{new Date().getFullYear()}</strong></p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. ABA SEGMENTOS DE ATUAÇÃO */}
+                {settingsActiveTab === 'segmentos' && (
+                  <SegmentosSettings />
+                )}
               </main>
             </div>
           </div>
@@ -7672,8 +8445,8 @@ function App() {
             {/* Cabeçalho do Modal */}
             <div className="border-b border-slate-200/80 px-6 py-4 bg-slate-50/80 flex items-center justify-between">
               <h3 className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-                <span className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg flex items-center justify-center text-xs shadow-sm">
-                  📋
+                <span className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg flex items-center justify-center shadow-sm">
+                  {typeof IconDocument !== 'undefined' ? <IconDocument size={14} /> : null}
                 </span>
                 <span>{editingTask ? 'Editar Tarefa Comercial' : 'Nova Tarefa Comercial'}</span>
               </h3>
@@ -7954,6 +8727,145 @@ function App() {
         </div>
       )}
 
+      {/* Modal de Edição de Oportunidade / Negócio */}
+      {showEditNegocioDrawerModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={() => setShowEditNegocioDrawerModal(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900 leading-tight">Editar Oportunidade</h3>
+                  {selectedTask?.numero_proposta_oficial && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg mt-0.5">
+                      Nº da Oportunidade: {selectedTask.numero_proposta_oficial}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setShowEditNegocioDrawerModal(false)} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" title="Fechar">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarEditarNegocioDrawer} className="p-6 overflow-y-auto flex-1 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Título da Oportunidade *</label>
+                <input required value={editNegocioDrawerForm.nome} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, nome: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Estágio do Funil</label>
+                  <select value={editNegocioDrawerForm.estagio} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, estagio: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer">
+                    {['Registro','Qualificação','Proposta','Desenvolvimento','Negociação','Termo de aceite','Ganho','Perdido','Congelado'].map(est => (
+                      <option key={est} value={est}>{est}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Tipo de Oportunidade</label>
+                  <select value={editNegocioDrawerForm.tipo} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, tipo: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer">
+                    <option value="Projeto">Projeto</option>
+                    <option value="Garantias">Garantias</option>
+                    <option value="Serviços">Serviços</option>
+                    <option value="SSU">SSU</option>
+                    <option value="Volumes">Volumes</option>
+                    <option value="Upgrade">Upgrade</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Probabilidade</label>
+                  <select value={editNegocioDrawerForm.probabilidade} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, probabilidade: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer">
+                    <option value="10">10%</option>
+                    <option value="30">30%</option>
+                    <option value="50">50%</option>
+                    <option value="70">70%</option>
+                    <option value="90">90%</option>
+                    <option value="100">100%</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Valor Estimado (R$)</label>
+                  <input type="number" step="0.01" placeholder="0,00" value={editNegocioDrawerForm.valor} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, valor: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Previsão de Fechamento do Negócio</label>
+                  <input type="date" value={editNegocioDrawerForm.dataPrevisao} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, dataPrevisao: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                </div>
+              </div>
+
+              {/* Registros de Oportunidade (R.O.) */}
+              <div>
+                <div className="flex items-center gap-3 pt-1 mb-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Registros de Oportunidade (R.O.)</span>
+                  <div className="flex-1 h-px bg-slate-100"></div>
+                </div>
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Infraestrutura</label>
+                    <input placeholder="Ex: Dell RO #123456" value={editNegocioDrawerForm.roInfra} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roInfra: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 1</label>
+                      <input placeholder="Ex: Veeam RO #98765" value={editNegocioDrawerForm.roSw1} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw1: e.target.value }))}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 2</label>
+                      <input placeholder="Ex: Fortinet RO #54321" value={editNegocioDrawerForm.roSw2} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw2: e.target.value }))}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 3</label>
+                      <input placeholder="Ex: VMware RO #11223" value={editNegocioDrawerForm.roSw3} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw3: e.target.value }))}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 4</label>
+                      <input placeholder="Ex: Red Hat RO #44556" value={editNegocioDrawerForm.roSw4} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw4: e.target.value }))}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Escopo & Solução Técnica</label>
+                <textarea rows={3} placeholder="Descreva o escopo, fabricantes (Dell, Veeam, etc.)..." value={editNegocioDrawerForm.descricao} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, descricao: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all resize-none" />
+              </div>
+
+              <div className="flex gap-3 pt-3 border-t border-slate-100 shrink-0">
+                <button type="button" onClick={() => setShowEditNegocioDrawerModal(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={savingEditNegocioDrawer} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
+                  {savingEditNegocioDrawer ? 'Salvando...' : '✓ Salvar Alterações'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 7. Drawer Lateral Direito */}
       {showDrawer && (
         <div className="drawer-container">
@@ -7964,48 +8876,94 @@ function App() {
               setClickupTaskId('');
             }}
           ></div>
-          <div 
+          <div
             className={`drawer-content h-full flex flex-col ${showDrawer ? 'active' : ''} ${
-              drawerTab === 'budget' ? 'w-[94vw] max-w-7xl' : 'w-full max-w-3xl md:max-w-4xl'
+              drawerTab === 'budget' ? 'w-[94vw] max-w-7xl' : 'w-full max-w-4xl md:max-w-5xl'
             }`}
           >
             {drawerTab === 'details' ? (
-              <div className="flex-1 flex flex-col p-6 overflow-hidden">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-4">
-                  <div>
-                    <h3 className="text-[17px] font-extrabold text-slate-900 leading-snug">{selectedTask ? selectedTask.name : 'Detalhes do Negócio'}</h3>
-                    {(() => {
-                      const propNumField = selectedTask && selectedTask.custom_fields 
-                        ? selectedTask.custom_fields.find(f => f.id === 'c44cc05d-303f-47e2-b243-40c6b26b732f') 
-                        : null;
-                      const propNum = propNumField ? propNumField.value : null;
-                      return (
-                        <p className="text-xs text-slate-500">
-                          {propNum ? `Nº da Proposta: ${propNum}` : `ID da oportunidade: #${clickupTaskId}`}
-                        </p>
-                      );
-                    })()}
+              <div className="flex-1 flex flex-col p-7 overflow-hidden bg-slate-50/60">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-5 gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <button 
+                      onClick={() => {
+                        setShowDrawer(false);
+                        setClickupTaskId('');
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 shadow-2xs"
+                      title="Voltar / Fechar (ESC)"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                      </svg>
+                      <span>Voltar</span>
+                    </button>
+
+                    <div className="min-w-0">
+                      <h3 className="text-base font-black text-slate-900 leading-snug truncate">{selectedTask ? (selectedTask.nome || selectedTask.name) : 'Detalhes da Oportunidade'}</h3>
+                      {(() => {
+                        const numProp = selectedTask?.numero_proposta_oficial;
+                        if (!numProp) return null;
+                        return (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md mt-0.5">
+                            Nº da Oportunidade: {numProp}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => {
-                      setShowDrawer(false);
-                      setClickupTaskId('');
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button 
+                      onClick={() => handleAbrirEditarNegocioDrawer(selectedTask)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      title="Editar oportunidade"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                      <span>Editar</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleExcluirNegocioDrawer(selectedTask)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      title="Excluir oportunidade"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                      <span>Excluir</span>
+                    </button>
+
+                    <button 
+                      onClick={() => {
+                        setShowDrawer(false);
+                        setClickupTaskId('');
+                      }}
+                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                      title="Fechar (ESC)"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4 mb-6">
                   {/* Cards de Responsável e Valor */}
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white p-3.5 rounded-xl border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Responsável pelo Negócio</span>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 border-l-4 border-l-indigo-400 shadow-sm shadow-slate-200/50">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        Responsável pelo Negócio
+                      </span>
                       <select
-                        className="w-full bg-transparent border-0 p-0 text-sm font-semibold text-slate-800 focus:ring-0 focus:outline-none cursor-pointer mt-1"
+                        className="w-full bg-transparent border-0 p-0 text-base font-black text-slate-900 focus:ring-0 focus:outline-none cursor-pointer mt-1.5"
                         value={selectedTask ? (selectedTask.responsavel_negocio || "") : ""}
                         onChange={(e) => {
                           if (selectedTask) {
@@ -8020,9 +8978,12 @@ function App() {
                         ))}
                       </select>
                     </div>
-                    <div className="bg-white p-3.5 rounded-xl border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Valor Estimado</span>
-                      <span className="text-sm font-bold text-indigo-600 mt-1 block">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 border-l-4 border-l-emerald-400 shadow-sm shadow-slate-200/50">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Valor Estimado
+                      </span>
+                      <span className="text-base font-black text-emerald-600 tracking-tight mt-1.5 block">
                         {(() => {
                           if (currentProposta && currentProposta.situacao === 'Selecionada') {
                             return `R$ ${Number(realTimeGrandTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -8037,7 +8998,7 @@ function App() {
                   </div>
 
                   {/* Pipeline Premium — Estágio da Venda */}
-                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
+                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-sm">
@@ -8049,19 +9010,20 @@ function App() {
 
                         {/* Botão Congelar Pequeno com Feedback Animado */}
                         {(() => {
-                          const congeladoOption = kanbanColumns.find(c => (c.name || '').toLowerCase().includes('congelad'));
-                          const currentOptId = getTaskOptionId(selectedTask, kanbanColumns);
+                          const safeColumns = (kanbanColumns && kanbanColumns.length > 0) ? kanbanColumns : ESTAGIO_OPTIONS;
+                          const congeladoOption = safeColumns.find(c => (c.name || '').toLowerCase().includes('congelad'));
+                          const currentOptId = getTaskOptionId(selectedTask, safeColumns);
                           const isFrozen = congeladoOption && currentOptId === congeladoOption.id;
 
                           if (isFrozen) {
                             return (
                               <button
                                 onClick={async () => {
-                                  if (selectedTask && kanbanColumns.length > 0) {
-                                    const firstActiveCol = kanbanColumns.find(c => {
+                                  if (selectedTask && safeColumns.length > 0) {
+                                    const firstActiveCol = safeColumns.find(c => {
                                       const n = (c.name || '').toLowerCase();
                                       return !n.includes('congelad') && !n.includes('ganho') && !n.includes('perdido');
-                                    }) || kanbanColumns[0];
+                                    }) || safeColumns[0];
                                     await handleOpportunityStateChange(selectedTask.id, firstActiveCol.id);
                                     showToast('Negócio Descongelado! Retornou ao Pipeline ❄️', 'info');
                                   }
@@ -8082,7 +9044,7 @@ function App() {
                                   await handleOpportunityStateChange(selectedTask.id, congeladoOption.id);
                                   showToast('Negócio Congelado ❄️', 'info');
                                 } else {
-                                  showToast('Estágio Congelado não configurado no ClickUp.', 'warning');
+                                  showToast('Estágio Congelado não configurado.', 'warning');
                                 }
                               }}
                               className="bg-slate-100 hover:bg-sky-50 text-slate-600 hover:text-sky-700 border border-slate-200 hover:border-sky-300 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
@@ -8098,26 +9060,27 @@ function App() {
 
                     {/* Grid de Estágios com Ganho e Perdido acendendo apenas quando fechados */}
                     {(() => {
-                      const rawOptions = kanbanColumns || [];
+                      const rawOptions = (kanbanColumns && kanbanColumns.length > 0) ? kanbanColumns : ESTAGIO_OPTIONS;
                       const options = rawOptions.filter(o => {
                         const n = (o.name || '').toLowerCase();
                         return !n.includes('congelad') && !n.includes('ganho') && !n.includes('perdido');
                       });
 
                       const currentRawOptionId = getTaskOptionId(selectedTask, rawOptions);
-                      const currentRawOption = kanbanColumns.find(c => c.id === currentRawOptionId);
-                      const currentRawName = (currentRawOption?.name || '').toLowerCase();
+                      const currentRawOption = rawOptions.find(c => c.id === currentRawOptionId);
+                      const currentRawName = (currentRawOption?.name || selectedTask?.estagio || '').toLowerCase();
 
                       // Verificar se há uma proposta selecionada ativada
                       const selectedProp = propostas && propostas.length > 0
                         ? (propostas.find(p => p.situacao === 'Selecionada') || propostas.find(p => p.versao === 'vA') || propostas[0])
                         : null;
-                      const hasSelectedProposal = Boolean(selectedProp && selectedProp.situacao === 'Selecionada');
+                      const hasSelectedProposal = Boolean(selectedProp);
 
                       // Determinar se o negócio está Ganho, Perdido ou Congelado
-                      const isWon = (selectedProp && selectedProp.situacao === 'Ganho') || currentRawName.includes('ganho');
-                      const isLost = (selectedProp && selectedProp.situacao === 'Perdido') || currentRawName.includes('perdido');
-                      const isFrozen = currentRawName.includes('congelad');
+                      const taskEstagio = (selectedTask?.estagio || '').toLowerCase();
+                      const isWon = (selectedProp && selectedProp.situacao === 'Ganho') || currentRawName.includes('ganho') || taskEstagio.includes('ganho');
+                      const isLost = (selectedProp && selectedProp.situacao === 'Perdido') || currentRawName.includes('perdido') || taskEstagio.includes('perdido');
+                      const isFrozen = currentRawName.includes('congelad') || taskEstagio.includes('congelad');
                       const isInactiveState = isWon || isLost || isFrozen;
 
                       const currentIdx = !isInactiveState ? options.findIndex(o => o.id === currentRawOptionId) : -1;
@@ -8255,23 +9218,24 @@ function App() {
                 </div>
 
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Barra de Abas com Ícones */}
-                  <div className="flex items-center border-b border-slate-200 mb-0 px-1">
+                  {/* Barra de Abas com Ícones + Rótulos */}
+                  <div className="flex items-center gap-1.5 border-b border-slate-200 mb-0 px-1 bg-white rounded-t-2xl pt-1.5">
                     {/* Aba Propostas */}
                     <button
                       onClick={() => { setDrawerSection('propostas'); }}
                       title="Propostas"
-                      className={`relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-200 cursor-pointer mx-1 ${
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'propostas'
-                          ? 'bg-indigo-100 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
+                      <span>Propostas</span>
                       {drawerSection === 'propostas' && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-indigo-500 rounded-full"></span>
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                     </button>
 
@@ -8279,28 +9243,29 @@ function App() {
                     <button
                       onClick={() => { setDrawerSection('tarefas'); }}
                       title="Tarefas"
-                      className={`relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-200 cursor-pointer mx-1 ${
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'tarefas'
-                          ? 'bg-indigo-100 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
+                      <span>Tarefas</span>
                       {drawerSection === 'tarefas' && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-indigo-500 rounded-full"></span>
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                       {(() => {
                         const overdueCount = commercialTasks.filter(t => {
                           const propObj = Array.isArray(t.propostas) ? t.propostas[0] : t.propostas;
-                          const isThisDeal = t.clickup_negocio_id === clickupTaskId || 
+                          const isThisDeal = t.clickup_negocio_id === clickupTaskId ||
                                              (propObj && propObj.clickup_negocio_id === clickupTaskId) ||
                                              (currentProposta && t.proposta_id === currentProposta.id);
                           return isThisDeal && t.status === 'pendente' && new Date(t.data_vencimento) < new Date();
                         }).length;
                         return overdueCount > 0 ? (
-                          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">{overdueCount}</span>
+                          <span className="w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">{overdueCount}</span>
                         ) : null;
                       })()}
                     </button>
@@ -8309,23 +9274,24 @@ function App() {
                     <button
                       onClick={() => { setDrawerSection('status'); fetchAtividades(clickupTaskId); }}
                       title="Status do Projeto"
-                      className={`relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-200 cursor-pointer mx-1 ${
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'status'
-                          ? 'bg-indigo-100 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                       </svg>
+                      <span>Atividades</span>
                       {drawerSection === 'status' && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-indigo-500 rounded-full"></span>
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                     </button>
                   </div>
 
                   {/* Conteúdo da Aba Selecionada */}
-                  <div className="flex-1 overflow-y-auto pr-1 pt-4">
+                  <div className="flex-1 overflow-y-auto pr-1 pt-4 px-1 bg-white rounded-b-2xl shadow-sm shadow-slate-200/40 border border-t-0 border-slate-200">
 
                     {/* === ABA: PROPOSTAS === */}
                     {drawerSection === 'propostas' && (
@@ -8338,8 +9304,11 @@ function App() {
                     {drawerSection === 'tarefas' && (
                       <div className="px-1 space-y-3">
                         {/* Botão + Nova Tarefa Comercial dentro da aba Tarefas */}
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 mb-3">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tarefas Associadas</span>
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            Tarefas Associadas
+                          </span>
                           <button
                             onClick={handleNewTaskClick}
                             className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center space-x-1"
@@ -8358,25 +9327,25 @@ function App() {
                           
                           if (dealTasks.length === 0) {
                             return (
-                              <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
-                                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-                                  <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                                <div className="w-14 h-14 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center">
+                                  <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                   </svg>
                                 </div>
-                                <p className="text-xs text-slate-500">Nenhuma tarefa associada a este negócio.</p>
+                                <p className="text-xs font-semibold text-slate-500">Nenhuma tarefa associada a este negócio.</p>
                               </div>
                             );
                           }
-                          
+
                           return dealTasks.map(task => {
                             const isOverdue = task.status === 'pendente' && new Date(task.data_vencimento) < new Date();
                             const isDone = task.status === 'concluida';
                             const matchedType = taskTypes.find(t => t.nome === task.tipo);
                             const typeEmoji = matchedType ? matchedType.emoji : '📋';
-                            
+
                             return (
-                              <div key={task.id} className="flex items-start justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition-colors">
+                              <div key={task.id} className={`flex items-start justify-between p-3 rounded-xl bg-white border shadow-xs hover:shadow-sm transition-all ${isOverdue ? 'border-l-4 border-l-rose-400 border-slate-200' : isDone ? 'border-l-4 border-l-emerald-400 border-slate-200' : 'border-l-4 border-l-indigo-300 border-slate-200'}`}>
                                 <div className="flex items-start space-x-2.5">
                                   <input 
                                     type="checkbox" 
@@ -8413,19 +9382,22 @@ function App() {
                     {drawerSection === 'status' && (
                       <div className="px-1 space-y-5">
                         {/* Formulário de Nova Atividade */}
-                        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">Registrar Atividade</span>
-                          <textarea
+                        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm shadow-slate-200/50">
+                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            Registrar Atividade
+                          </span>
+                          <MentionTextarea
                             value={novaAtividade}
-                            onChange={(e) => setNovaAtividade(e.target.value)}
-                            placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos..."
-                            className="w-full p-3 border border-slate-200 rounded-lg text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent resize-none transition-all"
+                            onChange={setNovaAtividade}
+                            membros={vendedores}
+                            placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega."
                             rows={3}
                           />
                           <button
                             onClick={handleCreateAtividade}
                             disabled={savingAtividade || !novaAtividade.trim()}
-                            className={`mt-2 w-full py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            className={`mt-2.5 w-full py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                               savingAtividade || !novaAtividade.trim()
                                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                                 : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
@@ -8437,32 +9409,35 @@ function App() {
 
                         {/* Lista de Atividades Registradas */}
                         <div>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-3">Histórico de Atividades</span>
-                          
+                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-3">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            Histórico de Atividades
+                          </span>
+
                           {loadingAtividades ? (
                             <div className="flex items-center justify-center py-6">
                               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                             </div>
                           ) : atividades.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-8 text-center space-y-2">
-                              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
-                                <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <div className="flex flex-col items-center justify-center py-10 text-center space-y-2 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                              <div className="w-12 h-12 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center">
+                                <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                                 </svg>
                               </div>
-                              <p className="text-xs text-slate-500">Nenhuma atividade registrada.</p>
+                              <p className="text-xs font-semibold text-slate-500">Nenhuma atividade registrada.</p>
                               <p className="text-[10px] text-slate-400">Registre ações, retornos e próximos passos.</p>
                             </div>
                           ) : (
                             <div className="space-y-3">
                               {atividades.map(ativ => (
-                                <div key={ativ.id} className="bg-white rounded-xl border border-slate-200 p-3.5 hover:border-slate-300 transition-colors shadow-sm">
+                                <div key={ativ.id} className="bg-white rounded-2xl border border-slate-200 p-3.5 hover:border-indigo-200 hover:shadow-sm transition-all shadow-xs">
                                   {editingAtividade === ativ.id ? (
                                     <div className="space-y-2">
-                                      <textarea
+                                      <MentionTextarea
                                         value={editingAtividadeTexto}
-                                        onChange={(e) => setEditingAtividadeTexto(e.target.value)}
-                                        className="w-full p-2.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
+                                        onChange={setEditingAtividadeTexto}
+                                        membros={vendedores}
                                         rows={3}
                                       />
                                       <div className="flex items-center space-x-2">
@@ -8484,7 +9459,7 @@ function App() {
                                   ) : (
                                     <div>
                                       <div className="flex items-start justify-between">
-                                        <p className="text-xs text-slate-800 leading-relaxed flex-1 pr-2 whitespace-pre-wrap">{ativ.texto}</p>
+                                        <p className="text-xs text-slate-800 leading-relaxed flex-1 pr-2 whitespace-pre-wrap">{renderTextoComMencoes(ativ.texto)}</p>
                                         <div className="flex items-center space-x-1 flex-shrink-0">
                                           {/* Botão Editar (Lápis) */}
                                           <button

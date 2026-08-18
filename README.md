@@ -25,14 +25,23 @@ A solução foi projetada sob uma arquitetura de baixo custo e alta performance:
 │       │   └── 📄 index.ts
 │       ├── 📁 get-clickup-task/      # Proxy seguro para puxar contexto de tarefas do ClickUp
 │       │   └── 📄 index.ts
+│       ├── 📁 sync-negocio-clickup/  # Empresa 360º: espelha negócio criado na SPA pro ClickUp (async)
+│       │   └── 📄 index.ts
+│       ├── 📁 sync-contato-clickup/  # Empresa 360º: espelha contato criado na SPA pro ClickUp (async)
+│       │   └── 📄 index.ts
+│       ├── 📁 sync-conta-clickup/    # Empresa 360º: espelha empresa criada na SPA pro ClickUp (async)
+│       │   └── 📄 index.ts
+│       ├── 📁 sync-proposta-tecnica-clickup/ # Cria lista técnica + tarefa "Enviar Proposta vX" no ClickUp
+│       │   └── 📄 index.ts
 │       └── 📁 mcp-brain/             # Servidor MCP: expõe o banco ao ClickUp Brain (somente leitura)
 │           ├── 📄 index.ts           # Protocolo MCP (JSON-RPC): initialize / tools.list / tools.call
-│           ├── 📄 tools.ts           # As 7 tools (propostas, forecast, fabricante, cliente, etc.)
+│           ├── 📄 tools.ts           # As 9 tools (propostas, forecast, fabricante, cliente, versão de proposta, etc.)
 │           ├── 📄 clickup.ts         # Resolução de cliente via lista "Contas" do ClickUp
 │           └── 📄 supabase.ts        # Cliente Supabase (anon key, somente leitura)
 ├── 📄 index.html                     # Entrypoint do frontend SPA
 ├── 📄 styles.css                     # Estilos customizados, glassmorphism e timeline
-└── 📄 app.js                         # Interface interativa e lógica React (Babel runtime)
+├── 📄 app.js                         # Interface interativa e lógica React (Babel runtime)
+└── 📄 empresas.js                    # Aba Empresas / Ficha 360º (Contas, Contatos, Negócios)
 ```
 
 ---
@@ -45,6 +54,7 @@ A solução foi projetada sob uma arquitetura de baixo custo e alta performance:
 2. Crie uma nova query, copie o conteúdo de [20260527_init.sql](supabase/migrations/20260527_init.sql) e clique em **Run**.
 3. Crie uma segunda query, copie o conteúdo de [20260527_evolution.sql](supabase/migrations/20260527_evolution.sql) e clique em **Run** para evoluir a modelagem (remover SKU e criar distribuidores).
 4. Crie uma terceira query, copie o conteúdo de [20260527_seed.sql](supabase/migrations/20260527_seed.sql) e clique em **Run** para carregar os produtos padrão sem SKU.
+5. **Empresa 360º (Contas/Contatos/Negócios + numeração interna de propostas)** — rode em ordem: [20260817_contas_contatos.sql](supabase/migrations/20260817_contas_contatos.sql), [20260817b_negocios.sql](supabase/migrations/20260817b_negocios.sql), [20260817c_negocios_contas_authenticated.sql](supabase/migrations/20260817c_negocios_contas_authenticated.sql), [20260818_negocios_contatos_sync_numeracao.sql](supabase/migrations/20260818_negocios_contatos_sync_numeracao.sql), [20260818b_fix_grant_ajustar_numeracao.sql](supabase/migrations/20260818b_fix_grant_ajustar_numeracao.sql), [20260818c_fix_grant_public_ajustar.sql](supabase/migrations/20260818c_fix_grant_public_ajustar.sql), [20260818d_restrict_config_numeracao_select.sql](supabase/migrations/20260818d_restrict_config_numeracao_select.sql), [20260818e_negocios_campos_oportunidade.sql](supabase/migrations/20260818e_negocios_campos_oportunidade.sql), [20260818f_contas_clickup_id_nullable.sql](supabase/migrations/20260818f_contas_clickup_id_nullable.sql), [20260818g_webhooks_empresa_360.sql](supabase/migrations/20260818g_webhooks_empresa_360.sql), [20260818h_webhook_proposta_tecnica.sql](supabase/migrations/20260818h_webhook_proposta_tecnica.sql). Cria as tabelas `contas`/`contatos`/`negocios`, as colunas de sync (`sync_status`/`sync_error`/`clickup_negocio_id`/`clickup_contact_id`/`clickup_account_id`), o gerador interno de numeração de propostas (`config_numeracao_propostas` + RPCs `gerar_numero_proposta()`/`ajustar_numeracao_proposta()`), os campos do formulário expandido de Oportunidade (Tipo, Probabilidade, Previsão, Descrição, Registros de Oportunidade dos fabricantes) e os 4 Database Webhooks da Empresa 360º (já criados via SQL direto nesta instância — ver nota abaixo).
 
 ---
 
@@ -63,6 +73,12 @@ supabase link --project-ref seu-project-ref-id
 supabase functions deploy sync-clickup-value
 supabase functions deploy clickup-status-webhook
 supabase functions deploy get-clickup-task
+
+# 4. Empresa 360º — sincronização assíncrona Supabase → ClickUp
+supabase functions deploy sync-negocio-clickup
+supabase functions deploy sync-contato-clickup
+supabase functions deploy sync-conta-clickup
+supabase functions deploy sync-proposta-tecnica-clickup
 ```
 
 #### Configuração de Segredos (Secrets) no Supabase:
@@ -78,6 +94,8 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY="sua_chave_service_role_do_supaba
 ---
 
 ### 3. Configuração dos Webhooks
+
+> **Atalho por SQL:** em instâncias self-hosted, "Database Webhook" no painel nada mais é do que um trigger Postgres `AFTER INSERT/UPDATE` chamando `supabase_functions.http_request()` via `pg_net`. Em vez de usar a UI abaixo, dá pra criar direto via SQL — ver `supabase/migrations/20260818g_webhooks_empresa_360.sql` como exemplo (é exatamente assim que os webhooks C/D/E abaixo foram configurados nesta instância).
 
 #### A. Database Webhook (Sincronização de Valor):
 1. No dashboard do Supabase, acesse **Database** > **Webhooks**.
@@ -104,6 +122,43 @@ curl -X POST https://api.clickup.com/api/v2/team/SEU_TEAM_ID/webhook \
     "events": ["taskStatusUpdated"]
   }'
 ```
+
+#### C. Database Webhook (Empresa 360º — sincronização de Negócios):
+1. No dashboard do Supabase, acesse **Database** > **Webhooks**.
+2. Clique em **Create a new webhook**.
+3. Preencha as configurações:
+   - **Name**: `sync_negocio_clickup`
+   - **Table**: `negocios`
+   - **Events**: Marque apenas **Insert**.
+   - **Webhook Service**: Selecione **Supabase Edge Functions**.
+   - **Edge Function**: Selecione `sync-negocio-clickup`.
+   - **Method**: `POST`.
+4. Salve o webhook. Sem isso, negócios criados pela SPA ficam presos em `sync_status='pending'` para sempre (a criação em si funciona normalmente — só a sincronização com o ClickUp em segundo plano depende deste webhook).
+
+#### D. Database Webhook (Empresa 360º — sincronização de Contatos):
+Mesmo processo do item C, com:
+   - **Name**: `sync_contato_clickup`
+   - **Table**: `contatos`
+   - **Events**: apenas **Insert**.
+   - **Edge Function**: `sync-contato-clickup`.
+   - **Method**: `POST`.
+
+#### E. Database Webhook (Empresa 360º — sincronização de Empresas):
+Mesmo processo do item C, com:
+   - **Name**: `sync_conta_clickup`
+   - **Table**: `contas`
+   - **Events**: apenas **Insert**.
+   - **Edge Function**: `sync-conta-clickup`.
+   - **Method**: `POST`.
+
+#### F. Database Webhook (Automação "Enviar Proposta vX"):
+Mesmo processo do item C, com:
+   - **Name**: `sync_proposta_tecnica_clickup`
+   - **Table**: `propostas`
+   - **Events**: apenas **Insert**.
+   - **Edge Function**: `sync-proposta-tecnica-clickup`.
+   - **Method**: `POST`.
+   - **Autocorreção de versão**: antes de criar a tarefa "Enviar Proposta vX", a function consulta a maior versão já existente na lista técnica do negócio no ClickUp e usa a próxima depois dela caso seja maior que a calculada pelo CRM (`negocios.propostas.versao`), corrigindo esse campo de volta no Supabase — protege negócios que já eram controlados manualmente pelo ClickUp antes do CRM existir. Depende de `negocios.numero_proposta_oficial` estar preenchido (gerado automaticamente para negócios novos criados pelo CRM; para negócios legados sem esse campo, é preciso um backfill pontual a partir do custom field "Nº de Proposta" do ClickUp).
 
 ---
 
@@ -146,6 +201,8 @@ supabase secrets set MCP_AUTH_KEY="uma_chave_forte_gerada_por_voce"
 | `analise_por_distribuidor` | "Quanto passamos pela Ingram Micro?" |
 | `historico_cliente` | "Qual é o histórico da Minerva?" |
 | `ranking_clientes` | "Quais são nossos 10 maiores clientes?" |
+| `negocios_fechados` | "Quantos negócios ganhamos esse mês?" |
+| `detalhes_versao_proposta` | "Como está a versão C da proposta do negócio X?" — junta os dados da proposta no Supabase com o status/comentários da tarefa técnica "Enviar Proposta vX" no ClickUp. |
 
 `historico_cliente` e `ranking_clientes` resolvem o cliente pela lista **Contas** do ClickUp (não existe tabela `clientes`/`contas` no Supabase hoje), reaproveitando a mesma lógica de casamento de nomes de `scripts/migracao_agendor_perdidos.py`.
 

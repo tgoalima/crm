@@ -165,7 +165,7 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-b: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
 }
 
@@ -192,14 +192,16 @@ h1, h2, h3, h4, h5, h6 {
   transition: all 0.2s ease;
   user-select: none;
   -webkit-user-select: none;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  /* Sombra suave "tingida" (mesmo padrão shadow-sm shadow-slate-100/50 já
+     usado na aba Relatórios), em vez da sombra cinza genérica anterior. */
+  box-shadow: 0 1px 3px 0 #f1f5f980, 0 1px 2px -1px #f1f5f980;
 }
 
 .kanban-card:hover {
   background: #f8fafc; /* hover:bg-slate-50 */
-  border-color: #cbd5e1; /* border-slate-300 */
+  border-color: #c7d2fe; /* border-indigo-200 */
   transform: translateY(-2px);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 4px 6px -1px oklch(93% 0.034 272.788 / 45%), 0 2px 4px -2px oklch(93% 0.034 272.788 / 45%);
 }
 
 .drag-handle {
