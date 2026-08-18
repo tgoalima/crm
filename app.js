@@ -206,27 +206,33 @@ const getNextVersionLetter = (currentVersao) => {
   }
   return prefix + charArray.join('');
 };
-const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick, hasOverdue }) => {
+const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick, hasOverdue, stageColor }) => {
   return (
-    <div 
-      data-id={task.id} 
+    <div
+      data-id={task.id}
       draggable={true}
       onDragStart={(e) => handleDragStart(e, task)}
       onClick={() => handleCardClick(task)}
       className="kanban-card flex flex-col relative"
+      style={{ borderLeft: `4px solid ${stageColor || '#6366f1'}` }}
     >
       <div className="flex items-start justify-between mb-2">
         <h4 className="text-sm font-semibold text-slate-800 line-clamp-2 pr-2">{task.name}</h4>
         {hasOverdue && (
-          <span 
-            className="w-2.5 h-2.5 rounded-full bg-red-500 border border-white flex-shrink-0 mt-1 animate-pulse" 
+          <span
+            className="w-2.5 h-2.5 rounded-full bg-red-500 border border-white flex-shrink-0 mt-1 animate-pulse"
             title="Possui tarefa comercial atrasada!"
           />
         )}
       </div>
       <div className="flex items-center justify-between text-xs text-slate-500 mt-auto">
-        <span>{responsavel || 'Sem Responsável'}</span>
-        <span className="text-emerald-600 font-semibold text-sm">{formattedValue}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          {responsavel && typeof AvatarInicial !== 'undefined' && (
+            <AvatarInicial nome={responsavel} size="xs" />
+          )}
+          <span className="truncate">{responsavel || 'Sem Responsável'}</span>
+        </span>
+        <span className="text-emerald-600 font-semibold text-sm shrink-0">{formattedValue}</span>
       </div>
     </div>
   );
@@ -6932,7 +6938,7 @@ function App() {
                                return isThisDeal && t.status === 'pendente' && new Date(t.data_vencimento) < new Date();
                              });
                              return (
-                               <KanbanCard 
+                               <KanbanCard
                                  key={task.id}
                                  task={task}
                                  dealValue={dealValue}
@@ -6941,6 +6947,7 @@ function App() {
                                  handleDragStart={handleDragStart}
                                  handleCardClick={handleCardClick}
                                  hasOverdue={hasOverdue}
+                                 stageColor={col.color}
                                />
                              );
                           })}
