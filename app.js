@@ -465,17 +465,23 @@ const ForecastFunnelPanel = ({
                     : 'R$ 0,00';
                   const responsavel = task.responsavel_negocio;
                   return (
-                    <div 
+                    <div
                       key={task.id}
                       onClick={() => onCardClick && onCardClick(task)}
                       className="bg-white border border-slate-200 rounded-xl p-3.5 hover:shadow-md hover:border-indigo-200 transition-all duration-200 cursor-pointer group"
+                      style={{ borderLeft: `4px solid ${selectedStageObj.color || '#6366f1'}` }}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-slate-900 leading-tight group-hover:text-indigo-700 transition-colors truncate">
                             {task.name}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1 truncate">{responsavel || 'Sem responsável'}</p>
+                          <div className="flex items-center gap-1.5 mt-1 min-w-0">
+                            {responsavel && typeof AvatarInicial !== 'undefined' && (
+                              <AvatarInicial nome={responsavel} size="xs" />
+                            )}
+                            <p className="text-xs text-slate-500 truncate">{responsavel || 'Sem responsável'}</p>
+                          </div>
                         </div>
                         <span className={`text-sm font-black flex-shrink-0 ${dealValue > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
                           {formattedValue}
