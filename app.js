@@ -2528,19 +2528,47 @@ function App() {
       setLoadingTasks(true);
     }
     try {
-      const response = await fetch('/api/tarefas', {
-        headers: {
-          ...getSupabaseHeaders(),
-          'Content-Type': 'application/json'
+      let loadedTasks = null;
+      try {
+        const response = await fetch('/api/tarefas', {
+          headers: {
+            ...getSupabaseHeaders(),
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const text = await response.text();
+          try {
+            const data = JSON.parse(text);
+            if (Array.isArray(data)) {
+              loadedTasks = data;
+            }
+          } catch (jsonErr) {}
         }
-      });
-      if (!response.ok) throw new Error("Erro na API ao carregar tarefas");
-      const data = await response.json();
-      console.log("[DEBUG] Loaded tasks with headers:", data);
-      setCommercialTasks(data || []);
+      } catch (apiErr) {
+        console.warn("Aviso ao buscar /api/tarefas:", apiErr);
+      }
+
+      // Se /api/tarefas não respondeu (ex: na VPS onde tudo roda direto via Supabase), busca via SupabaseClient
+      if (loadedTasks === null && client) {
+        const { data: sbTasks, error: sbErr } = await client
+          .from('tarefas_comerciais')
+          .select('*')
+          .order('data_vencimento', { ascending: true });
+        
+        if (sbErr) {
+          console.warn("Aviso ao carregar tarefas_comerciais do Supabase:", sbErr);
+          loadedTasks = [];
+        } else {
+          loadedTasks = sbTasks || [];
+        }
+      }
+
+      console.log("[DEBUG] Loaded tasks:", loadedTasks);
+      setCommercialTasks(loadedTasks || []);
     } catch (err) {
-      console.error("Erro ao buscar tarefas comerciais:", err);
-      showToast("Erro ao carregar tarefas comerciais.", "error");
+      console.warn("Erro ao buscar tarefas comerciais:", err);
+      setCommercialTasks([]);
     } finally {
       setLoadingTasks(false);
     }
@@ -2552,15 +2580,34 @@ function App() {
     setLoadingAtividades(true);
     try {
       const idClean = String(clickupId).replace('#', '');
-      const res = await fetch(`/api/atividades?clickup_negocio_id=${idClean}`);
-      if (res.ok) {
-        const data = await res.json();
-        setAtividades(data || []);
-      } else {
-        setAtividades([]);
+      let data = null;
+      try {
+        const res = await fetch(`/api/atividades?clickup_negocio_id=${idClean}`);
+        if (res.ok) {
+          const text = await res.text();
+          try { data = JSON.parse(text); } catch (e) {}
+        }
+      } catch (err) {}
+
+      if (data === null) {
+        // Fallback: busca comentários da tarefa direto na API do ClickUp via proxy
+        const cuRes = await fetch(`/clickup-api/task/${idClean}/comment`, {
+          headers: { ...getSupabaseHeaders() }
+        });
+        if (cuRes.ok) {
+          const cuData = await cuRes.json();
+          data = (cuData.comments || []).map(c => ({
+            id: c.id,
+            texto: c.comment_text || (c.comment ? c.comment.map(seg => seg.text).join('') : ''),
+            created_at: c.date ? new Date(parseInt(c.date)).toISOString() : new Date().toISOString(),
+            autor: c.user?.username || c.user?.email || 'ClickUp'
+          }));
+        }
       }
+
+      setAtividades(data || []);
     } catch (err) {
-      console.error('[ATIVIDADES] Erro ao buscar atividades:', err);
+      console.warn('[ATIVIDADES] Erro ao buscar atividades:', err);
       setAtividades([]);
     } finally {
       setLoadingAtividades(false);
@@ -2648,22 +2695,37 @@ function App() {
     setCommercialTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus } : t));
     
     try {
-      const response = await fetch(`/api/tarefas/${task.id}/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-supabase-url': safeStorage.getItem('supa_url') || '',
-          'x-supabase-key': safeStorage.getItem('supa_key') || ''
-        },
-        body: JSON.stringify({ status: nextStatus })
-      });
-      
-      if (!response.ok) {
-        throw new Error("Erro na requisição para o servidor");
+      let success = false;
+      try {
+        const response = await fetch(`/api/tarefas/${task.id}/status`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getSupabaseHeaders()
+          },
+          body: JSON.stringify({ status: nextStatus })
+        });
+        if (response.ok) success = true;
+      } catch (e) {}
+
+      if (!success && supabaseClient) {
+        const { error } = await supabaseClient
+          .from('tarefas_comerciais')
+          .update({ status: nextStatus })
+          .eq('id', task.id);
+        if (error) throw error;
+
+        // Se tiver subtask vinculada no ClickUp, atualiza o status dela via proxy
+        if (task.clickup_subtask_id) {
+          const clickupStatus = nextStatus === 'concluida' ? 'fechado' : 'aberto';
+          await fetch(`/clickup-api/task/${task.clickup_subtask_id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
+            body: JSON.stringify({ status: clickupStatus })
+          }).catch(cuErr => console.warn('Aviso ao sincronizar subtask no ClickUp:', cuErr));
+        }
       }
       
-      const data = await response.json();
-      console.log('[DEBUG] Resposta do servidor para status:', data);
       showToast("Status da tarefa atualizado com sucesso!", "success");
     } catch (err) {
       console.error("[ERROR] Falha ao atualizar status:", err);
@@ -2676,28 +2738,38 @@ function App() {
     if (!confirm("Deseja realmente excluir esta tarefa comercial?")) return;
     
     console.log('[DEBUG] Lixeira clicada para excluir a tarefa:', taskId);
-    // Optimistic update
+    const targetTask = commercialTasks.find(t => t.id === taskId);
     setCommercialTasks(prev => prev.filter(t => t.id !== taskId));
     
     try {
-      const response = await fetch(`/api/tarefas/${taskId}`, {
-        method: 'DELETE',
-        headers: {
-          'x-supabase-url': safeStorage.getItem('supa_url') || '',
-          'x-supabase-key': safeStorage.getItem('supa_key') || ''
+      let success = false;
+      try {
+        const response = await fetch(`/api/tarefas/${taskId}`, {
+          method: 'DELETE',
+          headers: { ...getSupabaseHeaders() }
+        });
+        if (response.ok) success = true;
+      } catch (e) {}
+
+      if (!success && supabaseClient) {
+        const { error } = await supabaseClient
+          .from('tarefas_comerciais')
+          .delete()
+          .eq('id', taskId);
+        if (error) throw error;
+
+        if (targetTask?.clickup_subtask_id) {
+          await fetch(`/clickup-api/task/${targetTask.clickup_subtask_id}`, {
+            method: 'DELETE',
+            headers: { ...getSupabaseHeaders() }
+          }).catch(cuErr => console.warn('Aviso ao excluir subtask no ClickUp:', cuErr));
         }
-      });
-      
-      if (!response.ok) {
-        throw new Error("Erro ao excluir tarefa no servidor");
       }
       
-      const data = await response.json();
-      console.log('[DEBUG] Resposta do servidor para exclusao:', data);
       showToast("Tarefa comercial excluída com sucesso!", "success");
     } catch (err) {
       console.error("[ERROR] Falha ao excluir tarefa:", err);
-      showToast("Erro ao excluir tarefa comercial. Recarregando...", "error");
+      showToast("Erro ao excluir tarefa comercial.", "error");
       if (supabaseClient) {
         fetchCommercialTasks(supabaseClient);
       }
