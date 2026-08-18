@@ -370,7 +370,7 @@ const ForecastFunnelPanel = ({
                 <div key={stage.id} className="w-full flex justify-center">
                   <button
                     onClick={() => setFilterStage(filterStage === stage.id ? null : stage.id)}
-                    style={{ width: stage.funnelWidth }}
+                    style={{ width: stage.funnelWidth, borderLeft: `4px solid ${stage.color}` }}
                     className={`flex justify-between items-center py-2.5 px-4 rounded-lg transition-all duration-200 border cursor-pointer relative overflow-hidden ${
                       isSelected
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-200/50'
