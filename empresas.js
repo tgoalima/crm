@@ -272,15 +272,48 @@ const CRMInput = ({ label, name, value, onChange, type = 'text', placeholder, mo
     <input
       type={type} required={required} placeholder={placeholder} value={value}
       onChange={e => onChange(name, mask ? mask(e.target.value) : e.target.value)}
-      className={`w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
+      className={`w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
     />
   </div>
 );
 
+// Máscara progressiva de valor monetário (BRL): digita "999751,68" enquanto
+// armazena o valor numérico puro ("999751.68") para compatibilidade com
+// parseFloat() no restante do código.
+const maskCurrencyInput = (raw) => {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return { display: '', numeric: '' };
+  const value = parseInt(digits, 10) / 100;
+  const display = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return { display, numeric: value.toFixed(2) };
+};
+
+const CRMCurrencyInput = ({ label, name, value, onChange, placeholder = '0,00', className = '', required }) => {
+  const [display, setDisplay] = React.useState(() => {
+    const n = parseFloat(value);
+    return !value || isNaN(n) ? '' : n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  });
+  const handleInput = (e) => {
+    const { display: d, numeric } = maskCurrencyInput(e.target.value);
+    setDisplay(d);
+    onChange(name, numeric);
+  };
+  return (
+    <div className={className}>
+      <label className="block text-xs font-bold text-slate-600 mb-1">{label}{required && ' *'}</label>
+      <div className="relative">
+        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold pointer-events-none">R$</span>
+        <input type="text" inputMode="decimal" required={required} placeholder={placeholder} value={display} onChange={handleInput}
+          className="w-full pl-9 pr-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-semibold text-slate-900 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+      </div>
+    </div>
+  );
+};
+
 const CRMSelect = ({ label, name, value, onChange, children, className = '' }) => (
   <div className={className}>
     <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>
-    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 shadow-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
+    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
   </div>
 );
 
@@ -350,7 +383,7 @@ const SegmentoCombobox = ({ value, onChange }) => {
     <div className="relative">
       <label className="block text-xs font-bold text-slate-600 mb-1">Segmento de Atuação</label>
       <input type="text" placeholder="Digite ou selecione..." value={value || busca} onChange={handleInputChange} onKeyDown={handleKeyDown} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
-        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+        className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
       {open && filtered.length > 0 && (
         <div className="absolute z-[110] top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
           <div ref={listRef} className="max-h-44 overflow-y-auto divide-y divide-slate-50">
@@ -393,7 +426,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
   const isEdit = !!conta;
   const [form, setForm] = React.useState({
     nome: conta?.nome || '', razao_social: conta?.razao_social || '',
-    cnpj: conta?.cnpj || '', inscricao_estadual: conta?.inscricao_estadual || '',
+    cnpj: maskCNPJ(conta?.cnpj || ''), inscricao_estadual: conta?.inscricao_estadual || '',
     status: conta?.status || 'customer base', account_tier: conta?.account_tier || '',
     industry: conta?.industry || '', billing_cycle: conta?.billing_cycle || 'One-time',
     email: conta?.email || '', telefone: conta?.telefone || '',
@@ -473,7 +506,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-100 bg-slate-50/80 shrink-0">
+        <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <AvatarInicial nome={form.nome || 'N'} size="lg" />
           <div className="flex-1">
             <h3 className="font-black text-base text-slate-900">{isEdit ? 'Editar Empresa' : 'Nova Empresa'}</h3>
@@ -481,9 +514,9 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
-        <form onSubmit={salvar} className="p-6 overflow-y-auto flex-1 space-y-5">
+        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Identificação</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="Nome Fantasia / Comercial" name="nome" value={form.nome} onChange={handleChange} placeholder="Ex: Hospital do Câncer de Londrina" required className="col-span-2" />
@@ -511,14 +544,14 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
               </CRMSelect>
             </div>
           </div>
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Canais de Contato</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="E-mail Corporativo" name="email" type="email" value={form.email} onChange={handleChange} placeholder="contato@empresa.com.br" />
               <CRMInput label="Telefone Principal" name="telefone" value={form.telefone} onChange={handleChange} placeholder="(11) 3333-0000" />
             </div>
           </div>
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Endereço</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="Logradouro / Endereço" name="rua" value={form.rua} onChange={handleChange} placeholder="Av. Paulista, 1000" className="col-span-2" />
@@ -529,8 +562,8 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
               </div>
             </div>
           </div>
-          <div className="flex gap-3 pt-2 border-t border-slate-100">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">Cancelar</button>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : (isEdit ? '✓ Atualizar Empresa' : '+ Cadastrar Empresa')}
             </button>
@@ -690,7 +723,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl ring-1 border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50/80 shrink-0">
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <AvatarInicial nome={form.nome || 'CT'} size="md" />
           <div className="flex-1 min-w-0">
             <h3 className="font-black text-base text-slate-900 leading-tight">{isEdit ? 'Editar Contato' : 'Novo Contato'}</h3>
@@ -908,7 +941,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
               <IconBriefcase size={20} />
@@ -922,11 +955,11 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
         </div>
 
         {/* FORM */}
-        <form onSubmit={salvar} className="p-6 overflow-y-auto flex-1 space-y-4">
+        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
 
           {/* SEÇÃO 1: IDENTIFICAÇÃO */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Identificação da Oportunidade</SectionTitle>
             <div className="space-y-3 mt-2">
               <CRMInput label="Título da Oportunidade" name="nome" value={form.nome} onChange={handleChange} placeholder="Ex: Expansão Servidores Dell PowerEdge R750" required />
@@ -935,7 +968,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Empresa / Conta *</label>
                 {contaFixa ? (
-                  <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200/80 rounded-xl">
+                  <div className="flex items-center gap-3 p-3 bg-white border border-slate-300 shadow-xs rounded-xl">
                     <AvatarInicial nome={contaFixa.nome} size="sm" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-black text-slate-900 truncate">{contaFixa.nome}</p>
@@ -945,7 +978,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
                 ) : (
                   <div className="relative">
                     <input placeholder="Digite o nome da empresa..." value={contaEscolhida ? contaEscolhida.nome : buscaConta} onChange={e => { setContaEscolhida(null); setBuscaConta(e.target.value); }}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     {contasFiltradas.length > 0 && (
                       <div className="absolute z-20 bg-white border border-slate-200 rounded-2xl mt-1 w-full max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-50">
                         {contasFiltradas.map(c => (
@@ -975,7 +1008,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 2: PIPELINE & CLASSIFICAÇÃO */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Classificação & Pipeline</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
               <CRMSelect label="Estágio do Funil" name="estagio" value={form.estagio} onChange={handleChange}>
@@ -1005,16 +1038,16 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 3: VALORES & PREVISÃO */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Valores & Previsão</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              <CRMInput label="Valor Estimado (R$)" name="valor" type="number" step="0.01" value={form.valor} onChange={handleChange} placeholder="0,00" />
+              <CRMCurrencyInput label="Valor Estimado" name="valor" value={form.valor} onChange={handleChange} />
               <CRMInput label="Previsão de Fechamento do Negócio" name="dataPrevisao" type="date" value={form.dataPrevisao} onChange={handleChange} />
             </div>
           </div>
 
           {/* SEÇÃO 4: REGISTROS DE OPORTUNIDADE (R.O.) */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Registros de Oportunidade (R.O.)</SectionTitle>
             <div className="space-y-2.5 mt-2">
               <CRMInput label="R.O: Infraestrutura" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
@@ -1028,7 +1061,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 5: ESCOPO & NOTAS */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Escopo & Solução Técnica</SectionTitle>
             <div className="mt-2">
               <textarea
@@ -1036,14 +1069,14 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
                 value={form.descricao}
                 onChange={e => handleChange('descricao', e.target.value)}
                 rows={3}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
             </div>
           </div>
 
           {/* FOOTER */}
-          <div className="flex gap-3 pt-3 border-t border-slate-100 shrink-0">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">Cancelar</button>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Criando...' : '+ Criar Oportunidade'}
             </button>
@@ -1178,7 +1211,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
               <IconBriefcase size={20} />
@@ -1196,11 +1229,11 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
         </div>
 
         {/* FORM */}
-        <form onSubmit={salvar} className="p-6 overflow-y-auto flex-1 space-y-4">
+        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
 
           {/* SEÇÃO 1: IDENTIFICAÇÃO */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Identificação da Oportunidade</SectionTitle>
             <div className="space-y-3 mt-2">
               <CRMInput label="Título da Oportunidade" name="nome" value={form.nome} onChange={handleChange} required />
@@ -1208,7 +1241,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
           </div>
 
           {/* SEÇÃO 2: PIPELINE & CLASSIFICAÇÃO */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Classificação & Pipeline</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
               <CRMSelect label="Estágio do Funil" name="estagio" value={form.estagio} onChange={handleChange}>
@@ -1238,16 +1271,16 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
           </div>
 
           {/* SEÇÃO 3: VALORES & PREVISÃO */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Valores & Previsão</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              <CRMInput label="Valor Estimado (R$)" name="valor" type="number" step="0.01" value={form.valor} onChange={handleChange} placeholder="0,00" />
+              <CRMCurrencyInput label="Valor Estimado" name="valor" value={form.valor} onChange={handleChange} />
               <CRMInput label="Previsão de Fechamento do Negócio" name="dataPrevisao" type="date" value={form.dataPrevisao} onChange={handleChange} />
             </div>
           </div>
 
           {/* SEÇÃO 4: REGISTROS DE OPORTUNIDADE (R.O.) */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Registros de Oportunidade (R.O.)</SectionTitle>
             <div className="space-y-2.5 mt-2">
               <CRMInput label="R.O: Infraestrutura" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
@@ -1261,7 +1294,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
           </div>
 
           {/* SEÇÃO 5: ESCOPO & NOTAS */}
-          <div>
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Escopo & Solução Técnica</SectionTitle>
             <div className="mt-2">
               <textarea
@@ -1269,14 +1302,14 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
                 value={form.descricao}
                 onChange={e => handleChange('descricao', e.target.value)}
                 rows={3}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
             </div>
           </div>
 
           {/* FOOTER */}
-          <div className="flex gap-3 pt-3 border-t border-slate-100 shrink-0">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">Cancelar</button>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : '✓ Salvar Alterações'}
             </button>
@@ -1383,12 +1416,12 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           </div>
 
           {/* KPI DASHBOARD — 4 Cards Executivos Estruturados */}
-          <div className="p-4 bg-slate-50/80 border-t border-slate-100">
+          <div className="p-4 bg-gradient-to-b from-slate-100 to-slate-100/60 border-t border-slate-200">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {/* Card 1: Ganhos */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 border-t-2 border-t-emerald-400 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Total Ganho</span>
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Total Ganho</span>
                   <IconDollar size={13} className="text-emerald-500" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-emerald-600 tracking-tight tabular-nums">
@@ -1400,9 +1433,9 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               </div>
 
               {/* Card 2: Pipeline */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 border-t-2 border-t-indigo-400 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Pipeline</span>
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Pipeline</span>
                   <IconZap size={13} className="text-indigo-500" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-indigo-600 tracking-tight tabular-nums">
@@ -1414,9 +1447,9 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               </div>
 
               {/* Card 3: Histórico de Negócios */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 border-t-2 border-t-slate-300 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Negócios</span>
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Negócios</span>
                   <IconDocument size={13} className="text-slate-400" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-slate-900 tracking-tight tabular-nums">
@@ -1428,9 +1461,9 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               </div>
 
               {/* Card 4: Taxa de Conversão */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
+              <div className={`bg-white p-3 rounded-2xl border border-slate-200 border-t-2 shadow-sm shadow-slate-200/60 flex flex-col justify-between ${kpis.taxa >= 60 ? 'border-t-emerald-400' : kpis.taxa > 0 ? 'border-t-amber-400' : 'border-t-slate-300'}`}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Conversão</span>
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Conversão</span>
                   <IconTrophy size={13} className={kpis.taxa >= 60 ? 'text-emerald-500' : kpis.taxa > 0 ? 'text-amber-500' : 'text-slate-400'} />
                 </div>
                 <p className={`text-sm sm:text-base font-black tracking-tight tabular-nums ${kpis.taxa >= 60 ? 'text-emerald-600' : kpis.taxa > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
@@ -1444,9 +1477,9 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           </div>
 
           {/* ABAS */}
-          <div className="flex border-t border-slate-100 px-4">
+          <div className="flex border-t border-slate-200 bg-white px-4 gap-1">
             {[['visao_geral','Visão Geral'],['contatos',`Contatos (${contatos.length})`],['oportunidades',`Oportunidades (${negocios.length})`]].map(([id,label]) => (
-              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'}`}>{label}</button>
+              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 text-indigo-600 bg-indigo-50/60' : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}>{label}</button>
             ))}
           </div>
         </div>
