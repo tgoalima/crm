@@ -85,8 +85,12 @@ const getInitials = (nome) => {
 };
 
 const resolveNegocioValor = (negocio, propostasPorNegocio) => {
-  const props = propostasPorNegocio.get(negocio.clickup_negocio_id) || propostasPorNegocio.get(negocio.id) || [];
-  if (!props.length) return 0;
+  const key = String(negocio.clickup_negocio_id || '').replace('#', '').trim();
+  const props = propostasPorNegocio.get(key) || propostasPorNegocio.get(negocio.clickup_negocio_id) || propostasPorNegocio.get(negocio.id) || [];
+  if (!props.length) {
+    const fallback = parseFloat(negocio.valor_clickup_fallback);
+    return isNaN(fallback) ? 0 : fallback;
+  }
   const prio = ['Selecionada','Ganho','Ativa','Desconsiderada'];
   const best = prio.reduce((f, sit) => f || props.find(p => p.situacao === sit), null) || props[0];
   const v = parseFloat(best.total_proposta);
@@ -312,47 +316,14 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
           }
         }
       } else {
-        let clickupId = null;
-        // 1. Cria tarefa na lista de Contas do ClickUp com tipo 'Conta' (custom_item_id: 1005)
-        try {
-          const cuRes = await fetch('/clickup-api/list/901326185461/task?custom_item_id=1005', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: form.nome.trim(),
-              custom_item_id: 1005,
-              status: form.status || 'customer base',
-              custom_fields: [
-                { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: '4e096a5b-96d7-4a40-baec-1fde61909cb0' }, // CRM Item Type: Conta
-                { id: '922c6189-1843-4039-90af-e45dd920cef4', value: form.razao_social || '' },
-                { id: '599b82f5-c87e-4248-a5dc-724027a29130', value: form.cnpj || '' },
-                { id: '0fe8980d-9591-4d36-974c-58d13d864352', value: form.email || '' },
-                { id: '8e9075cd-05c8-4be5-aa44-5615c216c868', value: form.telefone || '' },
-                { id: '95dbcd56-ebc5-4196-89e0-48185328367e', value: form.cidade || '' },
-                { id: '1ee2496a-94f9-4962-82e8-035a5136efcc', value: form.estado || '' },
-                { id: 'e5e777af-7e38-4707-b2ad-b3fdbd5cf239', value: form.rua || '' },
-                { id: '5c99dab5-3ee4-4071-b723-f17be8c94397', value: form.cep || '' }
-              ]
-            })
-          });
-          if (cuRes.ok) {
-            const cuData = await cuRes.json();
-            if (cuData && cuData.id) clickupId = cuData.id;
-          }
-        } catch (cuErr) {
-          console.warn('[ClickUp Sync] Falha ao criar no ClickUp:', cuErr);
-        }
-
-        if (!clickupId) {
-          clickupId = `crm_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        }
-
-        // 2. Grava no Supabase
+        // Grava no Supabase primeiro (clickup_account_id NULL, sync_status
+        // 'pending') e retorna na hora — a Edge Function sync-conta-clickup
+        // cria a tarefa no ClickUp em segundo plano, disparada pelo Database
+        // Webhook no INSERT.
         const { error } = await supabaseClient.from('contas').insert({
-          clickup_account_id: clickupId,
+          clickup_account_id: null,
           ...form,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          sync_status: 'pending',
         });
         if (error) throw error;
       }
@@ -546,53 +517,23 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
             .eq('id', regExistente.id);
           if (error) throw error;
         } else {
-          let contactCuId = contato?.clickup_contact_id ? `${contato.clickup_contact_id}_${empresa.id.substring(0,6)}` : null;
-
-          if (!contactCuId) {
-            try {
-              const cuRes = await fetch('/clickup-api/list/901326185456/task?custom_item_id=1003', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  name: normNome,
-                  custom_item_id: 1003,
-                  custom_fields: [
-                    { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: '2be1fe2b-3db1-48d5-972f-abd5caa7c645' }, // Contato
-                    { id: '0fe8980d-9591-4d36-974c-58d13d864352', value: normEmail || '' },
-                    { id: '8e9075cd-05c8-4be5-aa44-5615c216c868', value: form.celular || form.whatsapp || '' }
-                  ]
-                })
-              });
-              if (cuRes.ok) {
-                const cuData = await cuRes.json();
-                if (cuData && cuData.id) {
-                  contactCuId = cuData.id;
-                  if (empresa.clickup_account_id && !empresa.clickup_account_id.startsWith('crm_')) {
-                    try {
-                      await fetch(`/clickup-api/task/${contactCuId}/link/${empresa.clickup_account_id}`, { method: 'POST' });
-                    } catch (lErr) {}
-                  }
-                }
-              }
-            } catch (cuErr) {
-              console.warn('[ClickUp Sync] Falha ao criar contato no ClickUp:', cuErr);
-            }
-          }
-
+          // Grava no Supabase primeiro (clickup_contact_id NULL, sync_status
+          // 'pending') e segue — a Edge Function sync-contato-clickup cria a
+          // tarefa no ClickUp em segundo plano, disparada pelo Database
+          // Webhook no INSERT (um contato por empresa vinculada, cada INSERT
+          // dispara sua própria sincronização).
           const { error } = await supabaseClient
             .from('contatos')
             .insert({
               conta_id: empresa.id,
-              clickup_contact_id: contactCuId || `crm_ct_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+              clickup_contact_id: null,
               nome: normNome,
               cargo: form.cargo || null,
               email: normEmail || null,
               celular: form.celular || null,
               whatsapp: form.whatsapp || null,
               champion: form.champion,
-              sync_status: 'synced',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+              sync_status: 'pending',
             });
           if (error) throw error;
         }
@@ -786,77 +727,35 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
     setSalvando(true); setErro('');
 
     try {
-      // 1. Gera número oficial de proposta no Supabase
+      // 1. Gera número oficial de proposta no Supabase (síncrono, 100% interno)
       const { data: num, error: numErr } = await supabaseClient.rpc('gerar_numero_proposta');
       if (numErr) throw numErr;
 
-      let clickupNegId = null;
       const valorNum = parseFloat(form.valor) || 0;
       const probNum = parseInt(form.probabilidade) || 50;
 
-      // 2. Prepara custom fields para ClickUp
-      const customFields = [
-        { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: 'cd6922b0-34f4-45e3-853a-cba995a2591c' }, // CRM Item Type: Negócio
-        { id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: ESTAGIO_CLICKUP_IDS[form.estagio] || '3c4bcf81-91d3-40e7-97ae-a67b6bccea0c' }, // Estágio da Venda
-        ...(num ? [{ id: 'c44cc05d-303f-47e2-b243-40c6b26b732f', value: num }] : []),
-        ...(TIPO_OPORTUNIDADE_CLICKUP[form.tipo] ? [{ id: '5d384245-0640-4621-a2dd-98370f7efa82', value: TIPO_OPORTUNIDADE_CLICKUP[form.tipo] }] : []),
-        ...(valorNum > 0 ? [{ id: 'ee65221a-029d-4d0a-a981-b71b5a29b4b4', value: valorNum }] : []),
-        ...(probNum ? [{ id: '2c667b12-79c6-4949-b995-5c3938e7ff51', value: probNum }] : []),
-        ...(form.roInfra ? [{ id: RO_CLICKUP_IDS.roInfra, value: form.roInfra.trim() }] : []),
-        ...(form.roSw1 ? [{ id: RO_CLICKUP_IDS.roSw1, value: form.roSw1.trim() }] : []),
-        ...(form.roSw2 ? [{ id: RO_CLICKUP_IDS.roSw2, value: form.roSw2.trim() }] : []),
-        ...(form.roSw3 ? [{ id: RO_CLICKUP_IDS.roSw3, value: form.roSw3.trim() }] : []),
-        ...(form.roSw4 ? [{ id: RO_CLICKUP_IDS.roSw4, value: form.roSw4.trim() }] : [])
-      ];
-
-      // 3. Cria a tarefa no ClickUp na lista de Negócios (901326185457)
-      try {
-        const payloadCU = {
-          name: form.nome.trim(),
-          custom_item_id: 1004,
-          status: 'aberto',
-          description: form.descricao || '',
-          custom_fields: customFields,
-          ...(form.dataPrevisao ? { due_date: new Date(form.dataPrevisao + 'T12:00:00Z').getTime() } : {})
-        };
-
-        const cuRes = await fetch('/clickup-api/list/901326185457/task?custom_item_id=1004', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payloadCU)
-        });
-
-        if (cuRes.ok) {
-          const cuData = await cuRes.json();
-          if (cuData && cuData.id) {
-            clickupNegId = cuData.id;
-
-            // Vincula à tarefa da conta no ClickUp
-            if (contaEscolhida.clickup_account_id && !contaEscolhida.clickup_account_id.startsWith('crm_')) {
-              try {
-                await fetch(`/clickup-api/task/${clickupNegId}/link/${contaEscolhida.clickup_account_id}`, { method: 'POST' });
-              } catch (linkErr) {}
-            }
-          }
-        }
-      } catch (cuErr) {
-        console.warn('[ClickUp Sync] Falha ao criar negócio no ClickUp:', cuErr);
-      }
-
-      if (!clickupNegId) {
-        clickupNegId = `crm_neg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      }
-
-      // 4. Salva no Supabase
+      // 2. Grava no Supabase primeiro (clickup_negocio_id NULL, sync_status
+      // 'pending') e retorna na hora — a Edge Function sync-negocio-clickup
+      // cria a tarefa no ClickUp em segundo plano, disparada pelo Database
+      // Webhook no INSERT.
       const { error } = await supabaseClient.from('negocios').insert({
-        clickup_negocio_id: clickupNegId,
+        clickup_negocio_id: null,
         nome: form.nome.trim(),
         conta_id: contaEscolhida.id,
         estagio: form.estagio,
         numero_proposta_oficial: num || null,
         valor_clickup_fallback: valorNum > 0 ? valorNum : null,
-        sync_status: 'synced',
-        created_at: new Date().toISOString()
+        tipo_oportunidade: form.tipo || null,
+        probabilidade: probNum || null,
+        data_previsao: form.dataPrevisao || null,
+        descricao: form.descricao || null,
+        ro_infra: form.roInfra ? form.roInfra.trim() : null,
+        ro_sw1: form.roSw1 ? form.roSw1.trim() : null,
+        ro_sw2: form.roSw2 ? form.roSw2.trim() : null,
+        ro_sw3: form.roSw3 ? form.roSw3.trim() : null,
+        ro_sw4: form.roSw4 ? form.roSw4.trim() : null,
+        contato_principal_id: form.contatoId || null,
+        sync_status: 'pending',
       });
       if (error) throw error;
 
@@ -1330,6 +1229,8 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                     </span>
                   )}
                   {conta.industry && (<span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{conta.industry}</span>)}
+                  {conta.sync_status === 'pending' && <span className="text-[10px] font-bold text-amber-500">sincronizando...</span>}
+                  {conta.sync_status === 'failed' && <span className="text-[10px] font-bold text-rose-500" title={conta.sync_error}>falha ao sincronizar</span>}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1560,7 +1461,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   const valor = resolveNegocioValor(n, propostasPorNegocio);
                   const isGanho = n.estagio==='Ganho', isPerdido = n.estagio==='Perdido', isCongelado = n.estagio==='Congelado', isAberto = !isGanho && !isPerdido && !isCongelado;
                   return (
-                    <div key={n.id} onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: n.clickup_negocio_id, name: n.nome, estagio: n.estagio, clickup_negocio_id: n.clickup_negocio_id, numero_proposta_oficial: n.numero_proposta_oficial })} className={`bg-white rounded-2xl border transition-all cursor-pointer hover:shadow-md group ${isGanho ? 'border-l-4 border-l-emerald-500 border-slate-200' : isPerdido ? 'border-l-4 border-l-rose-400 border-slate-200 opacity-80' : isCongelado ? 'border-l-4 border-l-blue-300 border-slate-200' : 'border-l-4 border-l-indigo-600 border-slate-200'}`}>
+                    <div key={n.id} onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: String(n.clickup_negocio_id).replace('#', '').trim(), name: n.nome, estagio: n.estagio, clickup_negocio_id: n.clickup_negocio_id, numero_proposta_oficial: n.numero_proposta_oficial })} className={`bg-white rounded-2xl border transition-all cursor-pointer hover:shadow-md group ${isGanho ? 'border-l-4 border-l-emerald-500 border-slate-200' : isPerdido ? 'border-l-4 border-l-rose-400 border-slate-200 opacity-80' : isCongelado ? 'border-l-4 border-l-blue-300 border-slate-200' : 'border-l-4 border-l-indigo-600 border-slate-200'}`}>
                       <div className="px-4 py-3.5 flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <h5 className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-700 transition-colors leading-snug">{n.nome}</h5>
@@ -1618,15 +1519,16 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
     setLoading(true);
     try {
       const [{ data: c }, { data: n }, { data: p }, { data: ct }] = await Promise.all([
-        supabaseClient.from('contas').select('id,clickup_account_id,nome,cnpj,inscricao_estadual,cidade,estado,status,account_tier,industry,billing_cycle,razao_social,rua,cep,email,telefone').order('nome'),
-        supabaseClient.from('negocios').select('id,clickup_negocio_id,nome,conta_id,estagio,numero_proposta_oficial,sync_status,sync_error'),
+        supabaseClient.from('contas').select('id,clickup_account_id,nome,cnpj,inscricao_estadual,cidade,estado,status,account_tier,industry,billing_cycle,razao_social,rua,cep,email,telefone,sync_status,sync_error').order('nome'),
+        supabaseClient.from('negocios').select('id,clickup_negocio_id,nome,conta_id,estagio,numero_proposta_oficial,sync_status,sync_error,valor_clickup_fallback'),
         supabaseClient.from('propostas').select('id,clickup_negocio_id,total_proposta,situacao'),
         supabaseClient.from('contatos').select('id,clickup_contact_id,nome,cargo,email,celular,whatsapp,champion,conta_id,sync_status'),
       ]);
       const propsMap = new Map();
       for (const pr of p || []) {
-        const lista = propsMap.get(pr.clickup_negocio_id) || [];
-        lista.push(pr); propsMap.set(pr.clickup_negocio_id, lista);
+        const prKey = String(pr.clickup_negocio_id || '').replace('#', '').trim();
+        const lista = propsMap.get(prKey) || [];
+        lista.push(pr); propsMap.set(prKey, lista);
       }
       setContas(c || []); setNegocios(n || []); setPropostasPorNegocio(propsMap); setContatos(ct || []);
       if (contaSelecionada) {

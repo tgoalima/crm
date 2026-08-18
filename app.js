@@ -1112,7 +1112,7 @@ function App() {
   // Função para obter a aba inicial com base na Hash URL (SPA Hash Routing)
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '').trim();
-    if (['kanban', 'relatorios', 'tasks', 'propostas'].includes(hash)) {
+    if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
       return hash;
     }
     return safeStorage.getItem('crm_active_view') || 'kanban';
@@ -1132,7 +1132,7 @@ function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').trim();
-      if (['kanban', 'relatorios', 'tasks', 'propostas'].includes(hash)) {
+      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -1928,7 +1928,7 @@ function App() {
       }
 
       // Enriquecer negócios com responsável e valor da proposta do Supabase
-      const enrichedTasks = (negociosData || []).map(n => {
+      const enrichedTasks = (negociosData || []).filter(n => n.clickup_negocio_id).map(n => {
         const idClean = String(n.clickup_negocio_id || '').replace('#', '').trim();
         const matchedProps = [
           ...(propsByClickupId.get(idClean) || []),
@@ -2519,7 +2519,7 @@ function App() {
       setClickupTaskId('');
       setSelectedTask(null);
       if (supabaseClient) {
-        fetchTasks(supabaseClient);
+        fetchKanbanData();
       }
       showToast(`Oportunidade "${nomeNegocio}" excluída com sucesso!`, "success");
     } catch (err) {
@@ -2643,7 +2643,7 @@ function App() {
       }));
 
       setShowEditNegocioDrawerModal(false);
-      if (supabaseClient) fetchTasks(supabaseClient);
+      if (supabaseClient) fetchKanbanData();
       showToast('Oportunidade atualizada com sucesso!', 'success');
     } catch (err) {
       console.error('Erro ao atualizar oportunidade:', err);
