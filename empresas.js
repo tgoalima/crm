@@ -36,9 +36,9 @@ const formatCurrency = (v) =>
 
 const normalizeTier = (t) => {
   if (!t || t === '0' || t === 'none' || t === '') return null;
-  if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', icon: '💎', color: 'bg-violet-50 text-violet-700 border-violet-200', cardColor: 'bg-violet-50 text-violet-700 border-violet-200' };
-  if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', icon: '⭐', color: 'bg-amber-50 text-amber-700 border-amber-200', cardColor: 'bg-amber-50 text-amber-700 border-amber-200' };
-  if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', icon: '📦', color: 'bg-slate-100 text-slate-500 border-slate-200', cardColor: 'bg-slate-50 text-slate-500 border-slate-200' };
+  if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', Icon: IconDiamond, color: 'bg-violet-50 text-violet-700 border-violet-200', cardColor: 'bg-violet-50 text-violet-700 border-violet-200' };
+  if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', Icon: IconStar, color: 'bg-amber-50 text-amber-700 border-amber-200', cardColor: 'bg-amber-50 text-amber-700 border-amber-200' };
+  if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', Icon: IconPackage, color: 'bg-slate-100 text-slate-500 border-slate-200', cardColor: 'bg-slate-50 text-slate-500 border-slate-200' };
   return null;
 };
 
@@ -161,6 +161,96 @@ const IconX = ({ size = 14, className = '' }) => (
 const IconClose = ({ size = 16, className = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+);
+
+// Conjunto de ícones adicional — substitui os emojis usados como ícone de
+// interface (🏢🔍📍💰⚡📄🏆📞✉️🔄⭐💎📦❄️😞) por SVGs no mesmo estilo dos
+// ícones acima, pra tirar a mistura emoji+SVG e deixar a linguagem visual
+// consistente em todo o módulo (e reaproveitado também nas Tarefas Comerciais).
+const IconBuilding = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
+    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+    <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+    <path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>
+  </svg>
+);
+const IconSearch = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+);
+const IconMapPin = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+  </svg>
+);
+const IconDollar = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+  </svg>
+);
+const IconZap = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  </svg>
+);
+const IconDocument = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+  </svg>
+);
+const IconTrophy = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/>
+    <path d="M17 4h3a2 2 0 0 1-2 4h-1"/><path d="M7 4H4a2 2 0 0 0 2 4h1"/>
+  </svg>
+);
+const IconMail = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+    <polyline points="22 6 12 13 2 6"/>
+  </svg>
+);
+const IconPhone = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+  </svg>
+);
+const IconStar = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  </svg>
+);
+const IconDiamond = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="6 3 18 3 22 9 12 22 2 9 6 3"/>
+  </svg>
+);
+const IconPackage = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/>
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
+  </svg>
+);
+const IconSnowflake = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="12" y1="2" x2="12" y2="22"/><line x1="4" y1="7" x2="20" y2="17"/><line x1="4" y1="17" x2="20" y2="7"/>
+  </svg>
+);
+const IconFrown = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/>
+    <line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+  </svg>
+);
+const IconRefresh = ({ size = 13, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
   </svg>
 );
 
@@ -357,6 +447,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
               <CRMInput label="Nome Fantasia / Comercial" name="nome" value={form.nome} onChange={handleChange} placeholder="Ex: Hospital do Câncer de Londrina" required className="col-span-2" />
               <CRMInput label="Razão Social" name="razao_social" value={form.razao_social} onChange={handleChange} placeholder="Ex: Fundação Hospitalar Ltda" />
               <CRMInput label="CNPJ" name="cnpj" value={form.cnpj} onChange={handleChange} placeholder="00.000.000/0000-00" mono />
+              <CRMInput label="Inscrição Estadual" name="inscricao_estadual" value={form.inscricao_estadual} onChange={handleChange} placeholder="Ex: 123.456.789.012" mono />
               <CRMSelect label="Status da Conta" name="status" value={form.status} onChange={handleChange}>
                 <option value="customer base">Customer Base</option>
                 <option value="active">Active (Ativa)</option>
@@ -573,8 +664,8 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
 
           {/* VÍNCULO DE EMPRESAS (MULTI-SELEÇÃO) */}
           <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
-            <label className="text-xs font-black text-slate-800 uppercase tracking-wide block">
-              🏢 Empresas Vinculadas <span className="text-indigo-600 font-bold">({empresasVinculadas.length})</span>
+            <label className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+              <IconBuilding size={12} /> Empresas Vinculadas <span className="text-indigo-600 font-bold">({empresasVinculadas.length})</span>
             </label>
             <p className="text-[11px] text-slate-500 mb-2">
               Vincule este contato a uma ou mais empresas (ex: matriz e filiais) ou troque de empresa caso ele tenha mudado de emprego.
@@ -584,7 +675,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
             <div className="flex flex-wrap gap-1.5 mb-2">
               {empresasVinculadas.map(emp => (
                 <span key={emp.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-indigo-200 text-indigo-900 text-xs font-extrabold rounded-lg shadow-2xs">
-                  <span>🏢 {emp.nome}</span>
+                  <span className="flex items-center gap-1"><IconBuilding size={11} /> {emp.nome}</span>
                   <button
                     type="button"
                     onClick={() => removerVinculo(emp.id)}
@@ -638,7 +729,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
           <label className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200/70 rounded-xl cursor-pointer select-none">
             <input type="checkbox" checked={form.champion} onChange={e => setForm(p => ({...p, champion: e.target.checked}))} className="w-4 h-4 text-indigo-600 rounded" />
             <div>
-              <p className="text-xs font-black text-amber-900">⭐ Champion / Decisor</p>
+              <p className="text-xs font-black text-amber-900 flex items-center gap-1.5"><IconStar size={12} /> Champion / Decisor</p>
               <p className="text-[11px] text-amber-700">Principal tomador de decisão nesta(s) conta(s).</p>
             </div>
           </label>
@@ -1225,7 +1316,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   </span>
                   {tier && (
                     <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full border ${tier.color}`}>
-                      {tier.icon} {tier.label}
+                      <tier.Icon size={10} /> {tier.label}
                     </span>
                   )}
                   {conta.industry && (<span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{conta.industry}</span>)}
@@ -1254,7 +1345,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Total Ganho</span>
-                  <span className="text-xs">💰</span>
+                  <IconDollar size={13} className="text-emerald-500" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-emerald-600 tracking-tight tabular-nums">
                   {kpis.qtdGanho > 0 ? formatCurrency(kpis.ganho) : '—'}
@@ -1268,7 +1359,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Pipeline</span>
-                  <span className="text-xs">⚡</span>
+                  <IconZap size={13} className="text-indigo-500" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-indigo-600 tracking-tight tabular-nums">
                   {kpis.qtdAberto > 0 ? formatCurrency(kpis.pipeline) : '—'}
@@ -1282,7 +1373,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Negócios</span>
-                  <span className="text-xs">📄</span>
+                  <IconDocument size={13} className="text-slate-400" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-slate-900 tracking-tight tabular-nums">
                   {kpis.total}
@@ -1296,7 +1387,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Conversão</span>
-                  <span className="text-xs">🏆</span>
+                  <IconTrophy size={13} className={kpis.taxa >= 60 ? 'text-emerald-500' : kpis.taxa > 0 ? 'text-amber-500' : 'text-slate-400'} />
                 </div>
                 <p className={`text-sm sm:text-base font-black tracking-tight tabular-nums ${kpis.taxa >= 60 ? 'text-emerald-600' : kpis.taxa > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
                   {kpis.total > 0 ? `${kpis.taxa}%` : '—'}
@@ -1324,7 +1415,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
             <div className="p-5 space-y-4">
               <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">🏢 Dados Corporativos</h4>
+                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><IconBuilding size={11} /> Dados Corporativos</h4>
                   <button onClick={() => onEditarEmpresa(conta)} className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"><IconEdit size={11} /> Editar</button>
                 </div>
                 <dl className="grid grid-cols-2 divide-x divide-y divide-slate-100">
@@ -1333,14 +1424,14 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   <div className="px-5 py-3.5"><DadoCampo label="Insc. Estadual" value={conta.inscricao_estadual} mono /></div>
                   <div className="px-5 py-3.5"><DadoCampo label="Ciclo de Faturamento" value={conta.billing_cycle} /></div>
                   <div className="px-5 py-3.5"><DadoCampo label="Segmento" value={conta.industry} /></div>
-                  <div className="px-5 py-3.5"><DadoCampo label="Account Tier" value={tier ? `${tier.icon} ${tier.label}` : '—'} /></div>
+                  <div className="px-5 py-3.5"><DadoCampo label="Account Tier" value={tier ? <span className="flex items-center gap-1.5"><tier.Icon size={12} /> {tier.label}</span> : '—'} /></div>
                 </dl>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
                   <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">📞 Contato Corporativo</h4>
+                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><IconPhone size={11} /> Contato Corporativo</h4>
                   </div>
                   <dl className="px-5 py-4 space-y-3">
                     <DadoCampo label="E-mail" value={conta.email} href={conta.email ? `mailto:${conta.email}` : null} />
@@ -1349,7 +1440,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                 </div>
                 <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
                   <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">📍 Localização</h4>
+                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><IconMapPin size={11} /> Localização</h4>
                   </div>
                   <div className="px-5 py-4 space-y-1.5">
                     <p className="text-sm font-bold text-slate-900">{conta.rua || '—'}</p>
@@ -1381,7 +1472,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <h5 className="font-bold text-sm text-slate-900 group-hover:text-indigo-600 transition-colors truncate">{c.nome}</h5>
-                          {c.champion && <span className="shrink-0 text-xs" title="Champion / Principal Decisor">⭐</span>}
+                          {c.champion && <span className="shrink-0 text-amber-500" title="Champion / Principal Decisor"><IconStar size={12} /></span>}
                         </div>
                         <p className="text-xs text-slate-500 font-medium truncate">{c.cargo || 'Cargo não informado'}</p>
                         {c.email && <p className="text-[11px] text-slate-400 truncate mt-0.5">{c.email}</p>}
@@ -1418,7 +1509,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                       <button onClick={() => onExcluirContato(c)} title="Excluir contato" className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><IconTrash size={13} /></button>
                     </div>
                   </div>
-                  {c.champion && (<div className="px-4 py-2 border-t border-amber-100 bg-amber-50/60 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800">⭐ Champion — Principal decisor desta conta</p></div>)}
+                  {c.champion && (<div className="px-4 py-2 border-t border-amber-100 bg-amber-50/60 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800 flex items-center gap-1.5"><IconStar size={11} /> Champion — Principal decisor desta conta</p></div>)}
                 </div>
               ))}
             </div>
@@ -1466,8 +1557,8 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                         <div className="flex-1 min-w-0">
                           <h5 className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-700 transition-colors leading-snug">{n.nome}</h5>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${isGanho ? 'bg-emerald-50 text-emerald-700' : isPerdido ? 'bg-rose-50 text-rose-700' : isCongelado ? 'bg-blue-50 text-blue-700' : 'bg-indigo-50 text-indigo-700'}`}>
-                              {isGanho ? '🏆 Ganho' : isPerdido ? '😞 Perdido' : isCongelado ? '❄️ Congelado' : n.estagio}
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${isGanho ? 'bg-emerald-50 text-emerald-700' : isPerdido ? 'bg-rose-50 text-rose-700' : isCongelado ? 'bg-blue-50 text-blue-700' : 'bg-indigo-50 text-indigo-700'}`}>
+                              {isGanho ? <><IconTrophy size={10} /> Ganho</> : isPerdido ? <><IconFrown size={10} /> Perdido</> : isCongelado ? <><IconSnowflake size={10} /> Congelado</> : n.estagio}
                             </span>
                             {n.numero_proposta_oficial && (<span className="text-[11px] font-mono font-bold text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-lg">Nº {n.numero_proposta_oficial}</span>)}
                           </div>
@@ -1658,7 +1749,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       {/* TOPBAR */}
       <div className="shrink-0 px-6 py-3.5 bg-white border-b border-slate-200/80 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-base shadow-md">🏢</div>
+          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md"><IconBuilding size={18} /></div>
           <div>
             <h2 className="text-base font-extrabold text-slate-900 leading-tight">Diretório de Empresas</h2>
             <p className="text-xs font-bold text-slate-400 mt-0.5">
@@ -1672,7 +1763,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       {/* FILTROS */}
       <div className="shrink-0 px-6 py-2.5 bg-white/70 border-b border-slate-200/60 flex flex-wrap items-center gap-2.5">
         <div className="flex-1 min-w-[220px] relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconSearch size={13} /></span>
           <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400" />
           {busca && <button onClick={() => setBusca('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"><IconX size={11} /></button>}
         </div>
@@ -1714,7 +1805,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
                         <h4 className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">{conta.nome}</h4>
                         {tier && (
                           <span className={`inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-lg border shrink-0 ${tier.cardColor}`} title={tier.label}>
-                            {tier.icon} <span>{tier.label.replace('Tier ','T')}</span>
+                            <tier.Icon size={9} /> <span>{tier.label.replace('Tier ','T')}</span>
                           </span>
                         )}
                       </div>
@@ -1725,16 +1816,16 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
                   {/* Linha 2: Localização */}
                   {(conta.cidade || conta.estado) && (
                     <p className="text-xs text-slate-500 font-medium mb-2.5 flex items-center gap-1">
-                      <span className="text-slate-300">📍</span>{[conta.cidade,conta.estado].filter(Boolean).join(', ')}
+                      <IconMapPin size={11} className="text-slate-300" />{[conta.cidade,conta.estado].filter(Boolean).join(', ')}
                     </p>
                   )}
 
-                  {/* Linha 3: Pipeline (se houver) */}
+                  {/* Linha 3: Pipeline (se houver) — número em destaque, é a informação mais importante do card */}
                   {pipelineValor > 0 && (
-                    <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-2.5 mb-3 flex items-center justify-between">
+                    <div className="bg-indigo-50/60 border border-indigo-100 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
                       <div>
                         <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Pipeline em Aberto</span>
-                        <span className="text-sm font-black text-indigo-700 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
+                        <span className="text-base font-black text-indigo-700 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
                       </div>
                       <div className="px-2 py-1 bg-indigo-50 border border-indigo-200/80 rounded-lg text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
@@ -1774,7 +1865,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
 
         {contasFiltradas.length === 0 && (
           <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200 mt-4">
-            <div className="text-4xl mb-3">🔍</div>
+            <div className="flex justify-center mb-3 text-slate-300"><IconSearch size={40} /></div>
             <p className="text-base font-bold text-slate-700">Nenhuma empresa encontrada</p>
             <p className="text-xs text-slate-400 mt-1">Ajuste os termos da busca ou os filtros.</p>
           </div>
