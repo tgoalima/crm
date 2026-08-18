@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const CLICKUP_API_TOKEN = Deno.env.get("CLICKUP_API_TOKEN") || "";
+const TOKEN_ENCRYPTION_KEY = Deno.env.get("TOKEN_ENCRYPTION_KEY") || "";
 
 const CONTATOS_LIST_ID = "901326185456";
 const CF_EMAIL = "Email";
@@ -26,6 +27,39 @@ const corsHeaders = {
 async function marcarFalha(supabase: any, contatoId: string, mensagem: string) {
   console.error(`[sync-contato-clickup] Falha no contato ${contatoId}: ${mensagem}`);
   await supabase.from("contatos").update({ sync_status: "failed", sync_error: mensagem }).eq("id", contatoId);
+}
+
+// ─────────────────────────────────────────────
+// ATRIBUIÇÃO POR USUÁRIO — resolve com qual token do ClickUp sincronizar
+// ─────────────────────────────────────────────
+async function importDecryptionKey(): Promise<CryptoKey> {
+  const raw = Uint8Array.from(atob(TOKEN_ENCRYPTION_KEY), (c) => c.charCodeAt(0));
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+}
+
+async function decryptToken(encryptedB64: string, ivB64: string): Promise<string | null> {
+  try {
+    const key = await importDecryptionKey();
+    const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
+    const cipherBytes = Uint8Array.from(atob(encryptedB64), (c) => c.charCodeAt(0));
+    const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipherBytes);
+    return new TextDecoder().decode(plainBuf);
+  } catch (e) {
+    console.error("[sync-contato-clickup] Falha ao descriptografar token pessoal:", e.message);
+    return null;
+  }
+}
+
+async function resolveClickUpToken(supabase: any, criadoPorUserId: string | null | undefined): Promise<string> {
+  if (!criadoPorUserId || !TOKEN_ENCRYPTION_KEY) return CLICKUP_API_TOKEN;
+  const { data, error } = await supabase
+    .from("usuarios_clickup")
+    .select("token_encrypted, token_iv")
+    .eq("user_id", criadoPorUserId)
+    .maybeSingle();
+  if (error || !data) return CLICKUP_API_TOKEN;
+  const decrypted = await decryptToken(data.token_encrypted, data.token_iv);
+  return decrypted || CLICKUP_API_TOKEN;
 }
 
 async function buscarCamposDaLista(): Promise<Map<string, string>> {
@@ -59,6 +93,7 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const clickupToken = await resolveClickUpToken(supabase, record.criado_por_user_id);
 
     const { data: conta, error: contaErr } = await supabase
       .from("contas")
@@ -87,7 +122,7 @@ Deno.serve(async (req) => {
 
     const createRes = await fetch(`https://api.clickup.com/api/v2/list/${CONTATOS_LIST_ID}/task`, {
       method: "POST",
-      headers: { Authorization: CLICKUP_API_TOKEN, "Content-Type": "application/json" },
+      headers: { Authorization: clickupToken, "Content-Type": "application/json" },
       body: JSON.stringify({ name: record.nome, custom_fields: customFields }),
     });
 
@@ -103,7 +138,7 @@ Deno.serve(async (req) => {
     if (conta?.clickup_account_id) {
       const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
         method: "POST",
-        headers: { Authorization: CLICKUP_API_TOKEN },
+        headers: { Authorization: clickupToken },
       });
       if (!linkRes.ok) {
         console.error(`[sync-contato-clickup] Falha ao vincular ${novoClickupId} -> ${conta.clickup_account_id}: ${linkRes.status}`);

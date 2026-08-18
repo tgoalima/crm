@@ -2,6 +2,24 @@
 // Suprimática CRM — Gestão Comercial
 
 // ─────────────────────────────────────────────
+// HEADERS DE ATRIBUIÇÃO (token pessoal do ClickUp)
+// ─────────────────────────────────────────────
+// Duplicado localmente (em vez de depender de app.js já ter executado e
+// exposto seu próprio helper no escopo global) — mesmo padrão já usado no
+// projeto de duplicar pequenos helpers entre arquivos/functions em vez de
+// criar uma dependência implícita entre scripts carregados separadamente.
+// Nome diferente de propósito: app.js e empresas.js são carregados como
+// scripts <script> comuns (não módulos ES), então compartilham o mesmo
+// escopo global — um `const` com o mesmo nome nos dois arquivos quebraria
+// com "Identifier has already been declared" assim que o segundo script
+// rodasse.
+const getEmpresasClickUpHeaders = () => {
+  let token = null;
+  try { token = localStorage.getItem('crm_user_clickup_token'); } catch (e) {}
+  return token ? { 'Authorization': token } : {};
+};
+
+// ─────────────────────────────────────────────
 // SEGMENTOS
 // ─────────────────────────────────────────────
 const SEGMENTOS_DEFAULT = [
@@ -457,7 +475,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
           try {
             await fetch(`/clickup-api/task/${conta.clickup_account_id}?custom_item_id=1005`, {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getEmpresasClickUpHeaders() },
               body: JSON.stringify({
                 name: form.nome.trim(),
                 custom_item_id: 1005,
@@ -484,9 +502,11 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
         // 'pending') e retorna na hora — a Edge Function sync-conta-clickup
         // cria a tarefa no ClickUp em segundo plano, disparada pelo Database
         // Webhook no INSERT.
+        const { data: { session: sessConta } = {} } = await supabaseClient.auth.getSession();
         const { error } = await supabaseClient.from('contas').insert({
           clickup_account_id: null,
           ...form,
+          criado_por_user_id: sessConta?.user?.id || null,
           sync_status: 'pending',
         });
         if (error) throw error;
@@ -665,6 +685,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
       });
 
       // 1. Atualizar ou Inserir vínculo para cada empresa selecionada
+      const { data: { session: sessContato } = {} } = await supabaseClient.auth.getSession();
       for (const empresa of empresasVinculadas) {
         const regExistente = existentesDoTitular.find(c => c.conta_id === empresa.id);
 
@@ -699,6 +720,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
               celular: form.celular || null,
               whatsapp: form.whatsapp || null,
               champion: form.champion,
+              criado_por_user_id: sessContato?.user?.id || null,
               sync_status: 'pending',
             });
           if (error) throw error;
@@ -904,11 +926,13 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
       // 'pending') e retorna na hora — a Edge Function sync-negocio-clickup
       // cria a tarefa no ClickUp em segundo plano, disparada pelo Database
       // Webhook no INSERT.
+      const { data: { session: sessNegocio } = {} } = await supabaseClient.auth.getSession();
       const { error } = await supabaseClient.from('negocios').insert({
         clickup_negocio_id: null,
         nome: form.nome.trim(),
         conta_id: contaEscolhida.id,
         estagio: form.estagio,
+        criado_por_user_id: sessNegocio?.user?.id || null,
         numero_proposta_oficial: num || null,
         valor_clickup_fallback: valorNum > 0 ? valorNum : null,
         tipo_oportunidade: form.tipo || null,
@@ -1181,7 +1205,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
 
           await fetch(`/clickup-api/task/${negocio.clickup_negocio_id}?custom_item_id=1004`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getEmpresasClickUpHeaders() },
             body: JSON.stringify({
               name: form.nome.trim(),
               custom_item_id: 1004,
@@ -1741,7 +1765,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       // 2. Excluir no ClickUp se houver ID vinculado
       if (empresa.clickup_account_id && !empresa.clickup_account_id.startsWith('crm_')) {
         try {
-          await fetch(`/clickup-api/task/${empresa.clickup_account_id}`, { method: 'DELETE' });
+          await fetch(`/clickup-api/task/${empresa.clickup_account_id}`, { method: 'DELETE', headers: { ...getEmpresasClickUpHeaders() } });
         } catch (e) {
           console.warn('[ClickUp Delete] Falha ao excluir no ClickUp:', e);
         }
@@ -1769,7 +1793,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       // 2. Exclui no ClickUp se houver ID vinculado
       if (negocio.clickup_negocio_id && !negocio.clickup_negocio_id.startsWith('crm_neg_')) {
         try {
-          await fetch(`/clickup-api/task/${negocio.clickup_negocio_id}`, { method: 'DELETE' });
+          await fetch(`/clickup-api/task/${negocio.clickup_negocio_id}`, { method: 'DELETE', headers: { ...getEmpresasClickUpHeaders() } });
         } catch (e) {
           console.warn('[ClickUp Delete] Falha ao excluir negócio no ClickUp:', e);
         }

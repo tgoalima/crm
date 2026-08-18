@@ -1974,7 +1974,7 @@ function App() {
       if (responsavelId) {
         const res = await fetch(`/clickup-api/task/${taskId}/assignee`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
           body: JSON.stringify({ assignees: [responsavelId] })
         });
         if (!res.ok) throw new Error("Erro ClickUp Assignee");
@@ -1993,6 +1993,7 @@ function App() {
       if (error) throw error;
 
       if (!data || data.length === 0) {
+        const { data: { session: sessAuto } = {} } = await supabaseClient.auth.getSession();
         await supabaseClient
           .from('propostas')
           .insert({
@@ -2000,6 +2001,7 @@ function App() {
             versao: 'vA',
             situacao: 'Selecionada',
             criado_por: responsavelNome,
+            criado_por_user_id: sessAuto?.user?.id || null,
             cenario: '',
             total_proposta: 0
           });
@@ -2144,7 +2146,8 @@ function App() {
     const res = await fetch(`/clickup-api/task/${taskId}/field/c8d0abe2-c59f-4a9e-93ff-bd060659aa63`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getSupabaseHeaders()
       },
       body: JSON.stringify({ value: newOptionId })
     });
@@ -2156,7 +2159,7 @@ function App() {
   const updateTaskClickupStatus = async (taskId, statusName) => {
     const res = await fetch(`/clickup-api/task/${taskId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
       body: JSON.stringify({ status: statusName })
     });
     if (!res.ok) {
@@ -2499,7 +2502,7 @@ function App() {
       const idClean = String(clickupTaskId).replace('#', '');
       const res = await fetch('/api/atividades', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
         body: JSON.stringify({
           clickup_negocio_id: idClean,
           texto: novaAtividade.trim()
@@ -2527,7 +2530,7 @@ function App() {
     try {
       const res = await fetch(`/api/atividades/${atividadeId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
         body: JSON.stringify({ texto: editingAtividadeTexto.trim() })
       });
       if (res.ok) {
@@ -2551,7 +2554,7 @@ function App() {
     if (!confirm('Deseja realmente excluir esta atividade?')) return;
     setSavingAtividade(true);
     try {
-      const res = await fetch(`/api/atividades/${atividadeId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/atividades/${atividadeId}`, { method: 'DELETE', headers: { ...getSupabaseHeaders() } });
       if (res.ok) {
         showToast('Atividade excluída com sucesso!', 'success');
         fetchAtividades(clickupTaskId);
@@ -2578,7 +2581,8 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
           'x-supabase-url': safeStorage.getItem('supa_url') || '',
-          'x-supabase-key': safeStorage.getItem('supa_key') || ''
+          'x-supabase-key': safeStorage.getItem('supa_key') || '',
+          ...getSupabaseHeaders()
         },
         body: JSON.stringify({ status: nextStatus })
       });
@@ -2609,10 +2613,11 @@ function App() {
         method: 'DELETE',
         headers: {
           'x-supabase-url': safeStorage.getItem('supa_url') || '',
-          'x-supabase-key': safeStorage.getItem('supa_key') || ''
+          'x-supabase-key': safeStorage.getItem('supa_key') || '',
+          ...getSupabaseHeaders()
         }
       });
-      
+
       if (!response.ok) {
         throw new Error("Erro ao excluir tarefa no servidor");
       }
@@ -2653,7 +2658,7 @@ function App() {
       const cuTaskId = task.clickup_negocio_id || (task.id && !String(task.id).includes('-') ? task.id : null);
       if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
         try {
-          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE' });
+          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE', headers: { ...getSupabaseHeaders() } });
         } catch (e) {
           console.warn('[ClickUp Delete] Falha ao excluir negócio no ClickUp:', e);
         }
@@ -2757,7 +2762,7 @@ function App() {
 
           await fetch(`/clickup-api/task/${cuTaskId}?custom_item_id=1004`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
             body: JSON.stringify({
               name: editNegocioDrawerForm.nome.trim(),
               custom_item_id: 1004,
@@ -4054,6 +4059,7 @@ function App() {
     setLoading(true);
     try {
       const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : 'Vendedor CRM';
+      const { data: { session: sessInicial } = {} } = await supabaseClient.auth.getSession();
       const { data: newProp, error } = await supabaseClient
         .from('propostas')
         .insert({
@@ -4062,7 +4068,8 @@ function App() {
           cenario: '',
           situacao: 'Ativa',
           total_proposta: 0,
-          criado_por: currentResponsavel
+          criado_por: currentResponsavel,
+          criado_por_user_id: sessInicial?.user?.id || null
         })
         .select()
         .single();
@@ -4136,7 +4143,8 @@ function App() {
         const resVal = await fetch(urlValue, {
           method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...getSupabaseHeaders()
           },
           body: JSON.stringify(bodyFormatado)
         });
@@ -4193,7 +4201,8 @@ function App() {
         const resGlobal = await fetch(urlGlobal, {
           method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...getSupabaseHeaders()
           },
           body: JSON.stringify(bodyFormatado)
         });
@@ -4346,7 +4355,7 @@ function App() {
         if (Object.keys(datesPayload).length > 0) {
           fetch(`/clickup-api/task/${cleanCuId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
             body: JSON.stringify(datesPayload)
           }).catch(err => console.error("Erro ao sincronizar datas no ClickUp:", err));
         }
@@ -4481,6 +4490,7 @@ function App() {
 
       // 6. Insere a nova proposta (vB) mantendo o valor base herdado e a situação como 'Ativa'
       const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : (basePropData.criado_por || '');
+      const { data: { session: sessNovaVersao } = {} } = await supabaseClient.auth.getSession();
       const { data: newProp, error: propErr } = await supabaseClient
         .from('propostas')
         .insert({
@@ -4490,6 +4500,7 @@ function App() {
           situacao: 'Ativa',
           total_proposta: finalBaseTotal,
           criado_por: currentResponsavel,
+          criado_por_user_id: sessNovaVersao?.user?.id || null,
           data_inicio: basePropData.data_inicio || currentProposta?.data_inicio || clickupTaskDates?.start_date || null,
           // Nunca herda due_date do ClickUp como data_fechamento (ver comentário em loadProposalDetails).
           data_fechamento: null

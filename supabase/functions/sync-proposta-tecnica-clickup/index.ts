@@ -22,6 +22,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const CLICKUP_API_TOKEN = Deno.env.get("CLICKUP_API_TOKEN") || "";
+const TOKEN_ENCRYPTION_KEY = Deno.env.get("TOKEN_ENCRYPTION_KEY") || "";
 
 const FOLDER_PROJETOS_ID = "90134052120";
 const TECH_CUSTOM_ITEM_ID = 1014;
@@ -35,6 +36,39 @@ const corsHeaders = {
 
 function normalizeId(id: unknown): string {
   return String(id || "").replace("#", "").trim();
+}
+
+// ─────────────────────────────────────────────
+// ATRIBUIÇÃO POR USUÁRIO — resolve com qual token do ClickUp sincronizar
+// ─────────────────────────────────────────────
+async function importDecryptionKey(): Promise<CryptoKey> {
+  const raw = Uint8Array.from(atob(TOKEN_ENCRYPTION_KEY), (c) => c.charCodeAt(0));
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+}
+
+async function decryptToken(encryptedB64: string, ivB64: string): Promise<string | null> {
+  try {
+    const key = await importDecryptionKey();
+    const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
+    const cipherBytes = Uint8Array.from(atob(encryptedB64), (c) => c.charCodeAt(0));
+    const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipherBytes);
+    return new TextDecoder().decode(plainBuf);
+  } catch (e) {
+    console.error("[sync-proposta-tecnica-clickup] Falha ao descriptografar token pessoal:", e.message);
+    return null;
+  }
+}
+
+async function resolveClickUpToken(supabase: any, criadoPorUserId: string | null | undefined): Promise<string> {
+  if (!criadoPorUserId || !TOKEN_ENCRYPTION_KEY) return CLICKUP_API_TOKEN;
+  const { data, error } = await supabase
+    .from("usuarios_clickup")
+    .select("token_encrypted, token_iv")
+    .eq("user_id", criadoPorUserId)
+    .maybeSingle();
+  if (error || !data) return CLICKUP_API_TOKEN;
+  const decrypted = await decryptToken(data.token_encrypted, data.token_iv);
+  return decrypted || CLICKUP_API_TOKEN;
 }
 
 // Letras de versão como coluna de planilha: A=1, Z=26, AA=27, AB=28... —
@@ -62,9 +96,9 @@ function rankToLetters(rank: number): string {
 
 // Maior letra de versão já existente entre as tarefas "Enviar Proposta vX"
 // da lista técnica (0 se a lista estiver vazia ou não tiver nenhuma).
-async function getMaxVersionRankInList(listaId: string): Promise<number> {
+async function getMaxVersionRankInList(listaId: string, token: string): Promise<number> {
   const res = await fetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true`, {
-    headers: { Authorization: CLICKUP_API_TOKEN },
+    headers: { Authorization: token },
   });
   if (!res.ok) return 0;
   const data = await res.json();
@@ -84,9 +118,9 @@ async function getMaxVersionRankInList(listaId: string): Promise<number> {
 // Procura a lista técnica pelo nome sem criar — usado no fluxo de exclusão,
 // onde não faz sentido criar uma lista só pra constatar que não há nada
 // nela pra apagar.
-async function findListaTecnica(nome: string): Promise<string | null> {
+async function findListaTecnica(nome: string, token: string): Promise<string | null> {
   const listRes = await fetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
-    headers: { Authorization: CLICKUP_API_TOKEN },
+    headers: { Authorization: token },
   });
   if (!listRes.ok) return null;
   const listData = await listRes.json();
@@ -94,13 +128,13 @@ async function findListaTecnica(nome: string): Promise<string | null> {
   return existente ? existente.id : null;
 }
 
-async function getOrCreateListaTecnica(nome: string): Promise<string | null> {
-  const existenteId = await findListaTecnica(nome);
+async function getOrCreateListaTecnica(nome: string, token: string): Promise<string | null> {
+  const existenteId = await findListaTecnica(nome, token);
   if (existenteId) return existenteId;
 
   const createRes = await fetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
     method: "POST",
-    headers: { Authorization: CLICKUP_API_TOKEN, "Content-Type": "application/json" },
+    headers: { Authorization: token, "Content-Type": "application/json" },
     body: JSON.stringify({ name: nome }),
   });
   if (!createRes.ok) return null;
@@ -110,10 +144,10 @@ async function getOrCreateListaTecnica(nome: string): Promise<string | null> {
 
 // Acha o id da tarefa "Enviar Proposta vX" (match exato, sem contar espaços
 // extras) dentro da lista técnica — usado no fluxo de exclusão.
-async function findTarefaVersao(listaId: string, versao: string): Promise<string | null> {
+async function findTarefaVersao(listaId: string, versao: string, token: string): Promise<string | null> {
   const nomeAlvo = `${PREFIX_TASK}${versao}`.trim().toLowerCase();
   const res = await fetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true`, {
-    headers: { Authorization: CLICKUP_API_TOKEN },
+    headers: { Authorization: token },
   });
   if (!res.ok) return null;
   const data = await res.json();
@@ -134,6 +168,8 @@ async function handleDelete(supabase: ReturnType<typeof createClient>, oldRecord
     });
   }
 
+  const clickupToken = await resolveClickUpToken(supabase, oldRecord.criado_por_user_id);
+
   const idLimpo = normalizeId(oldRecord.clickup_negocio_id);
   const idComHash = "#" + idLimpo;
   const { data: negocio, error: negocioErr } = await supabase
@@ -152,7 +188,7 @@ async function handleDelete(supabase: ReturnType<typeof createClient>, oldRecord
   }
 
   const nomeLista = `${negocio.numero_proposta_oficial} - ${negocio.nome}`;
-  const listaId = await findListaTecnica(nomeLista);
+  const listaId = await findListaTecnica(nomeLista, clickupToken);
   if (!listaId) {
     console.warn(`[sync-proposta-tecnica-clickup] DELETE ignorado — lista técnica "${nomeLista}" não existe.`);
     return new Response(JSON.stringify({ success: true, message: "Ignorado (lista técnica não existe)" }), {
@@ -161,7 +197,7 @@ async function handleDelete(supabase: ReturnType<typeof createClient>, oldRecord
     });
   }
 
-  const tarefaId = await findTarefaVersao(listaId, String(oldRecord.versao || ""));
+  const tarefaId = await findTarefaVersao(listaId, String(oldRecord.versao || ""), clickupToken);
   if (!tarefaId) {
     console.warn(`[sync-proposta-tecnica-clickup] DELETE ignorado — tarefa "${PREFIX_TASK}${oldRecord.versao}" não encontrada na lista "${nomeLista}".`);
     return new Response(JSON.stringify({ success: true, message: "Ignorado (tarefa técnica não encontrada)" }), {
