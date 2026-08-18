@@ -83,6 +83,29 @@ def make_supabase_request(headers, path, method, payload=None):
     with urllib.request.urlopen(req) as response:
         return response.status, response.read()
 
+MENTION_PATTERN = re.compile(r'@\[([^\]]+)\]\((\d+)\)')
+
+def build_clickup_comment_segments(texto):
+    """Converte um texto com marcadores @[Nome](clickupUserId) — inseridos
+    pelo MentionTextarea do app.js — numa lista de segmentos rich-text do
+    ClickUp: texto normal vira {"text": ...}, cada marcador vira
+    {"type": "tag", "user": {"id": ...}}, que o ClickUp renderiza como uma
+    menção real (clicável, notifica a pessoa), em vez de "@Nome" em texto
+    puro. Ver POST /task/{id}/comment com o campo "comment" (array) em vez
+    de "comment_text" (string simples, sem suporte a menção real)."""
+    segments = []
+    last_end = 0
+    for m in MENTION_PATTERN.finditer(texto):
+        if m.start() > last_end:
+            segments.append({"text": texto[last_end:m.start()]})
+        segments.append({"type": "tag", "user": {"id": int(m.group(2))}})
+        last_end = m.end()
+    if last_end < len(texto):
+        segments.append({"text": texto[last_end:]})
+    if not segments:
+        segments.append({"text": texto})
+    return segments
+
 def make_clickup_request(path, method, payload=None, token=None):
     target_url = f"https://api.clickup.com/api/v2/{path.lstrip('/')}"
     headers = {
@@ -1107,7 +1130,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             clickup_comment_id = None
             try:
                 comment_payload = {
-                    "comment_text": f"[SPA Gestão Comercial] {texto}",
+                    "comment": build_clickup_comment_segments(f"[SPA Gestão Comercial] {texto}"),
                     "notify_all": False
                 }
                 cu_status, cu_res = make_clickup_request(
@@ -1218,7 +1241,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if clickup_comment_id:
                 try:
                     comment_payload = {
-                        "comment_text": f"[SPA Gestão Comercial] {texto}"
+                        "comment": build_clickup_comment_segments(f"[SPA Gestão Comercial] {texto}")
                     }
                     cu_status, cu_res = make_clickup_request(
                         f"comment/{clickup_comment_id}",

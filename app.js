@@ -206,6 +206,122 @@ const getNextVersionLetter = (currentVersao) => {
   }
   return prefix + charArray.join('');
 };
+
+// ─────────────────────────────────────────────
+// @MENÇÕES (Registrar Atividade) — marcador "@[Nome](clickupUserId)" no
+// texto bruto. Preserva o id numérico do ClickUp pra virar uma menção real
+// (clicável, notifica a pessoa) quando o comentário é sincronizado lá —
+// ver handle_create_atividade em server.py.
+// ─────────────────────────────────────────────
+const renderTextoComMencoes = (texto) => {
+  if (!texto) return null;
+  const re = /@\[([^\]]+)\]\((\d+)\)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = re.exec(texto)) !== null) {
+    if (match.index > lastIndex) parts.push(texto.slice(lastIndex, match.index));
+    parts.push(
+      <span key={`mencao-${key++}`} className="inline-block font-bold text-indigo-700 bg-indigo-50 px-1 rounded">@{match[1]}</span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < texto.length) parts.push(texto.slice(lastIndex));
+  return parts;
+};
+
+const MentionTextarea = ({ value, onChange, membros = [], placeholder = '', rows = 3 }) => {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const [highlight, setHighlight] = React.useState(0);
+  const [triggerPos, setTriggerPos] = React.useState(null);
+  const textareaRef = React.useRef(null);
+
+  const filtered = React.useMemo(() => {
+    if (!open) return [];
+    const q = query.trim().toLowerCase();
+    return (membros || []).filter(m => !q || (m.nome || '').toLowerCase().includes(q)).slice(0, 6);
+  }, [open, query, membros]);
+
+  React.useEffect(() => { setHighlight(0); }, [filtered]);
+
+  const handleChange = (e) => {
+    const newVal = e.target.value;
+    const cursor = e.target.selectionStart;
+    onChange(newVal);
+
+    const beforeCursor = newVal.slice(0, cursor);
+    const atIdx = beforeCursor.lastIndexOf('@');
+    if (atIdx === -1 || /\s/.test(beforeCursor.slice(atIdx + 1))) {
+      setOpen(false);
+      return;
+    }
+    setTriggerPos(atIdx);
+    setQuery(beforeCursor.slice(atIdx + 1));
+    setOpen(true);
+  };
+
+  const handleSelect = (membro) => {
+    if (triggerPos === null || !textareaRef.current) return;
+    const cursor = textareaRef.current.selectionStart;
+    const before = value.slice(0, triggerPos);
+    const after = value.slice(cursor);
+    const insertion = `@[${membro.nome}](${membro.id}) `;
+    const newVal = before + insertion + after;
+    onChange(newVal);
+    setOpen(false);
+    setQuery('');
+    setTriggerPos(null);
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const pos = (before + insertion).length;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open || filtered.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(i => (i + 1) % filtered.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(i => (i - 1 + filtered.length) % filtered.length); }
+    else if (e.key === 'Enter') { e.preventDefault(); handleSelect(filtered[highlight]); }
+    else if (e.key === 'Escape') { setOpen(false); }
+  };
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full p-3 border border-slate-300 rounded-xl text-xs text-slate-800 bg-white shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 resize-none transition-all"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+          {filtered.map((m, i) => (
+            <button
+              key={m.id}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(m); }}
+              onMouseEnter={() => setHighlight(i)}
+              className={`w-full text-left px-3.5 py-2 text-xs font-semibold flex items-center gap-2 transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'}`}
+            >
+              <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-black flex items-center justify-center shrink-0">{(m.nome || '?').slice(0, 1).toUpperCase()}</span>
+              <span>{m.nome}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const KanbanCard = React.memo(({ task, dealValue, formattedValue, responsavel, handleDragStart, handleCardClick, hasOverdue, stageColor }) => {
   return (
     <div
@@ -5400,9 +5516,9 @@ function App() {
     const isReadOnly = (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido') && !isEditingProposal;
 
     return (
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
+      <div className="flex-1 flex flex-col overflow-hidden bg-slate-100/70">
         {/* Barra superior de navegação */}
-        <div className="px-6 py-3 bg-white/90 backdrop-blur-md border-b border-slate-200/70 flex items-center justify-between z-10 shadow-2xs">
+        <div className="px-6 py-3 bg-white backdrop-blur-md border-b border-slate-200 flex items-center justify-between z-10 shadow-sm shadow-slate-200/40">
           <button 
             onClick={() => setDrawerTab('details')}
             className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-indigo-600 px-3 py-1.5 rounded-xl hover:bg-indigo-50/50 transition-all cursor-pointer group"
@@ -5638,7 +5754,7 @@ function App() {
           </div>
 
           {/* Grid Premium de Metadados (Form Controls Card) */}
-          <div className="mx-7 my-5 p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+          <div className="mx-7 my-5 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5">
               <div>
                 <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
@@ -5646,7 +5762,7 @@ function App() {
                   Tipo Oportunidade
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={getTipoOportunidade()}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -5676,7 +5792,7 @@ function App() {
                   Tipo de Projeto
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.cenario || ""}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, cenario: e.target.value })}
                   disabled={isReadOnly || !isProjeto}
@@ -5695,7 +5811,7 @@ function App() {
                   Vendedor / Responsável
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.criado_por || ""}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, criado_por: e.target.value })}
                   disabled={isReadOnly}
@@ -5717,7 +5833,7 @@ function App() {
                 </label>
                 <input
                   type="date"
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_inicio ? currentProposta.data_inicio.substring(0, 10) : (clickupTaskDates?.start_date || '')}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, data_inicio: e.target.value })}
                   disabled={isReadOnly}
@@ -5734,7 +5850,7 @@ function App() {
                 </label>
                 <input
                   type="date"
-                  className="h-10 rounded-xl border border-slate-200/90 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_fechamento ? currentProposta.data_fechamento.substring(0, 10) : ''}
                   onChange={(e) => setCurrentProposta({ ...currentProposta, data_fechamento: e.target.value })}
                   disabled={isReadOnly}
@@ -8693,14 +8809,14 @@ function App() {
               setClickupTaskId('');
             }}
           ></div>
-          <div 
+          <div
             className={`drawer-content h-full flex flex-col ${showDrawer ? 'active' : ''} ${
-              drawerTab === 'budget' ? 'w-[94vw] max-w-7xl' : 'w-full max-w-3xl md:max-w-4xl'
+              drawerTab === 'budget' ? 'w-[94vw] max-w-7xl' : 'w-full max-w-4xl md:max-w-5xl'
             }`}
           >
             {drawerTab === 'details' ? (
-              <div className="flex-1 flex flex-col p-6 overflow-hidden">
-                <div className="flex items-center justify-between border-b border-slate-200/80 pb-4 mb-4 gap-4">
+              <div className="flex-1 flex flex-col p-7 overflow-hidden bg-slate-50/60">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-5 gap-4">
                   <div className="flex items-center gap-3 min-w-0">
                     <button 
                       onClick={() => {
@@ -8774,10 +8890,13 @@ function App() {
                 <div className="space-y-4 mb-6">
                   {/* Cards de Responsável e Valor */}
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white p-3.5 rounded-xl border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Responsável pelo Negócio</span>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 border-l-4 border-l-indigo-400 shadow-sm shadow-slate-200/50">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        Responsável pelo Negócio
+                      </span>
                       <select
-                        className="w-full bg-transparent border-0 p-0 text-sm font-semibold text-slate-800 focus:ring-0 focus:outline-none cursor-pointer mt-1"
+                        className="w-full bg-transparent border-0 p-0 text-base font-black text-slate-900 focus:ring-0 focus:outline-none cursor-pointer mt-1.5"
                         value={selectedTask ? (selectedTask.responsavel_negocio || "") : ""}
                         onChange={(e) => {
                           if (selectedTask) {
@@ -8792,9 +8911,12 @@ function App() {
                         ))}
                       </select>
                     </div>
-                    <div className="bg-white p-3.5 rounded-xl border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Valor Estimado</span>
-                      <span className="text-sm font-bold text-indigo-600 mt-1 block">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 border-l-4 border-l-emerald-400 shadow-sm shadow-slate-200/50">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Valor Estimado
+                      </span>
+                      <span className="text-base font-black text-emerald-600 tracking-tight mt-1.5 block">
                         {(() => {
                           if (currentProposta && currentProposta.situacao === 'Selecionada') {
                             return `R$ ${Number(realTimeGrandTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -8809,7 +8931,7 @@ function App() {
                   </div>
 
                   {/* Pipeline Premium — Estágio da Venda */}
-                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
+                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-sm">
@@ -9029,23 +9151,24 @@ function App() {
                 </div>
 
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Barra de Abas com Ícones */}
-                  <div className="flex items-center border-b border-slate-200 mb-0 px-1">
+                  {/* Barra de Abas com Ícones + Rótulos */}
+                  <div className="flex items-center gap-1.5 border-b border-slate-200 mb-0 px-1 bg-white rounded-t-2xl pt-1.5">
                     {/* Aba Propostas */}
                     <button
                       onClick={() => { setDrawerSection('propostas'); }}
                       title="Propostas"
-                      className={`relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-200 cursor-pointer mx-1 ${
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'propostas'
-                          ? 'bg-indigo-100 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
+                      <span>Propostas</span>
                       {drawerSection === 'propostas' && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-indigo-500 rounded-full"></span>
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                     </button>
 
@@ -9053,28 +9176,29 @@ function App() {
                     <button
                       onClick={() => { setDrawerSection('tarefas'); }}
                       title="Tarefas"
-                      className={`relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-200 cursor-pointer mx-1 ${
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'tarefas'
-                          ? 'bg-indigo-100 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
+                      <span>Tarefas</span>
                       {drawerSection === 'tarefas' && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-indigo-500 rounded-full"></span>
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                       {(() => {
                         const overdueCount = commercialTasks.filter(t => {
                           const propObj = Array.isArray(t.propostas) ? t.propostas[0] : t.propostas;
-                          const isThisDeal = t.clickup_negocio_id === clickupTaskId || 
+                          const isThisDeal = t.clickup_negocio_id === clickupTaskId ||
                                              (propObj && propObj.clickup_negocio_id === clickupTaskId) ||
                                              (currentProposta && t.proposta_id === currentProposta.id);
                           return isThisDeal && t.status === 'pendente' && new Date(t.data_vencimento) < new Date();
                         }).length;
                         return overdueCount > 0 ? (
-                          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">{overdueCount}</span>
+                          <span className="w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">{overdueCount}</span>
                         ) : null;
                       })()}
                     </button>
@@ -9083,23 +9207,24 @@ function App() {
                     <button
                       onClick={() => { setDrawerSection('status'); fetchAtividades(clickupTaskId); }}
                       title="Status do Projeto"
-                      className={`relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-200 cursor-pointer mx-1 ${
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'status'
-                          ? 'bg-indigo-100 text-indigo-600'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                       </svg>
+                      <span>Atividades</span>
                       {drawerSection === 'status' && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-indigo-500 rounded-full"></span>
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                     </button>
                   </div>
 
                   {/* Conteúdo da Aba Selecionada */}
-                  <div className="flex-1 overflow-y-auto pr-1 pt-4">
+                  <div className="flex-1 overflow-y-auto pr-1 pt-4 px-1 bg-white rounded-b-2xl shadow-sm shadow-slate-200/40 border border-t-0 border-slate-200">
 
                     {/* === ABA: PROPOSTAS === */}
                     {drawerSection === 'propostas' && (
@@ -9112,8 +9237,11 @@ function App() {
                     {drawerSection === 'tarefas' && (
                       <div className="px-1 space-y-3">
                         {/* Botão + Nova Tarefa Comercial dentro da aba Tarefas */}
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 mb-3">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tarefas Associadas</span>
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            Tarefas Associadas
+                          </span>
                           <button
                             onClick={handleNewTaskClick}
                             className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center space-x-1"
@@ -9132,25 +9260,25 @@ function App() {
                           
                           if (dealTasks.length === 0) {
                             return (
-                              <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
-                                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-                                  <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                                <div className="w-14 h-14 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center">
+                                  <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                   </svg>
                                 </div>
-                                <p className="text-xs text-slate-500">Nenhuma tarefa associada a este negócio.</p>
+                                <p className="text-xs font-semibold text-slate-500">Nenhuma tarefa associada a este negócio.</p>
                               </div>
                             );
                           }
-                          
+
                           return dealTasks.map(task => {
                             const isOverdue = task.status === 'pendente' && new Date(task.data_vencimento) < new Date();
                             const isDone = task.status === 'concluida';
                             const matchedType = taskTypes.find(t => t.nome === task.tipo);
                             const typeEmoji = matchedType ? matchedType.emoji : '📋';
-                            
+
                             return (
-                              <div key={task.id} className="flex items-start justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition-colors">
+                              <div key={task.id} className={`flex items-start justify-between p-3 rounded-xl bg-white border shadow-xs hover:shadow-sm transition-all ${isOverdue ? 'border-l-4 border-l-rose-400 border-slate-200' : isDone ? 'border-l-4 border-l-emerald-400 border-slate-200' : 'border-l-4 border-l-indigo-300 border-slate-200'}`}>
                                 <div className="flex items-start space-x-2.5">
                                   <input 
                                     type="checkbox" 
@@ -9187,19 +9315,22 @@ function App() {
                     {drawerSection === 'status' && (
                       <div className="px-1 space-y-5">
                         {/* Formulário de Nova Atividade */}
-                        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">Registrar Atividade</span>
-                          <textarea
+                        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm shadow-slate-200/50">
+                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            Registrar Atividade
+                          </span>
+                          <MentionTextarea
                             value={novaAtividade}
-                            onChange={(e) => setNovaAtividade(e.target.value)}
-                            placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos..."
-                            className="w-full p-3 border border-slate-200 rounded-lg text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent resize-none transition-all"
+                            onChange={setNovaAtividade}
+                            membros={vendedores}
+                            placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega."
                             rows={3}
                           />
                           <button
                             onClick={handleCreateAtividade}
                             disabled={savingAtividade || !novaAtividade.trim()}
-                            className={`mt-2 w-full py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            className={`mt-2.5 w-full py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                               savingAtividade || !novaAtividade.trim()
                                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                                 : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
@@ -9211,32 +9342,35 @@ function App() {
 
                         {/* Lista de Atividades Registradas */}
                         <div>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-3">Histórico de Atividades</span>
-                          
+                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-3">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            Histórico de Atividades
+                          </span>
+
                           {loadingAtividades ? (
                             <div className="flex items-center justify-center py-6">
                               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                             </div>
                           ) : atividades.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-8 text-center space-y-2">
-                              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
-                                <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <div className="flex flex-col items-center justify-center py-10 text-center space-y-2 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                              <div className="w-12 h-12 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center">
+                                <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                                 </svg>
                               </div>
-                              <p className="text-xs text-slate-500">Nenhuma atividade registrada.</p>
+                              <p className="text-xs font-semibold text-slate-500">Nenhuma atividade registrada.</p>
                               <p className="text-[10px] text-slate-400">Registre ações, retornos e próximos passos.</p>
                             </div>
                           ) : (
                             <div className="space-y-3">
                               {atividades.map(ativ => (
-                                <div key={ativ.id} className="bg-white rounded-xl border border-slate-200 p-3.5 hover:border-slate-300 transition-colors shadow-sm">
+                                <div key={ativ.id} className="bg-white rounded-2xl border border-slate-200 p-3.5 hover:border-indigo-200 hover:shadow-sm transition-all shadow-xs">
                                   {editingAtividade === ativ.id ? (
                                     <div className="space-y-2">
-                                      <textarea
+                                      <MentionTextarea
                                         value={editingAtividadeTexto}
-                                        onChange={(e) => setEditingAtividadeTexto(e.target.value)}
-                                        className="w-full p-2.5 border border-slate-200 rounded-lg text-xs text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
+                                        onChange={setEditingAtividadeTexto}
+                                        membros={vendedores}
                                         rows={3}
                                       />
                                       <div className="flex items-center space-x-2">
@@ -9258,7 +9392,7 @@ function App() {
                                   ) : (
                                     <div>
                                       <div className="flex items-start justify-between">
-                                        <p className="text-xs text-slate-800 leading-relaxed flex-1 pr-2 whitespace-pre-wrap">{ativ.texto}</p>
+                                        <p className="text-xs text-slate-800 leading-relaxed flex-1 pr-2 whitespace-pre-wrap">{renderTextoComMencoes(ativ.texto)}</p>
                                         <div className="flex items-center space-x-1 flex-shrink-0">
                                           {/* Botão Editar (Lápis) */}
                                           <button
