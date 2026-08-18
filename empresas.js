@@ -1514,9 +1514,9 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
   const [showNovoContato, setShowNovoContato] = React.useState(false);
   const [contatoParaEditar, setContatoParaEditar] = React.useState(null);
 
-  const carregarDados = React.useCallback(async () => {
+  const carregarDados = React.useCallback(async (silent = false) => {
     if (!supabaseClient) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [{ data: c }, { data: n }, { data: p }, { data: ct }] = await Promise.all([
         supabaseClient.from('contas').select('id,clickup_account_id,nome,cnpj,inscricao_estadual,cidade,estado,status,account_tier,industry,billing_cycle,razao_social,rua,cep,email,telefone,sync_status,sync_error').order('nome'),
@@ -1536,10 +1536,24 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
         if (upd) setContaSelecionada(upd);
       }
     } catch (e) { console.error('[EmpresasTab]', e); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }, [supabaseClient, contaSelecionada?.id]);
 
   React.useEffect(() => { carregarDados(); }, [supabaseClient]);
+
+  // Enquanto houver alguma empresa/contato/negócio ainda 'pending' (sync
+  // assíncrono com o ClickUp em andamento), busca os dados de novo a cada
+  // 3s, em segundo plano (sem piscar o loading), até tudo sincronizar —
+  // assim o selo "sincronizando..." some sozinho quando o webhook terminar,
+  // sem precisar trocar de aba ou recarregar a página.
+  const temPendente = contas.some(c => c.sync_status === 'pending')
+    || negocios.some(n => n.sync_status === 'pending')
+    || contatos.some(c => c.sync_status === 'pending');
+  React.useEffect(() => {
+    if (!temPendente) return;
+    const timer = setInterval(() => carregarDados(true), 3000);
+    return () => clearInterval(timer);
+  }, [temPendente, carregarDados]);
 
   const handleExcluirContato = async (contato) => {
     if (!confirm(`Excluir o contato "${contato.nome}"?`)) return;
