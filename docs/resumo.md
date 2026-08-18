@@ -1,162 +1,181 @@
-# 📋 Resumo — Handover de Infraestrutura e Trabalho Recente para IA
+# 📋 Resumo Consolidado — Arquitetura, Infraestrutura e Handover do CRM Suprimática
 
-> **Como usar este documento:** cole todo o conteúdo abaixo no prompt inicial de qualquer IA (ChatGPT, Gemini, Claude, Cursor, etc.) para que ela entenda a arquitetura completa do projeto, o que foi construído recentemente (integração ClickUp Brain via MCP), e onde estão as dívidas técnicas conhecidas — para poder sugerir melhorias com contexto real, não achismo.
->
-> Este documento complementa (não substitui) `docs/Resumo_2.md`, que tem o histórico detalhado de auditoria de dados e bugs de UX corrigidos antes desta sessão. Aqui o foco é: infraestrutura de deploy self-hosted, schema real do banco, e a integração com o ClickUp Brain (novo).
+> **Como usar este documento:** Este arquivo é a fonte única de verdade sobre a arquitetura, banco de dados, integrações e histórico do CRM Suprimática. Cole este arquivo no contexto inicial de qualquer IA ou desenvolvedor para total alinhamento sobre o projeto.
 
 ---
 
-## 1. Visão Geral do Projeto
+## 1. Visão Geral da Arquitetura
 
-- **Nome:** SPA Gestão Comercial Suprimática — CRM/gestão comercial embarcado como iframe dentro de tarefas do ClickUp.
-- **Frontend:** React 18 + Babel standalone via CDN (sem bundler de JS), Tailwind CSS v4 **com build step estático** (`dist/styles.css` é gerado por `npx tailwindcss -i styles.css -o dist/styles.css --minify` — classes novas não aparecem no browser até rodar isso e incrementar o cache-buster `?v=X.X` em `index.html`).
-- **Arquivo principal do frontend:** `app.js` (raiz do repo, ~8000+ linhas, tudo em um arquivo só).
-- **Banco de dados (fonte da verdade):** Supabase (PostgreSQL), **self-hosted** em `https://supabase.llworkflow.com.br` (não é um projeto `*.supabase.co` — isso importa para deploy, ver seção 2).
-- **Backend/proxy local:** `server.py` (Python `http.server`, multi-thread) — só para desenvolvimento local, serve os arquivos estáticos e faz proxy de algumas chamadas ao ClickUp.
-- **Backend de produção:** Supabase Edge Functions (Deno), rodando no mesmo servidor self-hosted.
-- **CRM de origem histórico:** Agendor (dados de 2023–2026 migrados para o Supabase).
-- **Gestão de tarefas/negócios atual:** ClickUp — os "negócios" comerciais são tarefas em uma lista do ClickUp, e a SPA vive embarcada dentro de cada tarefa.
-
----
-
-## 2. Infraestrutura de Deploy (Supabase self-hosted) — importante e não óbvio
-
-O Supabase deste projeto **não é hospedado na nuvem da Supabase** — é uma instância self-hosted rodando via Docker Compose num VPS. Isso muda completamente como Edge Functions são publicadas, comparado com o fluxo documentado no `README.md` (que descreve o fluxo do Supabase Cloud via `supabase login`/`supabase functions deploy`, que **não se aplica aqui**).
-
-**Como funciona de verdade:**
-- Servidor: VPS Ubuntu, projeto docker-compose em `/home/ubuntu/apps/supabase/docker/` (repo oficial `supabase/supabase`, self-hosted).
-- Container das Edge Functions: `supabase-edge-functions` (imagem `supabase/edge-runtime:v1.74.0`), volume `./volumes/functions:/home/deno/functions`.
-- **Roteamento das functions:** existe uma function especial `main` (`volumes/functions/main/index.ts`) que atua como router único — TODA requisição a `/functions/v1/<nome>` passa primeiro por ela, que resolve `servicePath = /home/deno/functions/${nome}` e cria um worker isolado sob demanda (`EdgeRuntime.userWorkers.create`). **Cada nova function precisa estar diretamente em `volumes/functions/<nome>/index.ts`** — não dentro de uma subpasta extra.
-- **Timeout do worker: 60 segundos** (`workerTimeoutMs = 1 * 60 * 1000`, hardcoded em `main/index.ts`) — qualquer function que demore mais que isso é morta pelo supervisor (`WorkerRequestCancelled`). Isso é um limite real de infraestrutura que qualquer function nova precisa respeitar.
-- **Variáveis de ambiente:** o container `functions` recebe env vars fixas no `docker-compose.yml` (bloco `environment:` do serviço `functions`, por volta da linha 456) — `SUPABASE_URL` (interno: `http://kong:8000`), `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, etc. O router `main` repassa `Deno.env.toObject()` inteiro para cada worker, então **todas as functions compartilham o mesmo conjunto de env vars do container** — não existe um `supabase secrets set` por function como no Cloud. Para adicionar um secret novo (ex: `CLICKUP_API_TOKEN`), é preciso:
-  1. Adicionar a variável no `.env` do docker-compose (`/home/ubuntu/apps/supabase/docker/.env`).
-  2. Adicionar a passagem `NOME: ${NOME:-}` no bloco `environment:` do serviço `functions` no `docker-compose.yml`.
-  3. Recriar o container: `docker compose up -d functions` (um `restart` simples não aplica mudança de `environment:`; precisa ser `up -d` ou `restart` depois de já ter feito `up -d` uma vez para pegar o compose novo).
-- **Cache de módulos:** volume nomeado `deno-cache:/root/.cache/deno`, persiste entre restarts do container — imports remotos (`esm.sh`, `deno.land/std`) só são buscados na rede na primeira vez.
-
-**Bug real encontrado nesta sessão:** as 3 Edge Functions que já existiam em produção (`get-clickup-task`, `sync-clickup-value`, `clickup-status-webhook`) estavam **todas quebradas silenciosamente** — o código tinha sido copiado para `volumes/functions/functions/<nome>/index.ts` (um nível a mais de pasta do que o router espera), então toda chamada retornava `{"msg":"InvalidWorkerCreation: worker boot error... could not find an appropriate entrypoint"}`. Ninguém tinha percebido porque o app engole erros de sync silenciosamente. Foi corrigido movendo as pastas para o nível certo. Além disso, `CLICKUP_API_TOKEN` **nunca esteve configurado no servidor** — então mesmo com o path corrigido, `sync-clickup-value` (sincroniza valor da proposta pro custom field do ClickUp) e `clickup-status-webhook` (trava de segurança "só fecha negócio com 1 proposta Selecionada") **ainda vão falhar em runtime** até alguém configurar `CLICKUP_CUSTOM_FIELD_ID` e `CLICKUP_PROPOSTA_FIELD_ID` no `.env` do servidor (esses dois specificamente não foram adicionados — só `CLICKUP_API_TOKEN` e `MCP_AUTH_KEY`, que eram os necessários para o MCP). **Isso é uma dívida técnica em aberto real, não hipotética.**
+- **Nome da Aplicação:** SPA Gestão Comercial Suprimática (CRM / Gerador de Propostas).
+- **Ambientes de Uso:**
+  1. **Web Direto / Embedded no ClickUp:** Acessível publicamente em `https://crm.llworkflow.com.br` (embarcado como View / iframe dentro de tarefas do ClickUp ou standalone).
+  2. **Ambiente Local (Desenvolvimento):** Servido por `server.py` (Python `http.server` multi-thread na porta 8080) que emula proxy e variáveis locais.
+- **Frontend:**
+  - **Framework:** React 18 + Babel Standalone via CDN (sem bundler Webpack/Vite — compilação rápida em runtime).
+  - **Módulos:**
+    - `app.js`: Script central (~9500 linhas) contendo Kanban de Deals, Relatórios Financeiros/Forecast, Gerador de Propostas Comerciais, Tarefas Comerciais e Autenticação.
+    - `empresas.js`: Módulo Empresa 360º (Gestão de Contas, Ficha 360º, Contatos vinculados, Oportunidades com R.O., Segmentos de Atuação).
+    - `index.html`: Shell da SPA com cache-busters dinâmicos (`?v=X.X`).
+  - **Estilização:** Tailwind CSS v4 com compilação estática (`dist/styles.css` gerado via `npx @tailwindcss/cli -i ./styles.css -o ./dist/styles.css`).
+- **Banco de Dados (Fonte da Verdade):** Supabase (PostgreSQL), **self-hosted** na VPS em `https://supabase.llworkflow.com.br`.
+- **Backend / Microsserviços:** Supabase Edge Functions (Deno) rodando em container Docker na mesma VPS.
+- **CRM de Origem (Histórico):** Agendor (dados de 2023–2026 de negócios ganhos e perdidos migrados para o Supabase).
+- **Gestão de Tarefas e Oportunidades:** ClickUp (Workspace Suprimática — Lista de Negócios, Contas, Contatos e Projetos).
 
 ---
 
-## 3. Schema Real do Supabase (checado ao vivo via `/rest/v1/` OpenAPI — diverge dos arquivos de migração)
+## 2. Infraestrutura de Servidor e Deploy (VPS Self-Hosted)
 
-Os arquivos em `supabase/migrations/*.sql` estão desatualizados em relação ao banco real — há colunas/tabelas criadas fora de banda (via SQL Editor manual) que nunca viraram migration. **Não confie nos arquivos de migration para saber o schema atual; confie na leitura ao vivo.**
+O Supabase e a SPA rodam em uma **VPS Ubuntu dedicada** sob Docker Compose.
 
-- **`propostas`**: `id`, `clickup_negocio_id` (text — ID da tarefa "Negócio" no ClickUp), `versao` (texto tipo `vA`, `vB`...), `cenario`, `situacao` (valores reais em uso: `Ativa`, `Selecionada`, `Inativa`, `Ganho`, `Perdido` — **não** `Não selecionada`/`Substituída` como os comentários antigos no SQL sugerem), `total_proposta` (numeric, recalculado automaticamente por trigger a partir de `itens_proposta`), `criado_por`, `created_at`, `motivo_perda` (text), `data_fechamento` (date).
-- **`itens_proposta`**: `id`, `proposta_id` (FK → propostas), `produto_id` (FK → produtos), **`distribuidor_id`** (FK → distribuidores — os arquivos de migration antigos mostram uma coluna `distribuidor TEXT`, mas isso foi trocado para FK fora de banda), `quantidade`, `preco_unitario`, `total_item` (generated column).
-- **`produtos`**: `id`, `nome`, `fabricante`, `custo_referencia`, `created_at`.
-- **`distribuidores`**: `id`, `nome`, `created_at`.
-- **`vendedores`**: `id`, `nome`, `created_at` — **tabela sem nenhuma migration correspondente**, criada manualmente, usada em `app.js` e em policies de RLS.
-- **`tarefas_comerciais`**: `id`, `proposta_id`, `clickup_subtask_id`, `clickup_negocio_id`, `titulo`, `tipo`, `data_vencimento`, `responsavel_clickup_id`, `status`.
-- **Não existe tabela `clientes`/`contas`.** Essa informação mora só no ClickUp (lista "Contas"). O usuário confirmou intenção futura de trazer isso para o Supabase, mas por enquanto qualquer funcionalidade que precise de "cliente" precisa resolver via API do ClickUp em tempo real.
-- **RLS:** ativa em `propostas`, `itens_proposta`, `produtos`, `distribuidores`, `vendedores`, com policy de `SELECT` para o role `anon` em todas. **Não há policy de `UPDATE`/`DELETE` para `anon`** nessas tabelas (exceto `propostas`, que não tem RLS) — um `UPDATE`/`DELETE` com a chave anônima retorna HTTP 204 "sucesso" sem alterar nada. Scripts de escrita em massa precisam usar `SUPABASE_SERVICE_ROLE_KEY`.
+### Estrutura de Diretórios na VPS:
+- `/home/ubuntu/apps/suprimatica-crm/`: Repositório do Frontend SPA (servido pelo Nginx na porta `8085`).
+- `/home/ubuntu/apps/supabase/docker/`: Instância oficial self-hosted do Supabase.
+- `/home/ubuntu/apps/supabase/docker/volumes/functions/`: Volume montado no container `supabase-edge-functions` (`/home/deno/functions`).
+- `/home/ubuntu/apps/nginx-proxy-manager/`: Reverse Proxy que gerencia certificados SSL (Let's Encrypt) e roteia `https://crm.llworkflow.com.br` e `https://supabase.llworkflow.com.br`.
 
----
+### Containers Principais:
+1. `deploy-frontend-spa-1` (`nginx:alpine` na porta `8085`):
+   - Serve o frontend compilado.
+   - Fornece o endpoint nativo `/api/config` com a URL e `anon_key` do Supabase.
+   - Atua como proxy reverso para `/clickup-api/` repassando o cabeçalho `Authorization` do usuário logado.
+2. `supabase-edge-functions` (`supabase/edge-runtime:v1.74.0`):
+   - Router central `main` (`volumes/functions/main/index.ts`) que despacha chamadas `/functions/v1/<nome>`.
+   - Executa as Edge Functions com timeout de 60s.
+3. `supabase-db` (`supabase/postgres`):
+   - Banco de dados PostgreSQL 15 com extensões (`pg_trgm`, `pg_net`, `pg_graphql`).
 
-## 4. Integração com ClickUp — IDs e estrutura relevantes
-
-- **Lista "Negócios"** (os deals/oportunidades): `NEGOCIOS_LIST_ID = 901326185457`.
-- **Lista "Contas"** (clientes): `CONTAS_LIST_ID = 901326185461`.
-- **Custom field "Estágio da Venda"** (`CF_ESTAGIO_VENDA = c8d0abe2-c59f-4a9e-93ff-bd060659aa63`) — dropdown que define a etapa do funil de cada negócio. Opções (com IDs e orderindex):
-  ```
-  Registro (0) · Qualificação (1) · Proposta (2) · Desenvolvimento (3) ·
-  Negociação (4) · Termo de aceite (5) · Ganho (6) · Perdido (7) · Congelado (8)
-  ```
-  **Cuidado:** o valor retornado pela API para esse campo às vezes vem como o UUID da opção, às vezes como o orderindex numérico, dependendo do endpoint — qualquer código que leia esse campo precisa tratar os dois formatos (ver `getTaskOptionId` em `app.js` e `resolveEstagioNome` em `supabase/functions/mcp-brain/clickup.ts`).
-- **Custom field "Valor do negócio"** (`CF_DEAL_VALUE = ee65221a-029d-4d0a-a981-b71b5a29b4b4`) — usado como fallback de valor quando um negócio não tem nenhuma proposta no Supabase ainda.
-- **`linked_tasks`** (vínculos entre tarefas, ex: Conta ↔ Negócio): a API do ClickUp retorna cada vínculo com dois campos, `task_id` e `link_id`, mas **qual dos dois representa "a própria tarefa" vs "a outra ponta do link" não é fixo** — depende de qual lado criou o vínculo primeiro (confirmado empiricamente: numa Conta, `task_id` era a própria Conta; num Negócio, `task_id` era a Conta do outro lado e `link_id` era o próprio Negócio). Qualquer código que resolva vínculos precisa comparar os dois campos contra o próprio ID e pegar o que não bate — não confiar em nenhum dos dois campos ser sempre "self" ou sempre "other".
-- **Rate limit:** ~100 requisições/minuto por token — relevante para qualquer código que itere sobre muitos negócios chamando a API individualmente (ver seção 6, `ranking_clientes`).
+### Variáveis de Ambiente no Servidor (`/home/ubuntu/apps/supabase/docker/.env`):
+- `CLICKUP_API_TOKEN`: Token de contingência/serviço global do ClickUp.
+- `TOKEN_ENCRYPTION_KEY`: Chave secreta de 256 bits para criptografia AES-GCM dos tokens pessoais dos vendedores.
+- `MCP_AUTH_KEY`: Token de autorização para o ClickUp Brain consultar o servidor MCP.
 
 ---
 
-## 5. Frontend (`app.js`) — pontos-chave para quem for mexer
+## 3. Schema Completo do Banco de Dados (Supabase PostgreSQL)
 
-- **`getOpportunityValue(task)`**: função central que decide o valor "oficial" de um negócio. Prioridade: `task.supabase_deal_value` (pré-calculado) → busca em `supabaseProposalsList` pela proposta de maior prioridade (`Selecionada` > `Ganho` > `Ativa` > `Desconsiderada` > primeira encontrada) → `task.valor_estimado` → custom field `Valor do negócio` do ClickUp como último fallback. **Qualquer cálculo de forecast/valor precisa replicar exatamente essa prioridade para bater com o que a tela mostra** (foi a causa raiz de um bug corrigido nesta sessão, ver seção 7).
-- **`getTaskOptionId(task, options)`**: resolve a etapa/estágio de uma tarefa a partir do custom field dropdown, tratando a ambiguidade UUID-vs-orderindex mencionada na seção 4.
-- **`ForecastFunnelPanel`**: painel "Total em Negociação" — soma `getOpportunityValue()` de todos os negócios cujo estágio não é Ganho/Perdido/Congelado. Recebe agora também `kanbanSearchTerm` (adicionado nesta sessão, ver seção 7) para refletir a busca do Kanban no total.
-- **`DealsListView`**: lista rica de negócios (Ganho/Perdido/Congelado/Todos) com filtros de período, etapa, responsável e busca — acessível pelos botões "🏆 Ganho / 😞 Perdido / ❄️ Congelado / 📋 Lista Completa" no topo do Kanban.
-- **Cache-buster:** `index.html` carrega `app.js?v=X.X` e `dist/styles.css?v=X.X` com query string fixa — **qualquer mudança em `app.js` só aparece pro usuário se a versão for incrementada em `index.html`** (não basta salvar o arquivo). Versão atual após esta sessão: `app.js?v=53.6`.
+### A. Tabelas de Vendas & CRM:
+- **`contas` (Empresas/Clientes):**
+  - `id` (UUID, PK), `clickup_account_id` (TEXT, unique), `nome`, `razao_social`, `cnpj`, `email`, `telefone`, `cep`, `rua`, `cidade`, `estado`, `industry` (segmento), `account_tier`, `billing_cycle`, `status`, `responsavel_nome`, `responsavel_clickup_id`, `criado_por_user_id`, `sync_status`, `sync_error`, `created_at`, `updated_at`.
+- **`contatos` (Pessoas):**
+  - `id` (UUID, PK), `conta_id` (FK → contas), `clickup_contact_id` (TEXT, unique), `nome`, `email`, `cargo`, `celular`, `whatsapp`, `champion` (BOOLEAN), `criado_por_user_id`, `sync_status`, `sync_error`, `created_at`, `updated_at`.
+- **`negocios` (Oportunidades/Deals):**
+  - `id` (UUID, PK), `clickup_negocio_id` (TEXT, unique), `nome`, `conta_id` (FK → contas), `estagio` (Registro, Qualificação, Proposta, Desenvolvimento, Negociação, Termo de aceite, Ganho, Perdido, Congelado), `numero_proposta_oficial` (Ex: `13205/2026`), `valor_clickup_fallback` (NUMERIC), `tipo_oportunidade`, `probabilidade`, `data_previsao`, `descricao`, `ro_infra`, `ro_sw1`, `ro_sw2`, `ro_sw3`, `ro_sw4`, `contato_principal_id`, `criado_por_user_id`, `sync_status`, `sync_error`, `created_at`, `updated_at`.
+- **`propostas` (Versões de Orçamentos - vA, vB, etc.):**
+  - `id` (UUID, PK), `clickup_negocio_id` (TEXT), `versao` (vA, vB, vC...), `cenario` (HCI, Tradicional, etc.), `situacao` (Ativa, Selecionada, Substituída, Desconsiderada, Ganho, Perdido), `total_proposta` (NUMERIC, gerido por trigger), `criado_por` (Nome do responsável), `criado_por_user_id` (ClickUp ID numérico do autor), `clickup_proposta_tecnica_id` (ID da tarefa técnica no ClickUp), `data_inicio`, `data_fechamento`, `motivo_perda`, `sync_status`, `sync_error`, `created_at`.
+- **`itens_proposta` (Itens de Hardware/Software/Serviços):**
+  - `id` (UUID, PK), `proposta_id` (FK → propostas), `produto_id` (FK → produtos), `distribuidor_id` (FK → distribuidores), `quantidade` (INT), `preco_unitario` (NUMERIC), `total_item` (GENERATED ALWAYS AS quantidade * preco_unitario).
+- **`produtos` & `distribuidores`:**
+  - Cadastros base de produtos (SKU, Nome, Fabricante, Custo) e Distribuidores.
+- **`tarefas_comerciais` (Follow-ups Comerciais):**
+  - `id` (UUID, PK), `proposta_id`, `clickup_subtask_id`, `clickup_negocio_id`, `titulo`, `tipo` (Ligação, Reunião, E-mail, Follow-up), `data_vencimento` (BIGINT timestamp), `responsavel_clickup_id`, `status` (pendente/concluida).
+
+### B. Tabelas de Infraestrutura e Segurança:
+- **`usuarios_clickup` (Cofre de Tokens Criptografados):**
+  - `id` (UUID, PK), `user_email` (UNIQUE), `clickup_user_id` (UNIQUE), `username`, `encrypted_token` (AES-GCM base64), `iv` (base64), `created_at`, `updated_at`.
+  - **RLS:** Habilitado sem policies para `anon`/`authenticated` — somente lido/escrito pela chave `service_role` nas Edge Functions.
+- **`config_numeracao_propostas` (Sequenciador Atômico de Propostas):**
+  - `id` (INT PK = 1), `ultimo_numero` (INT), `ativo` (BOOLEAN), `updated_at`.
+  - Funções RPC atômicas: `gerar_numero_proposta()` e `ajustar_numeracao_proposta(novo_numero, novo_ativo)`.
 
 ---
 
-## 6. NOVO nesta sessão: Integração ClickUp Brain via MCP Server
+## 4. Atribuição por Usuário Real (Identidade no ClickUp)
 
-O diretor da empresa precisa perguntar em linguagem natural ao ClickUp Brain (IA nativa do ClickUp) sobre propostas, forecast, clientes, fabricantes — sem acesso direto ao Supabase. Construímos um **servidor MCP (Model Context Protocol)** que expõe o banco (somente leitura) como fonte de dados para o Brain.
+### O Problema Resolvido:
+Anteriormente, toda ação síncrona ou assíncrona feita no CRM era criada no ClickUp em nome de uma conta de serviço genérica global (`CLICKUP_API_TOKEN`).
 
-### Arquitetura
+### A Solução Implementada:
+1. **Frontend:**
+   - No login ou modal de perfil, o vendedor insere seu **Personal API Token (`pk_...`)**.
+   - O token é salvo localmente no `localStorage` (`crm_user_clickup_token`) e no perfil (`crm_user_profile`).
+   - Toda requisição HTTP da SPA para o proxy `/clickup-api/` inclui o header `Authorization: pk_...`.
+   - O frontend dispara automaticamente `syncUserClickUpCredentialsToEdge` enviando o token para a Edge Function `save-clickup-credentials`.
+2. **Criptografia na Edge Function:**
+   - A Edge Function `save-clickup-credentials` recebe o token em texto puro, criptografa com **Web Crypto AES-GCM (256-bit)** usando `TOKEN_ENCRYPTION_KEY` e grava no cofre `usuarios_clickup`.
+3. **Resolução Assíncrona em Background:**
+   - As Edge Functions de sincronização (`sync-negocio-clickup`, `sync-contato-clickup`, `sync-proposta-tecnica-clickup`) importam `supabase/functions/_shared/resolve-token.ts`.
+   - Elas leem `record.criado_por_user_id`, buscam o token pessoal descriptografado e realizam a chamada à API do ClickUp **com a identidade real do vendedor**. Se não houver token cadastrado, aplicam fallback transparente para o token global.
+
+---
+
+## 5. Módulo Empresa 360º (`empresas.js`)
+
+- **Visão 360º de Contas:** Permite visualizar empresas, métricas consolidadas (Total em Pipeline, Negócios Fechados, Taxa de Conversão, Contatos Chave/Champions).
+- **Criação Supabase-First & Assíncrona:**
+  - O usuário cria Empresa, Contato ou Oportunidade no CRM.
+  - O registro é inserido imediatamente no Supabase com `sync_status = 'pending'` e `criado_por_user_id`.
+  - A interface fecha instantaneamente sem aguardar a latência do ClickUp.
+  - Um Database Webhook (Trigger PostgreSQL via `supabase_functions.http_request`) dispara a Edge Function correspondente para criar a tarefa/contato/oportunidade no ClickUp em background e vinculá-la à Conta.
+- **Campos Específicos de Negócios:**
+  - Suporte a Registros de Oportunidade (R.O.) dos fabricantes Dell, Veeam, Fortinet, VMware e RedHat.
+  - Campos de Probabilidade, Tipo de Oportunidade, Data de Fechamento e Contato Principal.
+
+---
+
+## 6. Automação "Enviar Proposta vX" & Vínculos Técnicos
+
+- **Trigger de Proposta Técnica (`sync_proposta_tecnica_clickup_insert`):**
+  - Ao criar uma versão inicial (`vA`) ou nova versão (`vB`, `vC`...) no Gerador de Propostas, a Edge Function `sync-proposta-tecnica-clickup` cria automaticamente uma subtarefa técnica `[Nome do Negócio] — Enviar Proposta vX` dentro da oportunidade no ClickUp, com os valores e com o vendedor como responsável.
+  - O ID da subtarefa criada é salvo em `propostas.clickup_proposta_tecnica_id`.
+- **Exclusão Limpa (`sync_proposta_tecnica_clickup_delete`):**
+  - Se uma versão for excluída pelo CRM, a Edge Function remove automaticamente a subtarefa correspondente no ClickUp, evitando tarefas técnicas órfãs.
+
+---
+
+## 7. ClickUp Brain via MCP Server (`supabase/functions/mcp-brain/`)
+
+Servidor **Model Context Protocol (MCP)** sobre HTTP/JSON-RPC 2.0 que permite ao ClickUp Brain (IA interna do ClickUp) consultar dados do CRM em linguagem natural com permissão de leitura.
+
+### As 8 Ferramentas Expostas:
+1. `buscar_proposta_por_negocio`: Retorna itens, valores e histórico de versões de uma oportunidade.
+2. `listar_propostas_por_situacao`: Filtra propostas por estado (Ativa, Selecionada, Ganho, etc.).
+3. `resumo_forecast`: Retorna o resumo consolidado do funil comercial em andamento.
+4. `negocios_fechados`: Retorna totais e lista de negócios Ganhos, Perdidos ou Congelados com filtros de período.
+5. `analise_por_fabricante`: Relatório de propostas e valores por fabricante.
+6. `analise_por_distribuidor`: Relatório de propostas e valores por distribuidor parceiro.
+7. `historico_cliente`: Histórico comercial completo de um cliente (todas as oportunidades e status).
+8. `detalhes_versao_proposta`: Cruza os dados do Supabase com os comentários e status da tarefa técnica no ClickUp.
+
+---
+
+## 8. Frontend `app.js` — Regras de Negócio Importantes
+
+1. **Prioridade de Valor do Negócio (`getOpportunityValue`):**
+   `task.supabase_deal_value` → Proposta Selecionada → Proposta Ganho → Proposta Ativa → `valor_estimado` → Custom Field `Valor do negócio` do ClickUp.
+2. **Validade Comercial Dinâmica:**
+   - Baseada estritamente na data de fechamento planejada (`data_fechamento`).
+   - Ocultada automaticamente em propostas e negócios com status **Ganho** ou **Perdido**.
+3. **Resiliência Web / VPS:**
+   - Todas as chamadas de tarefas comerciais (`fetchCommercialTasks`), atividades (`fetchAtividades`), conclusão (`toggleTaskStatus`) e exclusão (`handleDeleteTask`) consultam o Supabase diretamente com fallback seguro ao proxy do ClickUp.
+4. **Cache-Busters:**
+   - Sempre incrementar as versões em `index.html` ao alterar os arquivos:
+     - `app.js?v=X.X`
+     - `empresas.js?v=X.X`
+     - `dist/styles.css?v=X.X`
+
+---
+
+## 9. Procedimento Padrão de Deploy
+
+### 1. Atualizar Frontend na VPS:
+```bash
+# Na sua máquina local:
+npx @tailwindcss/cli -i ./styles.css -o ./dist/styles.css
+git add .
+git commit -m "feat: sua alteração"
+git push origin main
+
+# Na VPS:
+ssh suprimatica-vps "cd /home/ubuntu/apps/suprimatica-crm && git pull origin main && cd deploy && docker compose down && docker compose up -d"
 ```
-Diretor no ClickUp → ClickUp Brain → HTTPS + header Authorization: Bearer <chave>
-  → Edge Function "mcp-brain" (self-hosted, ver seção 2)
-  → Supabase REST (anon key) + API do ClickUp (token)
+
+### 2. Aplicar Migrations no Banco:
+```bash
+ssh suprimatica-vps "docker exec -i supabase-db psql -U postgres -d postgres" < "supabase/migrations/nome_da_migration.sql"
 ```
 
-### Arquivos (`supabase/functions/mcp-brain/`)
-- **`index.ts`** — servidor MCP via JSON-RPC 2.0 sobre HTTP (métodos `initialize`, `tools/list`, `tools/call`), implementado **na mão** (sem o SDK oficial `@modelcontextprotocol/sdk`, para não depender de um import `npm:` não testado no runtime self-hosted — a superfície de 8 tools é pequena o bastante pra isso valer a pena). Usa **`Deno.serve()` nativo**, não o `std@0.168.0/http/server.ts` legado usado nas outras functions (motivo: o import antigo causava requisições do cliente MCP real do ClickUp travarem indefinidamente sem nenhum log rodar — ver bugs na seção 7). Autenticação aceita tanto header `X-MCP-Key: <chave>` quanto `Authorization: Bearer <chave>` (o campo de auth da UI do ClickUp só suporta o segundo formato).
-- **`tools.ts`** — implementação das 8 tools (lista abaixo).
-- **`clickup.ts`** — helpers de ClickUp: resolução de nome de cliente (normaliza acentos/sufixos tipo "ltda", casa por nome com a lista Contas), resolução de vínculos (`linked_tasks`), resolução de estágio do negócio, carregamento paginado da lista Negócios.
-- **`supabase.ts`** — cliente Supabase somente leitura (anon key — as tabelas já liberam `SELECT` pra esse role, não precisa de service_role).
-
-### As 8 tools
-| Tool | O que faz |
-|---|---|
-| `buscar_proposta_por_negocio` | Proposta(s) de um negócio específico (por `clickup_task_id`), com itens/produtos/distribuidores |
-| `listar_propostas_por_situacao` | Lista propostas por `situacao` bruta do Supabase |
-| `resumo_forecast` | Espelha o card "Total em Negociação" do SPA — soma o valor de cada negócio ainda em andamento no funil |
-| `negocios_fechados` | Espelha os filtros 🏆Ganho/😞Perdido/❄️Congelado do SPA, com totais e lista, opcionalmente por cliente e período |
-| `analise_por_fabricante` / `analise_por_distribuidor` | Propostas (qualquer situação) que contêm itens de um fabricante/distribuidor |
-| `historico_cliente` | Todos os negócios de um cliente (resolvido via lista Contas do ClickUp), cada um já rotulado com estágio real (Ganho/Perdido/Congelado/Em andamento) |
-| `ranking_clientes` | Top N clientes por valor de propostas Selecionadas |
-
-### Deploy
-- Código sobe via `scp` direto para `/home/ubuntu/apps/supabase/docker/volumes/functions/mcp-brain/` no servidor (não existe pipeline de CI/CD — é manual).
-- Depois de qualquer mudança: `docker compose restart functions` (ou `up -d functions` se mudou env vars/`docker-compose.yml`) — o restart limpa o cache de módulo do worker e força reload do código.
-- Secrets: `CLICKUP_API_TOKEN` e `MCP_AUTH_KEY` no `.env` do docker-compose + passthrough no `docker-compose.yml` (ver seção 2). `SUPABASE_URL`/`SUPABASE_ANON_KEY` já existiam no container.
-- Config no ClickUp: Workspace Settings → Apps → MCP Servers → Add Custom MCP Server, método de autenticação "cabeçalho de autorização", valor `Bearer <MCP_AUTH_KEY>`.
-
----
-
-## 7. Bugs encontrados e corrigidos nesta sessão (histórico, útil pra não repetir)
-
-1. **Deploy path errado** — as 3 functions antigas quebradas por causa de um nível de pasta a mais (seção 2).
-2. **`CLICKUP_API_TOKEN`/`MCP_AUTH_KEY` nunca configurados no servidor** — adicionados ao `.env`/`docker-compose.yml` do container `functions`.
-3. **`std/http/server.ts` legado travava requisições reais do ClickUp** (sem nenhum log do nosso código rodando, mesmo com logging extra adicionado) — resolvido migrando pra `Deno.serve()` nativo.
-4. **Campo de auth da UI do ClickUp mal interpretado** — não é um header customizado livre, é o header `Authorization` padrão (esquema + valor); o servidor precisou aceitar `Authorization: Bearer <chave>` além de `X-MCP-Key`.
-5. **Ambiguidade `task_id`/`link_id` em `linked_tasks`** (seção 4) — causava `historico_cliente` retornar negócios errados (na real, o próprio ID da conta repetido) até comparar os dois campos contra o próprio ID.
-6. **`resumo_forecast` somava só propostas com `situacao IN (Ativa, Selecionada)` do Supabase** — errado, porque `Selecionada` também é usada em negócios já Ganhos (não é exclusivo de negócios em andamento). Reescrito pra replicar `getOpportunityValue()` do `app.js`: filtrar por **estágio do negócio no ClickUp** (não pela situação da proposta), escolher uma proposta por negócio por prioridade (Selecionada > Ganho > Ativa > primeira), com fallback pro campo do ClickUp. Validado contra o SPA: R$25,6M / 67 negócios vs R$25,46M / 68 do SPA (diferença de 1 negócio = atualização feita pelo usuário no meio do teste).
-7. **`ranking_clientes` estourava o timeout de 60s** ao resolver cliente de 443 propostas sequencialmente contra a API do ClickUp (rate limit ~100/min) — corrigido limitando às 60 propostas de maior valor + lotes de 5 chamadas concorrentes + cache em memória de 15min.
-8. **`historico_cliente` incluía Contatos (pessoas) junto com Negócios** — uma Conta no ClickUp linka tanto a Negócios quanto a Contatos, e ambos vêm misturados em `linked_tasks`; corrigido filtrando só tarefas que têm o custom field "Estágio da Venda" preenchido (só Negócios têm).
-
-## 8. Trabalho recente adicional (fora do MCP)
-
-- **Migração de negócios Perdidos do Agendor** (`scripts/migracao_agendor_perdidos.py`): espelha a migração anterior dos 438 Ganhos, migrou 205 negócios perdidos do Agendor pro ClickUp + Supabase (`situacao = 'Perdido'`), com classificação automática de `motivo_perda` por regras de palavra-chave na descrição do Agendor. Relatórios de auditoria em `docs/relatorio_auditoria_perdidos.md` e `reports/*.csv`.
-- **Forecast reativo à busca do Kanban** (`app.js`): o card "Total em Negociação" não reagia ao filtro de busca por nome de cliente do Kanban (ex: digitar "unimed" filtrava os cards mas não o total). Corrigido extraindo o predicado de busca (`taskMatchesSearchTerm`) pra uma função compartilhada, usada tanto no filtro dos cards quanto em `ForecastFunnelPanel` (nova prop `kanbanSearchTerm`). Cache-buster incrementado pra `app.js?v=53.6`.
-
----
-
-## 9. Dívidas técnicas / gaps em aberto (pontos de partida pra sugestões)
-
-- `sync-clickup-value` e `clickup-status-webhook` seguem não-funcionais em produção por falta de `CLICKUP_CUSTOM_FIELD_ID`/`CLICKUP_PROPOSTA_FIELD_ID` no servidor (a trava de segurança "só fecha negócio com 1 proposta Selecionada" **não está ativa hoje**). **Achado adicional (18/08):** nem o Database Webhook do `sync-clickup-value` (INSERT/UPDATE em `propostas`) foi de fato criado — `supabase_functions.hooks` estava vazia, sem nenhum trigger em `propostas`. Provavelmente nunca foi configurado no painel apesar do README documentar o passo. Solução pronta: replicar o padrão SQL usado em `20260818g_webhooks_empresa_360.sql` (trigger `AFTER UPDATE` chamando `supabase_functions.http_request()`), depois de resolver os env vars.
-- ~~Não existe tabela `clientes`/`contas` no Supabase~~ **RESOLVIDO (17/08):** tabelas `contas`/`contatos`/`negocios` criadas e populadas (443 contas, 327 contatos, 725 negócios, migrations `20260817_contas_contatos.sql`/`20260817b_negocios.sql`, scripts `migracao_contas_contatos_clickup.py`/`migracao_negocios_clickup.py`). `negocios.estagio` já traz o estágio do funil (antes só existia no ClickUp).
-- ~~Kanban da SPA dependia do ClickUp pra tudo~~ **RESOLVIDO (17/08):** `fetchKanbanData` (`app.js`) reescrito pra ler `negocios`/`propostas`/`itens_proposta` do Supabase — zero chamadas ao ClickUp pra popular o Kanban. `handleOpportunityStateChange` (arrastar card) inverteu a direção: grava primeiro em `negocios.estagio` (Supabase, fonte de verdade) e só depois propaga pro ClickUp — **testado ao vivo em produção, mover um card pra "Termo de aceite" na SPA moveu corretamente no ClickUp também.** `getTaskOptionId`/`getOpportunityValue` não usam mais `custom_fields` do ClickUp, leem os campos limpos (`estagio`, `valor_clickup_fallback`) direto. `kanbanColumns` (nome/cor de cada estágio) hardcoded em `ESTAGIO_OPTIONS` no topo do `app.js` — se as opções mudarem no ClickUp, atualizar lá e em `supabase/functions/mcp-brain/clickup.ts`.
-- ~~`ranking_clientes` não escala~~ **RESOLVIDO (17/08):** com `propostas.conta_id` populado, virou uma query SQL direta — cobre 100% dos dados, sem amostragem, ~0,6s.
-- Não há testes automatizados em nenhuma parte do projeto (frontend, scripts Python, ou Edge Functions) — toda verificação até aqui foi manual via `curl`/browser.
-- Não há CI/CD — deploy de Edge Functions é `scp` manual + restart de container; deploy do frontend não foi investigado nesta sessão (ver `README.md` para hospedagem sugerida em CDN estática).
-- `vendedores` (e outras colunas/tabelas criadas fora de banda) não têm migration correspondente — schema real e arquivos `supabase/migrations/*.sql` divergem, risco de reconstrução incorreta do zero.
-- **Confirmado ao vivo (17/08):** existe uma policy de RLS de `INSERT` para `itens_proposta` (role `anon`) que funciona corretamente em produção — testado ponta a ponta (criar proposta + item via anon key, trigger recalculou `total_proposta`, dados de teste limpos depois). Essa policy **não está em nenhuma migration rastreada** (só `SELECT` aparece em `20260712_enable_rls.sql`) — foi criada direto no painel do Supabase, mesmo padrão de drift do `vendedores`/`distribuidor_id`. Vale capturar numa migration nova pra não perder se o banco precisar ser reconstruído do zero.
-- **Bug real encontrado e corrigido (17/08) — RLS faltando para o role `authenticated`:** `propostas`/`itens_proposta` têm policies extras não rastreadas (`"Allow anon all on X"` cobrindo `anon,authenticated,service_role`, e `"Acesso total para usuarios logados"` cobrindo só `authenticated`) — nenhuma delas está em migration. Ao trazer `contas`/`contatos`/`negocios` pro Supabase, só copiei o padrão `TO anon` que via nos arquivos rastreados, esquecendo desse acesso extra pro `authenticated`. Resultado: o Kanban da SPA aparecia **vazio pra qualquer usuário logado** (sessão Supabase Auth ativa) — RLS sem policy correspondente pro role da requisição retorna array vazio, HTTP 200, **sem erro nenhum**, o que tornou o diagnóstico mais difícil (só apareceu comparando modo anônimo do navegador — sem sessão salva, roda como `anon` — vs. modo normal logado — roda como `authenticated`). Corrigido em `20260817c_negocios_contas_authenticated.sql`. **Lição:** ao criar uma tabela nova, sempre checar `pg_policies` ao vivo pras tabelas irmãs mais próximas antes de assumir que os arquivos de migration mostram o RLS completo — esse projeto tem várias policies aplicadas só pelo painel, nunca versionadas.
-- ~~Numeração de propostas via Apps Script~~ **SUBSTITUÍDO (17/08, branch "Empresa 360º"):** o entendimento documentado abaixo (Apps Script + planilha Google) ficou obsoleto — a numeração deixou de depender de qualquer serviço externo. Criado um gerador 100% interno no Supabase: tabela `config_numeracao_propostas` (seed `ultimo_numero=13202`, o último número real usado na planilha) + RPC `gerar_numero_proposta()` (atômica, `UPDATE ... RETURNING`, síncrona, chamada direto pela SPA ao criar um negócio) + RPC `ajustar_numeracao_proposta(novo_numero, novo_ativo)` (ajuste manual/toggle liga-desliga, restrita a `authenticated`) — UI em Configurações → "Numeração de Propostas". Migrations: `20260818_negocios_contatos_sync_numeracao.sql` + fixes de RLS `20260818b`/`20260818c`. O Apps Script (`docs/apps_script_numeracao_proposta_ajustado.gs`) e a planilha Google seguem existindo mas não são mais chamados por nada neste fluxo — histórico da investigação original mantido abaixo pra contexto:
-  - *(histórico, não reflete mais o comportamento atual)* Entendimento inicial estava errado: esse Apps Script **não cria negócio nenhum** — ele recebe o ID de um negócio (deal) já existente (`.../exec?id=<DEAL_TASK_ID>`), resolve o cliente vinculado, atribui o próximo número sequencial de proposta (planilha Google Sheets + custom field "Nº da Proposta" no próprio deal no ClickUp). Código original fornecido pelo usuário e corrigido: `doGet` só valida/consulta, `doPost` ganhou checagem de idempotência, resposta sempre em JSON.
-- ~~Criação de negócio pela SPA — desenhado, implementação adiada~~ **IMPLEMENTADO (17/08, branch "Empresa 360º", 8 tasks via subagent-driven-development).** A criação de negócio pela SPA foi implementada com uma arquitetura diferente da desenhada originalmente nesta nota: em vez de a SPA chamar a API do ClickUp diretamente (POST + custom fields + link, síncrono, aguardado pelo navegador), o fluxo final é **Supabase-first + assíncrono** — `NovaOportunidadeModal` (`empresas.js`, acessível pela Ficha 360º de uma conta e por um botão "+ Nova Oportunidade" no Kanban) chama `gerar_numero_proposta()` e faz `INSERT` em `negocios` com `sync_status='pending'`, retorna na hora pro usuário (sem esperar ClickUp). Um Database Webhook (INSERT em `negocios`) dispara a Edge Function `sync-negocio-clickup`, que cria a tarefa no ClickUp, vincula à Conta e espelha o número de proposta, em segundo plano. Mesmo padrão pra Contatos (`NovoContatoModal` + `sync-contato-clickup`). Telas de Empresas/Ficha 360º (`empresas.js`, Tasks 4-7) implementadas como planejado. **Pendências:** os dois Database Webhooks (`sync-negocio-clickup`/`sync-contato-clickup`) precisam ser configurados manualmente no painel do Supabase (Database → Webhooks) — instruções na seção "Configuração dos Webhooks" do `README.md`; nenhuma verificação visual em navegador foi feita nesta implementação (extensão Chrome indisponível durante todo o desenvolvimento) — um passo de clique-e-confira real fica pendente antes do uso por usuários reais.
-
-- **Reconciliação (18/08) — trabalho paralelo feito fora da worktree/fora do git.** Entre o fim das 8 tasks e esta entrada, o usuário (com outra ferramenta) evoluiu bastante o módulo Empresa 360º **direto nos arquivos da pasta principal**, sem passar pelo git: CRUD completo de editar/excluir pra Contas/Contatos/Negócios, gestão de "Segmentos de Atuação", formulário de Oportunidade bem mais rico (Tipo, Probabilidade, Valor, Previsão de Fechamento, Descrição, Registros de Oportunidade — R.O. — dos fabricantes Dell/Veeam/Fortinet/VMware/RedHat), edição/exclusão de negócio direto do drawer do Kanban, redesign visual completo. Só que, nessa evolução, os 3 fluxos de criação (empresa/contato/negócio) **voltaram a ser síncronos** (chamavam o ClickUp direto do navegador, esperavam a resposta, só depois gravavam no Supabase — inclusive com fallback de ID falso `crm_*`/`crm_neg_*` quando o ClickUp falhava, e `sync_status` sempre fixo em `'synced'` mesmo quando a sincronização não aconteceu de verdade) — contradizendo a decisão Supabase-primeiro já tomada nesta sessão. Investigado, confirmado com o usuário ("mantive a sincronização... tudo é gravado no Supabase primeiro e só depois leva pro ClickUp"), e corrigido:
-  - Trazido pro git como baseline (`8c3c621`), depois corrigido em cima: `fetchTasks` inexistente (ReferenceError real ao editar/excluir negócio pelo drawer do Kanban) trocado por `fetchKanbanData()`; hash `#empresas` e filtro de negócios pendentes no Kanban (que tinham regredido por partir de uma base anterior à revisão final de ontem) restaurados; fallback `valor_clickup_fallback` de volta no `resolveNegocioValor`.
-  - **Achado:** os campos novos do formulário de Oportunidade (Tipo, Probabilidade, Previsão, Descrição, R.O.) nunca eram gravados no Supabase, só mandados pro ClickUp direto — impedia o padrão async de verdade, já que a Edge Function só enxerga o que está na linha do Supabase. Migration `20260818e_negocios_campos_oportunidade.sql` adicionou as colunas; `sync-negocio-clickup` atualizada pra montar os custom fields do ClickUp a partir delas.
-  - `contas.clickup_account_id` era `NOT NULL` (só existia pra empresas migradas, sempre com ID real) — migration `20260818f_contas_clickup_id_nullable.sql` tornou nullable + adicionou `sync_status`/`sync_error`, e criada a Edge Function nova `sync-conta-clickup` (não existia nas 8 tasks originais — criar empresa nova pela SPA não estava no escopo do plano) seguindo o mesmo padrão das outras duas.
-  - `sync-negocio-clickup`/`sync-contato-clickup` tratavam "conta sem `clickup_account_id`" como falha total — corrigido pra degradar (cria a tarefa mesmo assim, só não vincula ainda), já que agora é possível criar um negócio/contato pra uma empresa que ela mesma ainda está sincronizando.
-  - Todas as 3 Edge Functions (nova e as 2 atualizadas) testadas ao vivo contra dados reais (INSERT via anon key → invocação manual do webhook → task real no ClickUp com os campos certos → cleanup) antes de considerar pronto.
-  - **Webhooks resolvidos sem precisar do painel (18/08):** descoberto que "Database Webhook" no Supabase self-hosted é só um trigger Postgres `AFTER INSERT` chamando `supabase_functions.http_request()` via `pg_net` — a mesma coisa que a UI do Studio cria por trás dos panos (`supabase_functions.hooks` estava vazia porque nenhum webhook, nem o antigo `sync_clickup_value`, tinha sido criado ainda). Migration `20260818g_webhooks_empresa_360.sql` cria os 3 triggers direto via SQL (negócios/contatos/contas). **Testado ao vivo sem invocação manual:** INSERT real em cada uma das 3 tabelas disparou o webhook sozinho, criou a tarefa no ClickUp e atualizou `sync_status='synced'` automaticamente — não há mais pendência de configuração manual no painel pra esses 3. Verificação visual em navegador segue pendente (extensão Chrome indisponível).
-
-- **Fechando o vínculo CRM↔ClickUp da automação (18/08).** Usuário apontou o ponto que faltava: mesmo sem gravar nada no Supabase, o ClickUp Brain precisa conseguir responder "como está a versão C da proposta tal" trazendo os dois lados juntos. Resolvido sem nenhuma coluna nova: nova tool MCP `detalhes_versao_proposta` (`mcp-brain/tools.ts`) reconstrói o "vínculo" pela própria convenção de nomes determinística (`"{número} - {nome}"` / `"Enviar Proposta vX"`) que a automação já usa pra criar a lista/tarefa, e devolve numa resposta só: dados da proposta (Supabase — itens, valor, situação) + status e comentários reais da tarefa técnica (ClickUp, incluindo `task/{id}/comment`). Testado ao vivo com negócio+proposta+comentário reais, cleanup completo.
-- **"Enviar Proposta vX" trazido pro CRM (18/08).** O usuário tinha um Google Apps Script rodando no ClickUp: ao clicar "New Proposal" numa tarefa da lista Negócios, ele cria/reaproveita uma lista técnica em PRE-VENDAS/PROJETOS (`"{número} - {nome}"`) e uma tarefa "Enviar Proposta vX" dentro dela, linkada de volta à tarefa comercial. Confirmado ao vivo que os custom fields do script (`Nova Proposta`/botão, `Nº de Proposta`) estão na mesma lista Negócios (901326185457) já sincronizada pelas Edge Functions desta sessão — então a automação foi portada como `sync-proposta-tecnica-clickup`, disparada por Database Webhook no INSERT de `propostas` (migration `20260818h_webhook_proposta_tecnica.sql`, mesmo padrão SQL direto). Achado que simplificou o design: `propostas.versao` já vem preenchida no formato `"vA"`/`"vB"` pela Geradora de Propostas existente — não precisou calcular nada, só ler o campo. Não grava nada no Supabase, é uma ação só do lado do ClickUp (decisão explícita do usuário). **Testado ao vivo, sem invocação manual:** negócio de teste sincronizado → INSERT real de proposta → trigger disparou sozinho → lista e tarefa técnica criadas com o nome/tipo certos, já linkadas ao negócio → cleanup completo.
-- **Autocorreção de versão + backfill de `numero_proposta_oficial` (18/08).** Usuário testou criar uma vC real e a automação não criou nada no ClickUp. Causa raiz dupla: (1) `sync-proposta-tecnica-clickup` exige `negocios.numero_proposta_oficial` pra montar o nome da lista técnica, mas esse campo só é gerado (via `rpc('gerar_numero_proposta')`) pra negócios criados dali pra frente pelo botão "Nova Oportunidade" — os 725 negócios trazidos pela reconciliação Agendor→CRM nunca tiveram esse campo preenchido, embora o número real já existisse há tempos no ClickUp (custom field "Nº de Proposta", id `c44cc05d-303f-47e2-b243-40c6b26b732f`, na lista Negócios). Corrigido com um backfill único (script Python ad-hoc, não versionado — paginou a lista 901326185457 via API do ClickUp e gravou `numero_proposta_oficial` só onde estava vazio no Supabase e preenchido no ClickUp): **438 de 725** negócios corrigidos (os outros 287 também não têm o campo preenchido no ClickUp — vão ganhar o número normalmente na próxima proposta criada por eles). (2) Mesmo com o número presente, negócios que já eram controlados manualmente pelo ClickUp antes do CRM podem ter o contador de versão do Supabase atrasado em relação à lista técnica real (ex: CRM calcula "vB", ClickUp já tem até "vH") — a `versao` gravada em `propostas` vem só do histórico local (`getNextVersionLetter`, `app.js:186`), sem olhar pro ClickUp. Corrigido dentro da própria `sync-proposta-tecnica-clickup`: antes de criar a tarefa, busca a maior versão já existente na lista técnica (`GET /list/{id}/task`, regex `Enviar Proposta v([A-Za-z]+)`, comparação via rank tipo coluna de planilha pra suportar além de Z) e, se for maior ou igual à calculada pelo CRM, usa a próxima depois dela — e faz `UPDATE propostas SET versao=...` de volta no Supabase pra sincronizar os dois lados dali em diante, sem precisar de ajuste manual por negócio. **Testado ao vivo:** INSERT real de proposta pro negócio "Unimed de São Sebastião do Paraíso" (que só tinha vA/vB no Supabase e no ClickUp) → trigger disparou sozinho → "Enviar Proposta vC" criada corretamente → cleanup completo (proposta + tarefa técnica deletadas).
-- **Pedidos deixados para depois (18/08, decisão do próprio usuário):** (1) redesign visual "premium" de todas as abas exceto Relatórios (que já foi considerada boa) — referência visual já levantada: `app.js:6213-6730`, vocabulário de `rounded-xl/2xl`, sombras coloridas (`shadow-sm shadow-slate-100/50`), soft badges por cor semântica, toolbar `backdrop-blur-md`; (2) atribuição por usuário no ClickUp — hoje **parcial**: login já pede token pessoal do ClickUp e task creation via `/api/tarefas` já usa esse token (`app.js:1655-1700`, `server.py`), mas comentários e mudança de responsável caem no token global, e nenhuma Edge Function nova desta sessão sabe quem criou o quê; `vendedores` (tabela Supabase) é vestigial, sem migration, desconectada de Auth/ClickUp. Resolver direito exige plumbing de "criado por" da SPA até a Edge Function e decidir onde guardar token pessoal com segurança — fora de escopo de um ajuste pontual; (3) uma sincronização final Agendor↔CRM pra negócios Ganhos — usuário encontrou valores divergentes no negócio "Ferro" e quer investigar antes de considerar os dados de Ganhos confiáveis.
+### 3. Atualizar Edge Functions na VPS:
+```bash
+ssh suprimatica-vps "cp -r /home/ubuntu/apps/suprimatica-crm/supabase/functions/* /home/ubuntu/apps/supabase/docker/volumes/functions/ && cd /home/ubuntu/apps/supabase/docker && docker compose up -d functions"
+```
