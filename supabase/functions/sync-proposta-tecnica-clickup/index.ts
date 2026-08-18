@@ -2,8 +2,17 @@
 // Dispara via Database Webhook no INSERT de `propostas`. Cria (ou reaproveita)
 // a lista técnica na pasta PRE-VENDAS/PROJETOS e a tarefa "Enviar Proposta vX"
 // dentro dela, linkada de volta ao negócio de origem — porta pro CRM a
-// automação que hoje roda como Google Apps Script no ClickUp. Não grava
-// nada no Supabase: é uma ação só do lado do ClickUp.
+// automação que hoje roda como Google Apps Script no ClickUp.
+//
+// Autocorreção de versão: para negócios que já eram controlados manualmente
+// pelo ClickUp antes do CRM existir, o contador de versão do Supabase
+// (propostas.versao) pode estar atrasado em relação ao que já existe na
+// lista técnica (ex: CRM calcula "vB", mas o ClickUp já tem até "vH").
+// Antes de criar a tarefa, checamos a maior versão já existente na lista
+// técnica e, se for maior ou igual à calculada pelo CRM, pulamos direto
+// para a próxima depois dela — e corrigimos `propostas.versao` no Supabase
+// para bater com o que foi realmente usado, sincronizando os dois lados daí
+// em diante sem precisar de ajuste manual.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
@@ -23,6 +32,50 @@ const corsHeaders = {
 
 function normalizeId(id: unknown): string {
   return String(id || "").replace("#", "").trim();
+}
+
+// Letras de versão como coluna de planilha: A=1, Z=26, AA=27, AB=28... —
+// permite comparar/gerar "próxima versão" corretamente mesmo além de Z.
+function letterRank(letters: string): number {
+  let rank = 0;
+  for (const ch of letters.toUpperCase()) {
+    const code = ch.charCodeAt(0) - 64; // A=1
+    if (code < 1 || code > 26) continue;
+    rank = rank * 26 + code;
+  }
+  return rank;
+}
+
+function rankToLetters(rank: number): string {
+  let s = "";
+  let n = rank;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || "A";
+}
+
+// Maior letra de versão já existente entre as tarefas "Enviar Proposta vX"
+// da lista técnica (0 se a lista estiver vazia ou não tiver nenhuma).
+async function getMaxVersionRankInList(listaId: string): Promise<number> {
+  const res = await fetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true`, {
+    headers: { Authorization: CLICKUP_API_TOKEN },
+  });
+  if (!res.ok) return 0;
+  const data = await res.json();
+  const tasks = data.tasks || [];
+  const re = /^Enviar Proposta\s+v([A-Za-z]+)/i;
+  let maxRank = 0;
+  for (const t of tasks) {
+    const m = (t.name || "").match(re);
+    if (m) {
+      const rank = letterRank(m[1]);
+      if (rank > maxRank) maxRank = rank;
+    }
+  }
+  return maxRank;
 }
 
 async function getOrCreateListaTecnica(nome: string): Promise<string | null> {
@@ -92,8 +145,17 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ success: false }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     }
 
-    // 3) Cria a tarefa técnica "Enviar Proposta vX"
-    const nomeTarefa = `${PREFIX_TASK}${record.versao || ""}`.trim();
+    // 3) Autocorreção: compara a versão calculada pelo CRM com a maior já
+    // existente na lista técnica (relevante para negócios que já eram
+    // controlados manualmente pelo ClickUp antes do CRM existir).
+    const versaoLetrasCrm = String(record.versao || "").replace(/^v/i, "");
+    const rankCrm = letterRank(versaoLetrasCrm) || 1;
+    const maxRankClickUp = await getMaxVersionRankInList(listaId);
+    const rankFinal = maxRankClickUp >= rankCrm ? maxRankClickUp + 1 : rankCrm;
+    const versaoFinal = "v" + rankToLetters(rankFinal);
+
+    // 4) Cria a tarefa técnica "Enviar Proposta vX"
+    const nomeTarefa = `${PREFIX_TASK}${versaoFinal}`.trim();
     const createRes = await fetch(`https://api.clickup.com/api/v2/list/${listaId}/task`, {
       method: "POST",
       headers: { Authorization: CLICKUP_API_TOKEN, "Content-Type": "application/json" },
@@ -109,7 +171,20 @@ Deno.serve(async (req) => {
     const createdTask = await createRes.json();
     const tarefaTecnicaId = createdTask.id;
 
-    // 4) Linka de volta ao negócio de origem (não bloqueia)
+    // 5) Se a versão usada divergiu da calculada pelo CRM (lista técnica
+    // estava à frente), corrige `propostas.versao` no Supabase para bater
+    // com o que foi de fato criado no ClickUp — sincroniza os dois lados
+    // e evita o mesmo desalinhamento na próxima versão deste negócio.
+    if (versaoFinal !== record.versao && record.id) {
+      const { error: updErr } = await supabase.from("propostas").update({ versao: versaoFinal }).eq("id", record.id);
+      if (updErr) {
+        console.error(`[sync-proposta-tecnica-clickup] Falha ao corrigir versao no Supabase (id=${record.id}): ${updErr.message}`);
+      } else {
+        console.log(`[sync-proposta-tecnica-clickup] Versão corrigida de "${record.versao}" para "${versaoFinal}" (proposta id=${record.id}) para bater com o ClickUp.`);
+      }
+    }
+
+    // 6) Linka de volta ao negócio de origem (não bloqueia)
     if (negocio.clickup_negocio_id) {
       const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${tarefaTecnicaId}/link/${normalizeId(negocio.clickup_negocio_id)}`, {
         method: "POST",
@@ -120,7 +195,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ success: true, lista_id: listaId, tarefa_tecnica_id: tarefaTecnicaId }), {
+    return new Response(JSON.stringify({ success: true, lista_id: listaId, tarefa_tecnica_id: tarefaTecnicaId, versao: versaoFinal }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
