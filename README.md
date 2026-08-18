@@ -31,6 +31,8 @@ A solução foi projetada sob uma arquitetura de baixo custo e alta performance:
 │       │   └── 📄 index.ts
 │       ├── 📁 sync-conta-clickup/    # Empresa 360º: espelha empresa criada na SPA pro ClickUp (async)
 │       │   └── 📄 index.ts
+│       ├── 📁 sync-proposta-tecnica-clickup/ # Cria lista técnica + tarefa "Enviar Proposta vX" no ClickUp
+│       │   └── 📄 index.ts
 │       └── 📁 mcp-brain/             # Servidor MCP: expõe o banco ao ClickUp Brain (somente leitura)
 │           ├── 📄 index.ts           # Protocolo MCP (JSON-RPC): initialize / tools.list / tools.call
 │           ├── 📄 tools.ts           # As 7 tools (propostas, forecast, fabricante, cliente, etc.)
@@ -52,7 +54,7 @@ A solução foi projetada sob uma arquitetura de baixo custo e alta performance:
 2. Crie uma nova query, copie o conteúdo de [20260527_init.sql](supabase/migrations/20260527_init.sql) e clique em **Run**.
 3. Crie uma segunda query, copie o conteúdo de [20260527_evolution.sql](supabase/migrations/20260527_evolution.sql) e clique em **Run** para evoluir a modelagem (remover SKU e criar distribuidores).
 4. Crie uma terceira query, copie o conteúdo de [20260527_seed.sql](supabase/migrations/20260527_seed.sql) e clique em **Run** para carregar os produtos padrão sem SKU.
-5. **Empresa 360º (Contas/Contatos/Negócios + numeração interna de propostas)** — rode em ordem: [20260817_contas_contatos.sql](supabase/migrations/20260817_contas_contatos.sql), [20260817b_negocios.sql](supabase/migrations/20260817b_negocios.sql), [20260817c_negocios_contas_authenticated.sql](supabase/migrations/20260817c_negocios_contas_authenticated.sql), [20260818_negocios_contatos_sync_numeracao.sql](supabase/migrations/20260818_negocios_contatos_sync_numeracao.sql), [20260818b_fix_grant_ajustar_numeracao.sql](supabase/migrations/20260818b_fix_grant_ajustar_numeracao.sql), [20260818c_fix_grant_public_ajustar.sql](supabase/migrations/20260818c_fix_grant_public_ajustar.sql), [20260818d_restrict_config_numeracao_select.sql](supabase/migrations/20260818d_restrict_config_numeracao_select.sql), [20260818e_negocios_campos_oportunidade.sql](supabase/migrations/20260818e_negocios_campos_oportunidade.sql), [20260818f_contas_clickup_id_nullable.sql](supabase/migrations/20260818f_contas_clickup_id_nullable.sql). Cria as tabelas `contas`/`contatos`/`negocios`, as colunas de sync (`sync_status`/`sync_error`/`clickup_negocio_id`/`clickup_contact_id`/`clickup_account_id`), o gerador interno de numeração de propostas (`config_numeracao_propostas` + RPCs `gerar_numero_proposta()`/`ajustar_numeracao_proposta()`) e os campos do formulário expandido de Oportunidade (Tipo, Probabilidade, Previsão, Descrição, Registros de Oportunidade dos fabricantes).
+5. **Empresa 360º (Contas/Contatos/Negócios + numeração interna de propostas)** — rode em ordem: [20260817_contas_contatos.sql](supabase/migrations/20260817_contas_contatos.sql), [20260817b_negocios.sql](supabase/migrations/20260817b_negocios.sql), [20260817c_negocios_contas_authenticated.sql](supabase/migrations/20260817c_negocios_contas_authenticated.sql), [20260818_negocios_contatos_sync_numeracao.sql](supabase/migrations/20260818_negocios_contatos_sync_numeracao.sql), [20260818b_fix_grant_ajustar_numeracao.sql](supabase/migrations/20260818b_fix_grant_ajustar_numeracao.sql), [20260818c_fix_grant_public_ajustar.sql](supabase/migrations/20260818c_fix_grant_public_ajustar.sql), [20260818d_restrict_config_numeracao_select.sql](supabase/migrations/20260818d_restrict_config_numeracao_select.sql), [20260818e_negocios_campos_oportunidade.sql](supabase/migrations/20260818e_negocios_campos_oportunidade.sql), [20260818f_contas_clickup_id_nullable.sql](supabase/migrations/20260818f_contas_clickup_id_nullable.sql), [20260818g_webhooks_empresa_360.sql](supabase/migrations/20260818g_webhooks_empresa_360.sql), [20260818h_webhook_proposta_tecnica.sql](supabase/migrations/20260818h_webhook_proposta_tecnica.sql). Cria as tabelas `contas`/`contatos`/`negocios`, as colunas de sync (`sync_status`/`sync_error`/`clickup_negocio_id`/`clickup_contact_id`/`clickup_account_id`), o gerador interno de numeração de propostas (`config_numeracao_propostas` + RPCs `gerar_numero_proposta()`/`ajustar_numeracao_proposta()`), os campos do formulário expandido de Oportunidade (Tipo, Probabilidade, Previsão, Descrição, Registros de Oportunidade dos fabricantes) e os 4 Database Webhooks da Empresa 360º (já criados via SQL direto nesta instância — ver nota abaixo).
 
 ---
 
@@ -76,6 +78,7 @@ supabase functions deploy get-clickup-task
 supabase functions deploy sync-negocio-clickup
 supabase functions deploy sync-contato-clickup
 supabase functions deploy sync-conta-clickup
+supabase functions deploy sync-proposta-tecnica-clickup
 ```
 
 #### Configuração de Segredos (Secrets) no Supabase:
@@ -146,6 +149,14 @@ Mesmo processo do item C, com:
    - **Table**: `contas`
    - **Events**: apenas **Insert**.
    - **Edge Function**: `sync-conta-clickup`.
+   - **Method**: `POST`.
+
+#### F. Database Webhook (Automação "Enviar Proposta vX"):
+Mesmo processo do item C, com:
+   - **Name**: `sync_proposta_tecnica_clickup`
+   - **Table**: `propostas`
+   - **Events**: apenas **Insert**.
+   - **Edge Function**: `sync-proposta-tecnica-clickup`.
    - **Method**: `POST`.
 
 ---
