@@ -2457,7 +2457,7 @@ function App() {
       }
 
       // 2. Busca secundária de metadados no ClickUp de forma assíncrona (não bloqueia a tela)
-      fetch(`/clickup-api/task/${idWithoutHash}`)
+      fetch(`/clickup-api/task/${idWithoutHash}`, { headers: { ...getSupabaseHeaders() } })
         .then(r => r.ok ? r.json() : null)
         .then(taskData => {
           if (!taskData) return;
@@ -2495,12 +2495,12 @@ function App() {
   // Carregar vendedores cadastrados
   const loadVendedores = async () => {
     try {
-      const teamsRes = await fetch('/clickup-api/team');
+      const teamsRes = await fetch('/clickup-api/team', { headers: { ...getSupabaseHeaders() } });
       if (teamsRes.ok) {
         const teamsData = await teamsRes.json();
         if (teamsData.teams && teamsData.teams.length > 0) {
           const teamId = teamsData.teams[0].id;
-          const membersRes = await fetch(`/clickup-api/team/${teamId}`);
+          const membersRes = await fetch(`/clickup-api/team/${teamId}`, { headers: { ...getSupabaseHeaders() } });
           if (membersRes.ok) {
             const membersData = await membersRes.json();
             if (membersData.team && membersData.team.members) {
@@ -2834,7 +2834,7 @@ function App() {
     let roData = { roInfra: '', roSw1: '', roSw2: '', roSw3: '', roSw4: '' };
     if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
       try {
-        const res = await fetch(`/clickup-api/task/${cuTaskId}`);
+        const res = await fetch(`/clickup-api/task/${cuTaskId}`, { headers: { ...getSupabaseHeaders() } });
         if (res.ok) {
           const t = await res.json();
           const cfMap = new Map((t.custom_fields || []).map(f => [f.id, f.value]));
@@ -4075,7 +4075,7 @@ function App() {
       const cuId = updatedProp.clickup_negocio_id || clickupTaskId;
       if (cuId && !updatedProp.data_inicio) {
         const cleanCuId = cuId.startsWith('#') ? cuId.substring(1) : cuId;
-        fetch(`/clickup-api/task/${cleanCuId}`).then(res => {
+        fetch(`/clickup-api/task/${cleanCuId}`, { headers: { ...getSupabaseHeaders() } }).then(res => {
           if (res.ok) return res.json();
           return null;
         }).then(taskData => {
@@ -4252,7 +4252,8 @@ function App() {
       // 1. Obter detalhes da tarefa atual (Proposta)
       const taskRes = await fetch(`/clickup-api/task/${cleanTaskId}`, {
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          ...getSupabaseHeaders()
         }
       });
       if (!taskRes.ok) {
@@ -4309,7 +4310,8 @@ function App() {
             console.log(`[${new Date().toISOString()}] Iniciando verificação GET pós-POST para a tarefa ${cleanTaskId}...`);
             const verifyRes = await fetch(`/clickup-api/task/${cleanTaskId}`, {
               headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                ...getSupabaseHeaders()
               }
             });
             if (verifyRes.ok) {
@@ -4367,7 +4369,8 @@ function App() {
             console.log(`[${new Date().toISOString()}] Iniciando verificação GET pós-POST para a tarefa pai ${parentTaskId}...`);
             const verifyRes = await fetch(`/clickup-api/task/${parentTaskId}`, {
               headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                ...getSupabaseHeaders()
               }
             });
             if (verifyRes.ok) {
@@ -4796,7 +4799,8 @@ function App() {
     setSearchResult('');
     try {
       const clickupHeaders = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...getSupabaseHeaders()
       };
 
       // 1. Obter os Workspaces (Teams) para achar o team_id
