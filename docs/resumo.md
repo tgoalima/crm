@@ -39,6 +39,7 @@ O Supabase e a SPA rodam em uma **VPS Ubuntu dedicada** sob Docker Compose.
    - Serve o frontend compilado.
    - Fornece o endpoint nativo `/api/config` com a URL e `anon_key` do Supabase.
    - Atua como proxy reverso para `/clickup-api/` repassando o cabeçalho `Authorization` do usuário logado.
+   - Atua como proxy reverso para `/api/tarefas` e `/api/atividades`, repassando `Authorization` para as Edge Functions `api-tarefas`/`api-atividades` (ver nota abaixo).
 2. `supabase-edge-functions` (`supabase/edge-runtime:v1.74.0`):
    - Router central `main` (`volumes/functions/main/index.ts`) que despacha chamadas `/functions/v1/<nome>`.
    - Executa as Edge Functions com timeout de 60s.
@@ -49,6 +50,14 @@ O Supabase e a SPA rodam em uma **VPS Ubuntu dedicada** sob Docker Compose.
 - `CLICKUP_API_TOKEN`: Token de contingência/serviço global do ClickUp.
 - `TOKEN_ENCRYPTION_KEY`: Chave secreta de 256 bits para criptografia AES-GCM dos tokens pessoais dos vendedores.
 - `MCP_AUTH_KEY`: Token de autorização para o ClickUp Brain consultar o servidor MCP.
+
+### Migração de `/api/tarefas` e `/api/atividades` para Edge Functions (19/08):
+`server.py` (script Python local, usado só em desenvolvimento) sempre teve as rotas `/api/tarefas` (CRUD de tarefas comerciais) e `/api/atividades` (CRUD de comentários/atividades do negócio), mas **nunca rodou na VPS** — o domínio real que o usuário usa no dia a dia, `crm.llworkflow.com.br` (embutido como aba no ClickUp), nunca teve essas rotas: caíam no fallback da SPA e devolviam HTML em vez de JSON.
+- Criadas as Edge Functions `api-tarefas` e `api-atividades`, portando fielmente a lógica de `server.py` (matching de proposta em 4 níveis + auto-provisionamento + autocura em `api-tarefas`; mesclagem com comentários nativos do ClickUp e menções rich-text em `api-atividades`).
+- **Detalhe de roteamento do runtime:** o roteador interno das Edge Functions self-hosted remove o prefixo `/functions/v1/` do path, mas **não** remove o segmento com o nome da function — `req.url` dentro de `api-tarefas` para uma chamada a `.../functions/v1/api-tarefas/{id}/status` chega como `/api-tarefas/{id}/status`, não `/{id}/status`. As duas functions tratam isso extraindo o "tail" com dois `.replace()` separados.
+- `deploy/nginx.conf` ganhou dois blocos `location` (`/api/tarefas`, `/api/atividades`) proxiando pra `https://supabase.llworkflow.com.br/functions/v1/api-tarefas`/`api-atividades`, repassando `Authorization` do mesmo jeito que o bloco `/clickup-api/` já fazia.
+- **Bug pré-existente descoberto durante os testes (não relacionado à migração):** a tabela `atividades_negocio` nunca existiu no banco — nem `server.py` nem a nova Edge Function conseguiam gravar nela (erro real: `Could not find the table 'public.atividades_negocio' in the schema cache`). O recurso só "funcionava" porque o `GET` tem um fallback que mescla comentários nativos do ClickUp quando não encontra a linha correspondente no Supabase; nada nunca tinha sido persistido de fato. Corrigido com a migration `20260819b_atividades_negocio.sql`.
+- Testado ponta a ponta pelo domínio real `crm.llworkflow.com.br` (não só `localhost:8000` na VPS): create/list/status/delete em tarefas, create/list/edit/delete em atividades — dados de teste limpos dos dois lados (Supabase + ClickUp) ao final de cada teste.
 
 ---
 
@@ -69,6 +78,8 @@ O Supabase e a SPA rodam em uma **VPS Ubuntu dedicada** sob Docker Compose.
   - Cadastros base de produtos (SKU, Nome, Fabricante, Custo) e Distribuidores.
 - **`tarefas_comerciais` (Follow-ups Comerciais):**
   - `id` (UUID, PK), `proposta_id`, `clickup_subtask_id`, `clickup_negocio_id`, `titulo`, `tipo` (Ligação, Reunião, E-mail, Follow-up), `data_vencimento` (BIGINT timestamp), `responsavel_clickup_id`, `status` (pendente/concluida).
+- **`atividades_negocio` (Comentários/Atividades do Negócio):**
+  - `id` (UUID, PK), `clickup_negocio_id`, `clickup_comment_id`, `texto`, `data_execucao`, `created_at`, `updated_at`. Criada em 19/08 (migration `20260819b_atividades_negocio.sql`) — não existia antes, ver nota na seção 2.
 
 ### B. Tabelas de Infraestrutura e Segurança:
 - **`usuarios_clickup` (Cofre de Tokens Criptografados):**
