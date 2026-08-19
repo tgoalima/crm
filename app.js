@@ -2583,7 +2583,9 @@ function App() {
       const idClean = String(clickupId).replace('#', '');
       let data = null;
       try {
-        const res = await fetch(`/api/atividades?clickup_negocio_id=${idClean}`);
+        const res = await fetch(`/api/atividades?clickup_negocio_id=${idClean}`, {
+          headers: { ...getSupabaseHeaders() }
+        });
         if (res.ok) {
           const text = await res.text();
           try { data = JSON.parse(text); } catch (e) {}
@@ -2622,7 +2624,7 @@ function App() {
       const idClean = String(clickupTaskId).replace('#', '');
       const res = await fetch('/api/atividades', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
         body: JSON.stringify({
           clickup_negocio_id: idClean,
           texto: novaAtividade.trim()
@@ -2650,7 +2652,7 @@ function App() {
     try {
       const res = await fetch(`/api/atividades/${atividadeId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
         body: JSON.stringify({ texto: editingAtividadeTexto.trim() })
       });
       if (res.ok) {
@@ -2674,7 +2676,10 @@ function App() {
     if (!confirm('Deseja realmente excluir esta atividade?')) return;
     setSavingAtividade(true);
     try {
-      const res = await fetch(`/api/atividades/${atividadeId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/atividades/${atividadeId}`, {
+        method: 'DELETE',
+        headers: { ...getSupabaseHeaders() }
+      });
       if (res.ok) {
         showToast('Atividade excluída com sucesso!', 'success');
         fetchAtividades(clickupTaskId);
