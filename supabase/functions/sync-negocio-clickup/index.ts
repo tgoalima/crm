@@ -11,6 +11,7 @@ import { resolveClickUpToken } from "../_shared/resolve-token.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const CLICKUP_API_TOKEN = Deno.env.get("CLICKUP_API_TOKEN") || "";
 
 const NEGOCIOS_LIST_ID = "901326185457";
 const CUSTOM_ITEM_ID_NEGOCIO = 1004;

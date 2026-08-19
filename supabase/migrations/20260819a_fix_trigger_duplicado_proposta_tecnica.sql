@@ -1,0 +1,16 @@
+-- supabase/migrations/20260819a_fix_trigger_duplicado_proposta_tecnica.sql
+--
+-- Duas migrations criaram, sem coordenação entre duas sessões de IA
+-- trabalhando em paralelo, dois triggers AFTER INSERT idênticos em
+-- `propostas` chamando a mesma Edge Function sync-proposta-tecnica-clickup:
+-- `sync_proposta_tecnica_clickup` (20260818h_webhook_proposta_tecnica.sql)
+-- e `sync_proposta_tecnica_clickup_insert` (20260818k_usuarios_clickup.sql).
+-- Resultado: toda nova versão de proposta disparava a automação "Enviar
+-- Proposta vX" duas vezes, criando duas tarefas técnicas no ClickUp.
+-- Confirmado ao vivo em produção (19/08) e corrigido diretamente na VPS
+-- antes desta migration existir — aqui só documentamos/rastreamos a
+-- correção.
+--
+-- Mantém sync_proposta_tecnica_clickup_insert (criado com padrão
+-- DROP/CREATE idempotente, mais recente) e remove o mais antigo.
+DROP TRIGGER IF EXISTS sync_proposta_tecnica_clickup ON public.propostas;
