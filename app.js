@@ -2063,7 +2063,8 @@ function App() {
       const { data, error } = await supabaseClient
         .from('propostas')
         .update({ criado_por: responsavelNome })
-        .eq('clickup_negocio_id', cleanId);
+        .eq('clickup_negocio_id', cleanId)
+        .select('id');
 
       if (error) throw error;
 
