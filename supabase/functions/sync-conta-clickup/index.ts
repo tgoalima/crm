@@ -1,13 +1,15 @@
 // supabase/functions/sync-conta-clickup/index.ts
 // Dispara via Database Webhook no INSERT de `contas` com clickup_account_id
 // NULL. Cria a tarefa correspondente na lista Contas do ClickUp.
+//
+// Atribuição por Usuário: resolve o token pessoal do vendedor via
+// criado_por_user_id → usuarios_clickup, com fallback para CLICKUP_API_TOKEN.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+import { resolveClickUpToken } from "../_shared/resolve-token.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const CLICKUP_API_TOKEN = Deno.env.get("CLICKUP_API_TOKEN") || "";
-const TOKEN_ENCRYPTION_KEY = Deno.env.get("TOKEN_ENCRYPTION_KEY") || "";
 
 const CONTAS_LIST_ID = "901326185461";
 const CUSTOM_ITEM_ID_CONTA = 1005;
@@ -33,39 +35,6 @@ async function marcarFalha(supabase: any, contaId: string, mensagem: string) {
   await supabase.from("contas").update({ sync_status: "failed", sync_error: mensagem }).eq("id", contaId);
 }
 
-// ─────────────────────────────────────────────
-// ATRIBUIÇÃO POR USUÁRIO — resolve com qual token do ClickUp sincronizar
-// ─────────────────────────────────────────────
-async function importDecryptionKey(): Promise<CryptoKey> {
-  const raw = Uint8Array.from(atob(TOKEN_ENCRYPTION_KEY), (c) => c.charCodeAt(0));
-  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
-}
-
-async function decryptToken(encryptedB64: string, ivB64: string): Promise<string | null> {
-  try {
-    const key = await importDecryptionKey();
-    const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
-    const cipherBytes = Uint8Array.from(atob(encryptedB64), (c) => c.charCodeAt(0));
-    const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipherBytes);
-    return new TextDecoder().decode(plainBuf);
-  } catch (e) {
-    console.error("[sync-conta-clickup] Falha ao descriptografar token pessoal:", e.message);
-    return null;
-  }
-}
-
-async function resolveClickUpToken(supabase: any, criadoPorUserId: string | null | undefined): Promise<string> {
-  if (!criadoPorUserId || !TOKEN_ENCRYPTION_KEY) return CLICKUP_API_TOKEN;
-  const { data, error } = await supabase
-    .from("usuarios_clickup")
-    .select("token_encrypted, token_iv")
-    .eq("user_id", criadoPorUserId)
-    .maybeSingle();
-  if (error || !data) return CLICKUP_API_TOKEN;
-  const decrypted = await decryptToken(data.token_encrypted, data.token_iv);
-  return decrypted || CLICKUP_API_TOKEN;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -82,12 +51,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !CLICKUP_API_TOKEN) {
-      throw new Error("Variáveis de ambiente não configuradas (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/CLICKUP_API_TOKEN)");
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error("Variáveis de ambiente não configuradas (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY)");
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const clickupToken = await resolveClickUpToken(supabase, record.criado_por_user_id);
+    const clickupToken = await resolveClickUpToken(record.criado_por_user_id, supabase);
 
     // 1) Criar a tarefa no ClickUp
     const customFields: Record<string, unknown>[] = [
