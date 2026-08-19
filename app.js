@@ -1282,6 +1282,13 @@ const SegmentosSettings = () => {
 
 function App() {
   const [config, setConfig] = useState(getInitialConfig);
+  // Mapa clickup_negocio_id -> estagio real do negócio, usado pra blindar os
+  // cálculos de "Ganho"/"Perdido" do relatório contra proposta.data_fechamento
+  // desalinhada do estágio de verdade do negócio (ver migration 20260819e e
+  // docs/resumo.md). Declarado no topo do componente porque é referenciado
+  // por useMemo's (distributorTotals, manufacturerTotals) que rodam antes
+  // de outros hooks mais abaixo no arquivo.
+  const negociosEstagioRef = useRef(new Map());
   const [supabaseClient, setSupabaseClient] = useState(null);
   const [dbConnected, setDbConnected] = useState(false);
   const [session, setSession] = useState(null);
@@ -1738,7 +1745,9 @@ function App() {
       const sit = prop?.situacao;
       if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      const cid = String(prop?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid && negociosEstagioRef.current.get(cid) === 'Ganho';
     });
     const itemsToProcess = wonItems.length > 0 ? wonItems : (commercialData || []);
 
@@ -1770,7 +1779,9 @@ function App() {
       const sit = prop?.situacao;
       if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      const cid = String(prop?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid && negociosEstagioRef.current.get(cid) === 'Ganho';
     });
     const itemsToProcess = wonItems.length > 0 ? wonItems : (commercialData || []);
 
@@ -3344,16 +3355,29 @@ function App() {
     const allItens = rawCommercialRef.current || [];
 
     // 1. Filtrar propostas do período
+    // Blindagem: além do texto de situacao/data_fechamento na própria proposta,
+    // exige que o negócio pai esteja de fato no estágio correspondente
+    // (negocios.estagio é a fonte real da verdade — ver migration 20260819e).
+    // Isso evita que uma proposta com data_fechamento desalinhada (dado legado
+    // ou qualquer escrita futura que escape do trigger de consistência) volte
+    // a inflar os números do relatório.
+    const estagioDoNegocio = (p) => {
+      const cid = String(p?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid ? negociosEstagioRef.current.get(cid) : undefined;
+    };
+
     const isWonProp = (p) => {
       if (!p || !p.situacao || !p.data_fechamento) return false;
       const s = p.situacao.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      return estagioDoNegocio(p) === 'Ganho';
     };
 
     const isLostProp = (p) => {
       if (!p || !p.situacao) return false;
       const s = p.situacao.trim().toLowerCase();
-      return s === 'perdido' || s === 'cancelado' || s === 'desconsiderada';
+      if (s !== 'perdido' && s !== 'cancelado' && s !== 'desconsiderada') return false;
+      return estagioDoNegocio(p) === 'Perdido';
     };
 
     const currentProps = allProps.filter(p => {
@@ -3546,24 +3570,33 @@ function App() {
     setDashboardFetching(true);
     try {
       if (forceRefresh || rawProposalsRef.current.length === 0) {
-        const [propsRes, itensRes] = await Promise.all([
+        const [propsRes, itensRes, negociosRes] = await Promise.all([
           client.from('propostas').select('*').order('created_at', { ascending: false }),
           client.from('itens_proposta').select(`
             quantidade,
             preco_unitario,
             distribuidor_id,
             produto_id,
-            propostas(created_at, data_fechamento, situacao),
+            propostas(created_at, data_fechamento, situacao, clickup_negocio_id),
             distribuidores(nome),
             produtos(nome, fabricante)
-          `)
+          `),
+          client.from('negocios').select('clickup_negocio_id, estagio')
         ]);
 
         if (propsRes.error) throw propsRes.error;
         if (itensRes.error) throw itensRes.error;
+        if (negociosRes.error) throw negociosRes.error;
 
         rawProposalsRef.current = propsRes.data || [];
         rawCommercialRef.current = itensRes.data || [];
+
+        const estagioMap = new Map();
+        (negociosRes.data || []).forEach(n => {
+          const cid = String(n.clickup_negocio_id || '').replace('#', '').trim();
+          if (cid) estagioMap.set(cid, n.estagio);
+        });
+        negociosEstagioRef.current = estagioMap;
       }
 
       const activeF = currentDateFilterRef.current;
@@ -3580,13 +3613,17 @@ function App() {
   const topProductsAggregated = useMemo(() => {
     if (!commercialData || commercialData.length === 0) return [];
     
-    // Filtrar apenas itens de propostas com situação GANHO ou SELECIONADA
+    // Filtrar apenas itens de propostas com situação GANHO ou SELECIONADA, e cujo
+    // negócio pai esteja de fato em estágio Ganho (mesma blindagem de isWonProp
+    // em applyFilterRange — ver migration 20260819e).
     const wonItems = commercialData.filter(item => {
       const prop = Array.isArray(item.propostas) ? item.propostas[0] : item.propostas;
       const sit = prop?.situacao;
       if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      const cid = String(prop?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid && negociosEstagioRef.current.get(cid) === 'Ganho';
     });
 
     const groups = {};
