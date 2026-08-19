@@ -6652,22 +6652,6 @@ function App() {
               </div>
             </div>
 
-            {/* Card Informativo de Integridade de Dados */}
-            <div className="p-2.5 px-3.5 rounded-xl bg-indigo-50/70 border border-indigo-100 flex items-center justify-between text-xs text-indigo-950 shadow-sm">
-              <div className="flex items-center space-x-2.5">
-                <span className="flex h-2 w-2 relative shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span className="font-semibold text-slate-800">
-                  <strong className="text-indigo-900 font-bold">Painel Executivo Calibrado:</strong> Dados e itens 100% integrados e sincronizados em tempo real entre <span className="text-indigo-600 font-semibold">Supabase</span>, <span className="text-indigo-600 font-semibold">ClickUp</span> e <span className="text-indigo-600 font-semibold">Agendor</span>.
-                </span>
-              </div>
-              <span className="hidden sm:inline-flex text-[11px] font-bold text-emerald-700 bg-emerald-100/70 border border-emerald-300/60 px-2.5 py-0.5 rounded-full">
-                100% Calibrado
-              </span>
-            </div>
-
             {/* BLOCO 1: RESUMO SAZONAL DE VENDAS */}
             <div className="bg-white border border-slate-200/80 rounded-xl p-6 flex flex-col transition-all duration-300 hover:border-slate-200 shadow-sm shadow-slate-100/50">
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
