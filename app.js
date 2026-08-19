@@ -2355,6 +2355,42 @@ function App() {
       const currentOptionId = getTaskOptionId(task, kanbanColumns);
       if (currentOptionId === targetOptionId) return;
 
+      const targetOption = kanbanColumns.find(c => c.id === targetOptionId);
+      const targetName = (targetOption?.name || '').toLowerCase();
+
+      // Arrastar direto pra Ganho/Perdido precisa passar pelo mesmo fluxo oficial de
+      // fechamento que o dropdown de Status já usa (handleConfirmClose) — só ele grava
+      // data_fechamento/motivo_perda na proposta. handleOpportunityStateChange sozinho só
+      // move o estágio do negócio; sem data_fechamento, esse negócio nunca aparece no
+      // relatório de faturamento (achado em 19/08, ver docs/resumo.md).
+      if (targetName.includes('ganho') || targetName.includes('perdido')) {
+        const idWithoutHash = taskId.startsWith('#') ? taskId.substring(1) : taskId;
+        const idWithHash = '#' + idWithoutHash;
+        const { data: props, error } = await supabaseClient
+          .from('propostas')
+          .select('*')
+          .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
+          .order('created_at', { ascending: false });
+
+        if (error || !props || props.length === 0) {
+          showToast('Não foi possível localizar a proposta deste negócio.', 'error');
+          return;
+        }
+
+        const selected = props.find(p => p.situacao === 'Selecionada') || props.find(p => p.versao === 'vA') || props[0];
+        setClickupTaskId(taskId);
+        setPropostas(props);
+        await loadProposalDetails(selected.id);
+        setCloseDate(new Date().toISOString().split('T')[0]);
+        if (targetName.includes('ganho')) {
+          setShowCloseModal('win');
+        } else {
+          setSelectedLossReason('');
+          setShowCloseModal('loss');
+        }
+        return;
+      }
+
       await handleOpportunityStateChange(taskId, targetOptionId);
     } catch (dropErr) {
       console.error("Erro ao mover o card:", dropErr);
@@ -9225,10 +9261,25 @@ function App() {
                                 <button
                                   key={col.id || idx}
                                   onClick={async () => {
-                                    if (selectedTask) {
-                                      setSelectedTask(prev => (prev ? { ...prev, estagio: col.name } : prev));
-                                      await handleOpportunityStateChange(selectedTask.id, col.id);
+                                    if (!selectedTask) return;
+                                    const colName = (col.name || '').toLowerCase();
+                                    // Mesma proteção do drag-and-drop no Kanban (ver handleDrop):
+                                    // ir direto pra Ganho/Perdido por aqui pula o fluxo que grava
+                                    // data_fechamento/motivo_perda, deixando o negócio invisível
+                                    // no relatório de faturamento.
+                                    if (colName.includes('ganho') || colName.includes('perdido')) {
+                                      if (!currentProposta) return;
+                                      setCloseDate(new Date().toISOString().split('T')[0]);
+                                      if (colName.includes('ganho')) {
+                                        setShowCloseModal('win');
+                                      } else {
+                                        setSelectedLossReason('');
+                                        setShowCloseModal('loss');
+                                      }
+                                      return;
                                     }
+                                    setSelectedTask(prev => (prev ? { ...prev, estagio: col.name } : prev));
+                                    await handleOpportunityStateChange(selectedTask.id, col.id);
                                   }}
                                   title={`Mover para: ${col.name}`}
                                   className={`relative flex flex-col items-center justify-center py-2.5 px-1 rounded-xl transition-all duration-300 cursor-pointer group ${
