@@ -2049,7 +2049,7 @@ function App() {
       if (responsavelId) {
         const res = await fetch(`/clickup-api/task/${taskId}/assignee`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
           body: JSON.stringify({ assignees: [responsavelId] })
         });
         if (!res.ok) throw new Error("Erro ClickUp Assignee");
@@ -2220,7 +2220,8 @@ function App() {
     const res = await fetch(`/clickup-api/task/${taskId}/field/c8d0abe2-c59f-4a9e-93ff-bd060659aa63`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getSupabaseHeaders()
       },
       body: JSON.stringify({ value: newOptionId })
     });
@@ -2232,7 +2233,7 @@ function App() {
   const updateTaskClickupStatus = async (taskId, statusName) => {
     const res = await fetch(`/clickup-api/task/${taskId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
       body: JSON.stringify({ status: statusName })
     });
     if (!res.ok) {
@@ -2806,7 +2807,7 @@ function App() {
       const cuTaskId = task.clickup_negocio_id || (task.id && !String(task.id).includes('-') ? task.id : null);
       if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
         try {
-          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE' });
+          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE', headers: { ...getSupabaseHeaders() } });
         } catch (e) {
           console.warn('[ClickUp Delete] Falha ao excluir negócio no ClickUp:', e);
         }
@@ -2910,7 +2911,7 @@ function App() {
 
           await fetch(`/clickup-api/task/${cuTaskId}?custom_item_id=1004`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
             body: JSON.stringify({
               name: editNegocioDrawerForm.nome.trim(),
               custom_item_id: 1004,
@@ -4291,7 +4292,8 @@ function App() {
         const resVal = await fetch(urlValue, {
           method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...getSupabaseHeaders()
           },
           body: JSON.stringify(bodyFormatado)
         });
@@ -4348,7 +4350,8 @@ function App() {
         const resGlobal = await fetch(urlGlobal, {
           method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...getSupabaseHeaders()
           },
           body: JSON.stringify(bodyFormatado)
         });
@@ -4501,7 +4504,7 @@ function App() {
         if (Object.keys(datesPayload).length > 0) {
           fetch(`/clickup-api/task/${cleanCuId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
             body: JSON.stringify(datesPayload)
           }).catch(err => console.error("Erro ao sincronizar datas no ClickUp:", err));
         }
