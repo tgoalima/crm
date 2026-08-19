@@ -146,6 +146,7 @@ const safeStorage = {
     } catch (e) {
       try {
         localStorage.removeItem('crm_cache_kanban_tasks_v2');
+        localStorage.removeItem('crm_cache_kanban_tasks_v3');
         localStorage.removeItem('crm_cache_vendedores');
         localStorage.setItem(key, val);
       } catch (err) {}
@@ -466,6 +467,13 @@ const ForecastFunnelPanel = ({
 
   const searchTermNormalized = (kanbanSearchTerm || '').toLowerCase().trim();
 
+  // Com fabricante selecionado, mostra só a fatia de valor daquele fabricante no
+  // negócio (não o valor cheio da proposta) — negócio.valorPorFabricante é montado
+  // em fetchKanbanData a partir de itens_proposta (quantidade * preco_unitario).
+  const valueForCurrentFilter = (t) => filterFabricante
+    ? (t?.valorPorFabricante?.[filterFabricante] || 0)
+    : (getOpportunityValue ? (getOpportunityValue(t) || 0) : 0);
+
   const safeTasks = allTasks
     .filter(t => !filterFabricante || (Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante)))
     .filter(t => taskMatchesSearchTerm(t, searchTermNormalized));
@@ -479,7 +487,7 @@ const ForecastFunnelPanel = ({
 
   const rawStageData = activeCols.map(col => {
     const tasksInCol = safeTasks.filter(t => getTaskOptionId && getTaskOptionId(t, safeColumns) === col.id);
-    const total = tasksInCol.reduce((acc, t) => acc + (getOpportunityValue ? (getOpportunityValue(t) || 0) : 0), 0);
+    const total = tasksInCol.reduce((acc, t) => acc + valueForCurrentFilter(t), 0);
     return {
       id: col.id,
       name: col.name,
@@ -626,7 +634,7 @@ const ForecastFunnelPanel = ({
               {safeTasks
                 .filter(t => getTaskOptionId(t, kanbanColumns) === filterStage)
                 .map(task => {
-                  const dealValue = getOpportunityValue(task);
+                  const dealValue = valueForCurrentFilter(task);
                   const formattedValue = dealValue !== null && dealValue !== undefined
                     ? `R$ ${Number(dealValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` 
                     : 'R$ 0,00';
@@ -1340,7 +1348,9 @@ function App() {
     // v2: formato mudou de custom_fields (ClickUp) pra estagio (Supabase) em 17/08 —
     // chave nova pra não reidratar com cache antigo incompatível (fazia getTaskOptionId
     // não achar nenhum estágio e o Kanban parecer vazio até a busca nova completar).
-    const cached = localStorage.getItem('crm_cache_kanban_tasks_v2');
+    // v3: adicionado valorPorFabricante (19/08) — chave nova pra não reidratar com
+    // cache antigo sem esse campo (Forecast filtrado por fabricante ficaria em R$ 0).
+    const cached = localStorage.getItem('crm_cache_kanban_tasks_v3');
     return cached ? JSON.parse(cached) : [];
   });
   const [kanbanColumns, setKanbanColumns] = useState(ESTAGIO_OPTIONS);
@@ -1561,8 +1571,6 @@ function App() {
     const cached = localStorage.getItem('crm_cache_vendedores');
     return cached ? JSON.parse(cached) : [];
   });
-  const [newVendedorName, setNewVendedorName] = useState('');
-  const [editingVendedor, setEditingVendedor] = useState(null);
   const [taskTypes, setTaskTypes] = useState(() => {
     const cached = localStorage.getItem('crm_cache_task_types');
     return cached ? JSON.parse(cached) : [
@@ -2018,6 +2026,13 @@ function App() {
     return null;
   };
 
+  // Valor do negócio restrito a um fabricante (usado pelo filtro do Forecast) — sem
+  // fabricante selecionado, cai no valor cheio da proposta (getOpportunityValue).
+  const getOpportunityValueForFabricante = (task, fabricante) => {
+    if (!fabricante) return getOpportunityValue(task);
+    return task?.valorPorFabricante?.[fabricante] || 0;
+  };
+
   const getOpportunityResponsavel = (task) => {
     if (!task || !supabaseProposalsList) return '';
     const cleanId = String(task.id).replace('#', '').trim();
@@ -2117,7 +2132,7 @@ function App() {
         : Promise.resolve({ data: [], error: null });
 
       const itensPromise = supabaseClient
-        ? supabaseClient.from('itens_proposta').select('proposta_id, produtos(fabricante)')
+        ? supabaseClient.from('itens_proposta').select('proposta_id, quantidade, preco_unitario, produtos(fabricante)')
         : Promise.resolve({ data: [], error: null });
 
       const [{ data: negociosData, error: negociosErr }, { data: props, error: propsErr }, { data: itensData, error: itensErr }] = await Promise.all([
@@ -2132,8 +2147,12 @@ function App() {
 
       setKanbanColumns(ESTAGIO_OPTIONS);
 
-      // Índice proposta_id -> lista de fabricantes distintos dos itens da proposta
+      // Índice proposta_id -> lista de fabricantes distintos dos itens da proposta,
+      // e proposta_id -> valor somado (quantidade * preco_unitario) por fabricante
+      // — usado pelo filtro de fabricante do Forecast pra não contar o negócio
+      // inteiro quando ele mistura vários fabricantes (ver docs/resumo.md).
       const fabricantesByPropId = new Map();
+      const valorPorFabricantePropId = new Map();
       if (!itensErr && itensData) {
         for (const item of itensData) {
           const prodObj = Array.isArray(item.produtos) ? item.produtos[0] : item.produtos;
@@ -2141,6 +2160,11 @@ function App() {
           if (!fab || !item.proposta_id) continue;
           if (!fabricantesByPropId.has(item.proposta_id)) fabricantesByPropId.set(item.proposta_id, new Set());
           fabricantesByPropId.get(item.proposta_id).add(fab);
+
+          const itemValor = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
+          if (!valorPorFabricantePropId.has(item.proposta_id)) valorPorFabricantePropId.set(item.proposta_id, {});
+          const fabTotals = valorPorFabricantePropId.get(item.proposta_id);
+          fabTotals[fab] = (fabTotals[fab] || 0) + itemValor;
         }
       }
 
@@ -2171,6 +2195,7 @@ function App() {
         let resp = '';
         let supabaseDealValue = null;
         let fabricantes = [];
+        let valorPorFabricante = {};
         let dataFechamento = null;
 
         if (matchedProps.length > 0) {
@@ -2185,6 +2210,7 @@ function App() {
           const v = parseFloat(best.total_proposta);
           if (!isNaN(v)) supabaseDealValue = v;
           fabricantes = Array.from(fabricantesByPropId.get(best.id) || []);
+          valorPorFabricante = valorPorFabricantePropId.get(best.id) || {};
           dataFechamento = best.data_fechamento || null;
         }
 
@@ -2197,13 +2223,14 @@ function App() {
           responsavel_negocio: resp,
           supabase_deal_value: supabaseDealValue,
           fabricantes,
+          valorPorFabricante,
           data_fechamento: dataFechamento,
         };
       });
 
       setKanbanTasks(enrichedTasks);
       try {
-        safeStorage.setItem('crm_cache_kanban_tasks_v2', JSON.stringify(enrichedTasks));
+        safeStorage.setItem('crm_cache_kanban_tasks_v3', JSON.stringify(enrichedTasks));
       } catch (storageErr) {
         // Ignora cota excedida do Safari silenciosamente
       }
@@ -2548,7 +2575,10 @@ function App() {
     }
   };
 
-  // Carregar vendedores cadastrados
+  // Carregar vendedores cadastrados — restrito a quem já logou no CRM com token
+  // próprio (tabela usuarios_clickup, exposta via view usuarios_clickup_registrados
+  // sem o token). Se a view falhar, cai pra lista completa do ClickUp (dropdown de
+  // conveniência, não controle de acesso — ver docs/resumo.md).
   const loadVendedores = async () => {
     try {
       const teamsRes = await fetch('/clickup-api/team', { headers: { ...getSupabaseHeaders() } });
@@ -2560,10 +2590,27 @@ function App() {
           if (membersRes.ok) {
             const membersData = await membersRes.json();
             if (membersData.team && membersData.team.members) {
-              const users = membersData.team.members.map(m => m.user);
+              let users = membersData.team.members.map(m => m.user);
+
+              if (supabaseClient) {
+                try {
+                  const { data: registrados, error: registradosErr } = await supabaseClient
+                    .from('usuarios_clickup_registrados')
+                    .select('clickup_user_id');
+                  if (!registradosErr && registrados) {
+                    const registradosIds = new Set(registrados.map(r => String(r.clickup_user_id)));
+                    users = users.filter(u => registradosIds.has(String(u.id)));
+                  } else if (registradosErr) {
+                    console.warn("Erro ao carregar usuários registrados no CRM, exibindo todo o workspace ClickUp:", registradosErr);
+                  }
+                } catch (registradosErr) {
+                  console.warn("Erro ao carregar usuários registrados no CRM, exibindo todo o workspace ClickUp:", registradosErr);
+                }
+              }
+
               const ocultos = JSON.parse(safeStorage.getItem('crm_vendedores_ocultos') || '[]');
-              const mapped = users.map(u => ({ 
-                id: u.id, 
+              const mapped = users.map(u => ({
+                id: u.id,
                 nome: u.username || u.email,
                 oculto: ocultos.includes(String(u.id)) || ocultos.includes(Number(u.id))
               }));
@@ -5253,52 +5300,8 @@ function App() {
     }
   };
 
-  const handleCreateVendedor = async (e) => {
-    e.preventDefault();
-    if (!newVendedorName.trim()) return;
-    try {
-      const { data, error } = await supabaseClient
-        .from('vendedores')
-        .insert({ nome: newVendedorName.trim() }).select().single();
-      if (error) throw error;
-      showToast('Vendedor adicionado!', 'success');
-      setNewVendedorName('');
-      await loadVendedores();
-    } catch (err) {
-      showToast(err.message || 'Erro ao cadastrar vendedor', 'error');
-    }
-  };
-
-  const handleSaveVendedorEdit = async (e) => {
-    e.preventDefault();
-    try {
-      const { error } = await supabaseClient
-        .from('vendedores')
-        .update({ nome: editingVendedor.nome })
-        .eq('id', editingVendedor.id);
-      if (error) throw error;
-      showToast('Vendedor atualizado com sucesso!', 'success');
-      setEditingVendedor(null);
-      loadVendedores();
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao editar vendedor.', 'error');
-    }
-  };
-
-  const handleDeleteVendedor = async (id) => {
-    if (!confirm('Deseja realmente excluir este vendedor?')) return;
-    try {
-      const { error } = await supabaseClient.from('vendedores').delete().eq('id', id);
-      if (error) throw error;
-      showToast('Vendedor excluído com sucesso!', 'success');
-      loadVendedores();
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao excluir vendedor.', 'error');
-    }
-  };
-
+  // Lista de vendedores agora é derivada automaticamente (ClickUp ∩ usuarios_clickup,
+  // ver loadVendedores) — criar/editar/excluir manualmente não existe mais, só ocultar.
   const handleToggleOcultoVendedor = async (vendedor) => {
     const isOculto = !vendedor.oculto;
     const updatedVendedores = vendedores.map(v => 
@@ -8190,47 +8193,9 @@ function App() {
                   <div className="space-y-6">
                     <div className="mb-4">
                       <h2 className="text-base font-bold text-slate-900">Vendedores Cadastrados</h2>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">Gerencie a equipe de vendas.</p>
-                    </div>
-
-                    <div className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs">
-                      <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-3">
-                        {editingVendedor ? 'Editar Vendedor' : 'Novo Vendedor'}
-                      </h3>
-                      <form 
-                        onSubmit={editingVendedor ? handleSaveVendedorEdit : handleCreateVendedor}
-                        className="flex gap-2"
-                      >
-                        <input 
-                          type="text" 
-                          required
-                          placeholder="Ex: Ana Silva"
-                          value={editingVendedor ? editingVendedor.nome : newVendedorName}
-                          onChange={(e) => {
-                            if (editingVendedor) {
-                              setEditingVendedor({ ...editingVendedor, nome: e.target.value });
-                            } else {
-                              setNewVendedorName(e.target.value);
-                            }
-                          }}
-                          className="flex-1 rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
-                        />
-                        <button 
-                          type="submit"
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
-                        >
-                          {editingVendedor ? 'Salvar' : 'Adicionar'}
-                        </button>
-                        {editingVendedor && (
-                          <button 
-                            type="button"
-                            onClick={() => setEditingVendedor(null)}
-                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                          >
-                            Cancelar
-                          </button>
-                        )}
-                      </form>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        Lista derivada automaticamente de quem está cadastrado no ClickUp e já fez login no CRM com o próprio token. Use "Ocultar" para remover alguém das listas de responsável sem afetar o cadastro.
+                      </p>
                     </div>
 
                     <div className="max-h-60 overflow-y-auto bg-white border border-slate-200/80 rounded-xl shadow-xs">
@@ -8251,26 +8216,12 @@ function App() {
                               <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
                                 <td className="p-3 font-semibold text-slate-800">{v.nome}</td>
                                 <td className="p-3 text-center space-x-2">
-                                  <button 
+                                  <button
                                     onClick={() => handleToggleOcultoVendedor(v)}
                                     className={`${v.oculto ? 'text-emerald-600 hover:text-emerald-800' : 'text-amber-600 hover:text-amber-800'} font-semibold cursor-pointer`}
                                     title={v.oculto ? "Exibir no CRM" : "Ocultar no CRM"}
                                   >
                                     {v.oculto ? "Exibir" : "Ocultar"}
-                                  </button>
-                                  <span className="text-slate-300">•</span>
-                                  <button 
-                                    onClick={() => setEditingVendedor(v)}
-                                    className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-                                  >
-                                    Editar
-                                  </button>
-                                  <span className="text-slate-300">•</span>
-                                  <button 
-                                    onClick={() => handleDeleteVendedor(v.id)}
-                                    className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
-                                  >
-                                    Excluir
                                   </button>
                                 </td>
                               </tr>
