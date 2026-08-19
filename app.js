@@ -2310,10 +2310,12 @@ function App() {
       }
 
       showToast(`Oportunidade atualizada!`, "success");
+      return true;
     } catch (err) {
       console.error("Erro na sincronização de estado:", err);
       showToast("Não foi possível atualizar a oportunidade.", "error");
       fetchKanbanData();
+      return false;
     }
   };
 
@@ -9124,8 +9126,8 @@ function App() {
                                       const n = (c.name || '').toLowerCase();
                                       return !n.includes('congelad') && !n.includes('ganho') && !n.includes('perdido');
                                     }) || safeColumns[0];
-                                    await handleOpportunityStateChange(selectedTask.id, firstActiveCol.id);
-                                    showToast('Negócio Descongelado! Retornou ao Pipeline ❄️', 'info');
+                                    const ok = await handleOpportunityStateChange(selectedTask.id, firstActiveCol.id);
+                                    if (ok) showToast('Negócio Descongelado! Retornou ao Pipeline ❄️', 'info');
                                   }
                                 }}
                                 className="bg-sky-500 hover:bg-sky-600 text-white px-2.5 py-0.5 rounded-full text-[10px] font-extrabold shadow-sm shadow-sky-500/30 flex items-center gap-1.5 cursor-pointer animate-pulse ring-2 ring-sky-300 transition-all"
@@ -9141,8 +9143,8 @@ function App() {
                             <button
                               onClick={async () => {
                                 if (selectedTask && congeladoOption) {
-                                  await handleOpportunityStateChange(selectedTask.id, congeladoOption.id);
-                                  showToast('Negócio Congelado ❄️', 'info');
+                                  const ok = await handleOpportunityStateChange(selectedTask.id, congeladoOption.id);
+                                  if (ok) showToast('Negócio Congelado ❄️', 'info');
                                 } else {
                                   showToast('Estágio Congelado não configurado.', 'warning');
                                 }
