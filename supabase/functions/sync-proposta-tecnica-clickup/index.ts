@@ -39,6 +39,17 @@ const FOLDER_PROJETOS_ID = "90134052120";
 const TECH_CUSTOM_ITEM_ID = 1014;
 const PREFIX_TASK = "Enviar Proposta ";
 
+// A lista técnica/"Enviar Proposta vX" só faz sentido pra propostas do tipo
+// PROJETO — o app.js grava o "Tipo de Oportunidade" direto na coluna
+// `cenario`: PROJETO fica com cenario "" (ainda não escolheu o "Tipo de
+// Projeto") ou um dos 4 valores abaixo (Tipo de Projeto, dentro de Projeto);
+// os outros 5 tipos de oportunidade (Garantias/Serviços/SSU/Volumes/Upgrade)
+// gravam o próprio nome do tipo, em CAIXA ALTA, direto em `cenario` — daí o
+// match ser sensível a maiúsculas/minúsculas: "Upgrade" (Tipo de Projeto,
+// dentro de Projeto) é uma string diferente de "UPGRADE" (Tipo de
+// Oportunidade, não-projeto), e não podem ser confundidas aqui.
+const TIPOS_SEM_LISTA_TECNICA = new Set(["GARANTIAS", "SERVIÇOS", "SSU", "VOLUMES", "UPGRADE"]);
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -184,6 +195,15 @@ Deno.serve(async (req) => {
     // uma segunda tarefa.
     if (record.clickup_proposta_tecnica_id) {
       return new Response(JSON.stringify({ success: true, message: "Ignorado (tarefa técnica já existe)" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // Filtro por tipo de oportunidade: só PROJETO gera lista técnica.
+    const cenarioRecord = String(record.cenario || "").trim();
+    if (TIPOS_SEM_LISTA_TECNICA.has(cenarioRecord)) {
+      return new Response(JSON.stringify({ success: true, message: `Ignorado (tipo de oportunidade "${cenarioRecord}" não gera lista técnica)` }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
