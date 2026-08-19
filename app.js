@@ -2281,32 +2281,38 @@ function App() {
       ]);
 
       // 4. REGRA DE REABERTURA: Se o estágio escolhido for do pipeline ativo (não Ganho e não Perdido),
-      // reabrir propostas associadas em Supabase limpando data_fechamento e motivo_perda
+      // reabrir propostas associadas em Supabase limpando data_fechamento e motivo_perda.
+      // Isolado em seu próprio try/catch: é uma limpeza acessória — uma falha aqui não pode
+      // derrubar a mudança de estágio em si, que já foi salva com sucesso nos passos 2 e 3.
       if (!targetName.includes("ganho") && !targetName.includes("perdido") && supabaseClient) {
-        await supabaseClient
-          .from('propostas')
-          .update({
-            situacao: 'Selecionada',
-            data_fechamento: null,
-            motivo_perda: null
-          })
-          .or(`clickup_negocio_id.eq.${cleanTaskId},clickup_negocio_id.eq.${idWithHash}`)
-          .in('situacao', ['Ganho', 'Perdido']);
+        try {
+          await supabaseClient
+            .from('propostas')
+            .update({
+              situacao: 'Selecionada',
+              data_fechamento: null,
+              motivo_perda: null
+            })
+            .or(`clickup_negocio_id.eq.${cleanTaskId},clickup_negocio_id.eq.${idWithHash}`)
+            .in('situacao', ['Ganho', 'Perdido']);
 
-        if (currentProposta && (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido')) {
-          setCurrentProposta(prev => ({
-            ...prev,
-            situacao: 'Selecionada',
-            data_fechamento: null,
-            motivo_perda: null
-          }));
-        }
-        setPropostas(prev => prev.map(p => {
-          if (p.situacao === 'Ganho' || p.situacao === 'Perdido') {
-            return { ...p, situacao: 'Selecionada', data_fechamento: null, motivo_perda: null };
+          if (currentProposta && (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido')) {
+            setCurrentProposta(prev => ({
+              ...prev,
+              situacao: 'Selecionada',
+              data_fechamento: null,
+              motivo_perda: null
+            }));
           }
-          return p;
-        }));
+          setPropostas(prev => prev.map(p => {
+            if (p.situacao === 'Ganho' || p.situacao === 'Perdido') {
+              return { ...p, situacao: 'Selecionada', data_fechamento: null, motivo_perda: null };
+            }
+            return p;
+          }));
+        } catch (reaberturaErr) {
+          console.warn("Estágio mudou com sucesso, mas falhou ao reabrir propostas associadas:", reaberturaErr);
+        }
       }
 
       showToast(`Oportunidade atualizada!`, "success");
