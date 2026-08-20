@@ -3810,8 +3810,30 @@ function App() {
     try {
       if (forceRefresh || rawProposalsRef.current.length === 0) {
         lastDashboardFetchAtRef.current = Date.now();
+
+        // Filtro de data no servidor (período atual + comparativo, união dos
+        // dois) em vez de buscar a tabela inteira sempre. `data_fechamento.is.null`
+        // é mantido no OR pra preservar exatamente o fallback pra created_at que
+        // o filtro client-side (applyFilterRange, abaixo) já fazia — validado
+        // batendo 100% com a lógica antiga contra os dados reais de produção
+        // (Ano Atual/Comparativo/Todo Histórico) antes de subir isso.
+        const filt = currentDateFilterRef.current;
+        const boundsList = [filt.start, filt.end, filt.compStart, filt.compEnd].filter(Boolean);
+        const lowerBound = boundsList.length ? boundsList.reduce((a, b) => (a < b ? a : b)) : '2000-01-01';
+        const upperBound = boundsList.length ? boundsList.reduce((a, b) => (a > b ? a : b)) : '2100-01-01';
+        const dateOrFilter = `data_fechamento.is.null,and(data_fechamento.gte.${lowerBound},data_fechamento.lte.${upperBound})`;
+
+        // itens_proposta continua sem filtro de data no servidor: testado ao
+        // vivo contra o Supabase real, tanto o filtro por lista de ids
+        // (.in(), estoura limite de tamanho de URL a partir de ~94 propostas —
+        // pouco pra um range normal, "Ano Atual" já tem 262) quanto o filtro
+        // direto na tabela relacionada via join (`propostas!inner(...)` dentro
+        // de um .or()) — essa versão do PostgREST não aceita coluna de tabela
+        // relacionada dentro da árvore lógica do or(). Tabela pequena hoje
+        // (1.266 linhas) — não compensa o risco de uma solução mais complexa
+        // (função no banco via RPC) pra esse ganho.
         const [propsRes, itensRes, negociosRes] = await Promise.all([
-          client.from('propostas').select('*').order('created_at', { ascending: false }),
+          client.from('propostas').select('*').or(dateOrFilter).order('created_at', { ascending: false }),
           client.from('itens_proposta').select(`
             quantidade,
             preco_unitario,
@@ -3823,11 +3845,9 @@ function App() {
           `),
           client.from('negocios').select('clickup_negocio_id, estagio')
         ]);
-
         if (propsRes.error) throw propsRes.error;
         if (itensRes.error) throw itensRes.error;
         if (negociosRes.error) throw negociosRes.error;
-
         rawProposalsRef.current = propsRes.data || [];
         rawCommercialRef.current = itensRes.data || [];
 
