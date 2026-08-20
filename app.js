@@ -1351,6 +1351,16 @@ function App() {
   const TAB_CACHE_TTL_MS = 60000;
   const lastKanbanFetchAtRef = useRef(0);
   const lastDashboardFetchAtRef = useRef(0);
+  // Desde que o Relatórios passou a filtrar propostas por data no servidor
+  // (loadDashboardData), rawProposalsRef só cobre o período que estava ativo
+  // na hora da última busca de verdade — não é mais "a tabela inteira" que
+  // dava pra refiltrar livremente pra qualquer range sem rebuscar. Guarda
+  // aqui o range que foi de fato buscado, pra saber quando um novo range
+  // pedido pelo usuário (troca de período/comparativo) exige busca nova
+  // mesmo dentro do TTL — sem isso, escolher um período fora do que já
+  // estava em cache voltava zerado (o cache antigo era refiltrado, não
+  // rebuscado).
+  const lastFetchedBoundsRef = useRef({ lower: null, upper: null });
   // Espelha activeTab pra uso dentro do setInterval de auto-polling — sem
   // isso, fetchAllData (fechada dentro do useEffect do interval, que não
   // depende de activeTab) sempre enxergaria a aba de quando o interval foi
@@ -3822,6 +3832,7 @@ function App() {
         const lowerBound = boundsList.length ? boundsList.reduce((a, b) => (a < b ? a : b)) : '2000-01-01';
         const upperBound = boundsList.length ? boundsList.reduce((a, b) => (a > b ? a : b)) : '2100-01-01';
         const dateOrFilter = `data_fechamento.is.null,and(data_fechamento.gte.${lowerBound},data_fechamento.lte.${upperBound})`;
+        lastFetchedBoundsRef.current = { lower: lowerBound, upper: upperBound };
 
         // itens_proposta continua sem filtro de data no servidor: testado ao
         // vivo contra o Supabase real, tanto o filtro por lista de ids
@@ -4227,10 +4238,22 @@ function App() {
 
   useEffect(() => {
     if (activeTab === 'relatorios' && dbConnected) {
+      // O período pedido agora (união atual+comparativo) pode não estar
+      // coberto pelo que foi buscado da última vez (ver lastFetchedBoundsRef)
+      // — nesse caso precisa buscar de novo do servidor mesmo dentro do TTL,
+      // senão o período novo é refiltrado em cima de dados de outro período
+      // e volta vazio.
+      const boundsList = [startDate, endDate, compareStartDate, compareEndDate].filter(Boolean);
+      const reqLower = boundsList.length ? boundsList.reduce((a, b) => (a < b ? a : b)) : null;
+      const reqUpper = boundsList.length ? boundsList.reduce((a, b) => (a > b ? a : b)) : null;
+      const cached = lastFetchedBoundsRef.current;
+      const outOfCache = !cached.lower || !cached.upper
+        || (reqLower && reqLower < cached.lower)
+        || (reqUpper && reqUpper > cached.upper);
       const stale = Date.now() - lastDashboardFetchAtRef.current > TAB_CACHE_TTL_MS;
-      loadDashboardData(supabaseClient, false, stale);
+      loadDashboardData(supabaseClient, false, stale || outOfCache);
     }
-  }, [activeTab, dbConnected, startDate, endDate]);
+  }, [activeTab, dbConnected, startDate, endDate, compareStartDate, compareEndDate]);
 
   // Carregar propostas quando o ID do ClickUp mudar
   useEffect(() => {
