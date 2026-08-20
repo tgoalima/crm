@@ -4461,13 +4461,24 @@ function App() {
   // pelas guardas existentes (itensRef/propostaDirtyRef) contra sobrescrever
   // edição em andamento. Ver docs/superpowers/specs/2026-08-20-realtime-sync-design.md.
   const realtimeDebounceRef = useRef(null);
+  // Espelha fetchAllData pra uso dentro do useEffect do realtime — sem isso,
+  // scheduleRefresh (fechado dentro de um efeito que só depende de
+  // session/supabaseClient) sempre enxergaria o fetchAllData de quando o
+  // efeito foi criado, com clickupTaskId ainda '' (mesmo motivo de
+  // activeTabRef/itensRef acima).
+  const fetchAllDataRef = useRef(null);
+  useEffect(() => {
+    fetchAllDataRef.current = fetchAllData;
+  });
+
   useEffect(() => {
     if (!session || !supabaseClient) return;
 
     const scheduleRefresh = () => {
+      if (document.hidden) return;
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       realtimeDebounceRef.current = setTimeout(() => {
-        fetchAllData(true);
+        fetchAllDataRef.current(true);
       }, 1500);
     };
 
@@ -4476,7 +4487,9 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'negocios' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'propostas' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'itens_proposta' }, scheduleRefresh)
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[Realtime] crm-realtime-sync status:', status);
+      });
 
     return () => {
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
