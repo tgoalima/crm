@@ -7065,7 +7065,7 @@ function App() {
                     <div className="flex items-baseline gap-1">
                       <span className="text-xl font-extrabold text-rose-950">{biMetrics?.lostCount || 0}</span>
                       <span className="text-[10px] font-medium text-rose-700/80">
-                        (R$ {(biMetrics?.lostValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})
+                        (R$ {(biMetrics?.lostValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                       </span>
                     </div>
                   </div>
