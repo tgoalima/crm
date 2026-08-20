@@ -146,6 +146,8 @@ const safeStorage = {
     } catch (e) {
       try {
         localStorage.removeItem('crm_cache_kanban_tasks_v2');
+        localStorage.removeItem('crm_cache_kanban_tasks_v3');
+        localStorage.removeItem('crm_cache_kanban_tasks_v4');
         localStorage.removeItem('crm_cache_vendedores');
         localStorage.setItem(key, val);
       } catch (err) {}
@@ -466,6 +468,13 @@ const ForecastFunnelPanel = ({
 
   const searchTermNormalized = (kanbanSearchTerm || '').toLowerCase().trim();
 
+  // Com fabricante selecionado, mostra só a fatia de valor daquele fabricante no
+  // negócio (não o valor cheio da proposta) — negócio.valorPorFabricante é montado
+  // em fetchKanbanData a partir de itens_proposta (quantidade * preco_unitario).
+  const valueForCurrentFilter = (t) => filterFabricante
+    ? (t?.valorPorFabricante?.[filterFabricante] || 0)
+    : (getOpportunityValue ? (getOpportunityValue(t) || 0) : 0);
+
   const safeTasks = allTasks
     .filter(t => !filterFabricante || (Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante)))
     .filter(t => taskMatchesSearchTerm(t, searchTermNormalized));
@@ -479,7 +488,7 @@ const ForecastFunnelPanel = ({
 
   const rawStageData = activeCols.map(col => {
     const tasksInCol = safeTasks.filter(t => getTaskOptionId && getTaskOptionId(t, safeColumns) === col.id);
-    const total = tasksInCol.reduce((acc, t) => acc + (getOpportunityValue ? (getOpportunityValue(t) || 0) : 0), 0);
+    const total = tasksInCol.reduce((acc, t) => acc + valueForCurrentFilter(t), 0);
     return {
       id: col.id,
       name: col.name,
@@ -626,7 +635,7 @@ const ForecastFunnelPanel = ({
               {safeTasks
                 .filter(t => getTaskOptionId(t, kanbanColumns) === filterStage)
                 .map(task => {
-                  const dealValue = getOpportunityValue(task);
+                  const dealValue = valueForCurrentFilter(task);
                   const formattedValue = dealValue !== null && dealValue !== undefined
                     ? `R$ ${Number(dealValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` 
                     : 'R$ 0,00';
@@ -1282,6 +1291,13 @@ const SegmentosSettings = () => {
 
 function App() {
   const [config, setConfig] = useState(getInitialConfig);
+  // Mapa clickup_negocio_id -> estagio real do negócio, usado pra blindar os
+  // cálculos de "Ganho"/"Perdido" do relatório contra proposta.data_fechamento
+  // desalinhada do estágio de verdade do negócio (ver migration 20260819e e
+  // docs/resumo.md). Declarado no topo do componente porque é referenciado
+  // por useMemo's (distributorTotals, manufacturerTotals) que rodam antes
+  // de outros hooks mais abaixo no arquivo.
+  const negociosEstagioRef = useRef(new Map());
   const [supabaseClient, setSupabaseClient] = useState(null);
   const [dbConnected, setDbConnected] = useState(false);
   const [session, setSession] = useState(null);
@@ -1333,7 +1349,11 @@ function App() {
     // v2: formato mudou de custom_fields (ClickUp) pra estagio (Supabase) em 17/08 —
     // chave nova pra não reidratar com cache antigo incompatível (fazia getTaskOptionId
     // não achar nenhum estágio e o Kanban parecer vazio até a busca nova completar).
-    const cached = localStorage.getItem('crm_cache_kanban_tasks_v2');
+    // v3: adicionado valorPorFabricante (19/08) — chave nova pra não reidratar com
+    // cache antigo sem esse campo (Forecast filtrado por fabricante ficaria em R$ 0).
+    // v4: adicionado conta_id/responsavel_clickup_id (19/08) — chave nova pra não
+    // reidratar sem eles (aba Empresa do drawer ficaria vazia até a busca completar).
+    const cached = localStorage.getItem('crm_cache_kanban_tasks_v4');
     return cached ? JSON.parse(cached) : [];
   });
   const [kanbanColumns, setKanbanColumns] = useState(ESTAGIO_OPTIONS);
@@ -1385,7 +1405,10 @@ function App() {
   const [newTaskTime, setNewTaskTime] = useState('09:00');
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
-  const [drawerSection, setDrawerSection] = useState('propostas'); // 'propostas' | 'tarefas' | 'status'
+  const [drawerSection, setDrawerSection] = useState('propostas'); // 'propostas' | 'tarefas' | 'status' | 'empresa'
+  const [empresaDoNegocio, setEmpresaDoNegocio] = useState(null);
+  const [contatosDoNegocio, setContatosDoNegocio] = useState([]);
+  const [loadingEmpresaDoNegocio, setLoadingEmpresaDoNegocio] = useState(false);
   const [atividades, setAtividades] = useState([]);
   const [loadingAtividades, setLoadingAtividades] = useState(false);
   const [novaAtividade, setNovaAtividade] = useState('');
@@ -1554,8 +1577,6 @@ function App() {
     const cached = localStorage.getItem('crm_cache_vendedores');
     return cached ? JSON.parse(cached) : [];
   });
-  const [newVendedorName, setNewVendedorName] = useState('');
-  const [editingVendedor, setEditingVendedor] = useState(null);
   const [taskTypes, setTaskTypes] = useState(() => {
     const cached = localStorage.getItem('crm_cache_task_types');
     return cached ? JSON.parse(cached) : [
@@ -1738,7 +1759,9 @@ function App() {
       const sit = prop?.situacao;
       if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      const cid = String(prop?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid && negociosEstagioRef.current.get(cid) === 'Ganho';
     });
     const itemsToProcess = wonItems.length > 0 ? wonItems : (commercialData || []);
 
@@ -1770,7 +1793,9 @@ function App() {
       const sit = prop?.situacao;
       if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      const cid = String(prop?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid && negociosEstagioRef.current.get(cid) === 'Ganho';
     });
     const itemsToProcess = wonItems.length > 0 ? wonItems : (commercialData || []);
 
@@ -2007,6 +2032,13 @@ function App() {
     return null;
   };
 
+  // Valor do negócio restrito a um fabricante (usado pelo filtro do Forecast) — sem
+  // fabricante selecionado, cai no valor cheio da proposta (getOpportunityValue).
+  const getOpportunityValueForFabricante = (task, fabricante) => {
+    if (!fabricante) return getOpportunityValue(task);
+    return task?.valorPorFabricante?.[fabricante] || 0;
+  };
+
   const getOpportunityResponsavel = (task) => {
     if (!task || !supabaseProposalsList) return '';
     const cleanId = String(task.id).replace('#', '').trim();
@@ -2049,7 +2081,7 @@ function App() {
       if (responsavelId) {
         const res = await fetch(`/clickup-api/task/${taskId}/assignee`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
           body: JSON.stringify({ assignees: [responsavelId] })
         });
         if (!res.ok) throw new Error("Erro ClickUp Assignee");
@@ -2063,7 +2095,8 @@ function App() {
       const { data, error } = await supabaseClient
         .from('propostas')
         .update({ criado_por: responsavelNome })
-        .eq('clickup_negocio_id', cleanId);
+        .eq('clickup_negocio_id', cleanId)
+        .select('id');
 
       if (error) throw error;
 
@@ -2079,6 +2112,20 @@ function App() {
             cenario: '',
             total_proposta: 0
           });
+      }
+
+      // Mantém negocios.responsavel_nome/responsavel_clickup_id em sincronia —
+      // é a fonte que fetchKanbanData prioriza (ver migration 20260819g).
+      try {
+        await supabaseClient
+          .from('negocios')
+          .update({
+            responsavel_nome: responsavelNome || null,
+            responsavel_clickup_id: responsavelId ? String(responsavelId) : null,
+          })
+          .eq('clickup_negocio_id', cleanId);
+      } catch (negErr) {
+        console.warn("Erro silencioso ao sincronizar responsável em negocios:", negErr);
       }
 
       await refreshSupabaseProposalsList();
@@ -2097,7 +2144,7 @@ function App() {
       // O Kanban não faz mais nenhuma chamada ao ClickUp pra se popular (a
       // SPA é a fonte de verdade; ver docs/resumo.md, tabela `negocios`).
       const negociosPromise = supabaseClient
-        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback')
+        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback, conta_id, responsavel_nome, responsavel_clickup_id')
         : Promise.resolve({ data: [], error: null });
 
       const propsPromise = supabaseClient
@@ -2105,7 +2152,7 @@ function App() {
         : Promise.resolve({ data: [], error: null });
 
       const itensPromise = supabaseClient
-        ? supabaseClient.from('itens_proposta').select('proposta_id, produtos(fabricante)')
+        ? supabaseClient.from('itens_proposta').select('proposta_id, quantidade, preco_unitario, produtos(fabricante)')
         : Promise.resolve({ data: [], error: null });
 
       const [{ data: negociosData, error: negociosErr }, { data: props, error: propsErr }, { data: itensData, error: itensErr }] = await Promise.all([
@@ -2120,8 +2167,12 @@ function App() {
 
       setKanbanColumns(ESTAGIO_OPTIONS);
 
-      // Índice proposta_id -> lista de fabricantes distintos dos itens da proposta
+      // Índice proposta_id -> lista de fabricantes distintos dos itens da proposta,
+      // e proposta_id -> valor somado (quantidade * preco_unitario) por fabricante
+      // — usado pelo filtro de fabricante do Forecast pra não contar o negócio
+      // inteiro quando ele mistura vários fabricantes (ver docs/resumo.md).
       const fabricantesByPropId = new Map();
+      const valorPorFabricantePropId = new Map();
       if (!itensErr && itensData) {
         for (const item of itensData) {
           const prodObj = Array.isArray(item.produtos) ? item.produtos[0] : item.produtos;
@@ -2129,6 +2180,11 @@ function App() {
           if (!fab || !item.proposta_id) continue;
           if (!fabricantesByPropId.has(item.proposta_id)) fabricantesByPropId.set(item.proposta_id, new Set());
           fabricantesByPropId.get(item.proposta_id).add(fab);
+
+          const itemValor = (parseFloat(item.quantidade) || 0) * (parseFloat(item.preco_unitario) || 0);
+          if (!valorPorFabricantePropId.has(item.proposta_id)) valorPorFabricantePropId.set(item.proposta_id, {});
+          const fabTotals = valorPorFabricantePropId.get(item.proposta_id);
+          fabTotals[fab] = (fabTotals[fab] || 0) + itemValor;
         }
       }
 
@@ -2156,9 +2212,13 @@ function App() {
           ...(idClean ? propsByClickupId.get('#' + idClean) || [] : []),
         ];
 
-        let resp = '';
+        // Responsável: prioriza negocios.responsavel_nome (disponível desde a
+        // criação, ver migration 20260819g) — só cai pro criado_por da melhor
+        // proposta em negócios antigos que ainda não têm esse campo preenchido.
+        let resp = n.responsavel_nome || '';
         let supabaseDealValue = null;
         let fabricantes = [];
+        let valorPorFabricante = {};
         let dataFechamento = null;
 
         if (matchedProps.length > 0) {
@@ -2169,10 +2229,11 @@ function App() {
             matchedProps.find(p => p.situacao === 'Desconsiderada') ||
             matchedProps[0];
 
-          resp = best.criado_por || '';
+          if (!resp) resp = best.criado_por || '';
           const v = parseFloat(best.total_proposta);
           if (!isNaN(v)) supabaseDealValue = v;
           fabricantes = Array.from(fabricantesByPropId.get(best.id) || []);
+          valorPorFabricante = valorPorFabricantePropId.get(best.id) || {};
           dataFechamento = best.data_fechamento || null;
         }
 
@@ -2181,17 +2242,20 @@ function App() {
           name: n.nome,
           estagio: n.estagio,
           valor_clickup_fallback: n.valor_clickup_fallback,
+          conta_id: n.conta_id || null,
           custom_fields: [],
           responsavel_negocio: resp,
+          responsavel_clickup_id: n.responsavel_clickup_id || null,
           supabase_deal_value: supabaseDealValue,
           fabricantes,
+          valorPorFabricante,
           data_fechamento: dataFechamento,
         };
       });
 
       setKanbanTasks(enrichedTasks);
       try {
-        safeStorage.setItem('crm_cache_kanban_tasks_v2', JSON.stringify(enrichedTasks));
+        safeStorage.setItem('crm_cache_kanban_tasks_v4', JSON.stringify(enrichedTasks));
       } catch (storageErr) {
         // Ignora cota excedida do Safari silenciosamente
       }
@@ -2220,7 +2284,8 @@ function App() {
     const res = await fetch(`/clickup-api/task/${taskId}/field/c8d0abe2-c59f-4a9e-93ff-bd060659aa63`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getSupabaseHeaders()
       },
       body: JSON.stringify({ value: newOptionId })
     });
@@ -2232,7 +2297,7 @@ function App() {
   const updateTaskClickupStatus = async (taskId, statusName) => {
     const res = await fetch(`/clickup-api/task/${taskId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
       body: JSON.stringify({ status: statusName })
     });
     if (!res.ok) {
@@ -2279,39 +2344,47 @@ function App() {
       ]);
 
       // 4. REGRA DE REABERTURA: Se o estágio escolhido for do pipeline ativo (não Ganho e não Perdido),
-      // reabrir propostas associadas em Supabase limpando data_fechamento e motivo_perda
+      // reabrir propostas associadas em Supabase limpando data_fechamento e motivo_perda.
+      // Isolado em seu próprio try/catch: é uma limpeza acessória — uma falha aqui não pode
+      // derrubar a mudança de estágio em si, que já foi salva com sucesso nos passos 2 e 3.
       if (!targetName.includes("ganho") && !targetName.includes("perdido") && supabaseClient) {
-        await supabaseClient
-          .from('propostas')
-          .update({
-            situacao: 'Selecionada',
-            data_fechamento: null,
-            motivo_perda: null
-          })
-          .or(`clickup_negocio_id.eq.${cleanTaskId},clickup_negocio_id.eq.${idWithHash}`)
-          .in('situacao', ['Ganho', 'Perdido']);
+        try {
+          await supabaseClient
+            .from('propostas')
+            .update({
+              situacao: 'Selecionada',
+              data_fechamento: null,
+              motivo_perda: null
+            })
+            .or(`clickup_negocio_id.eq.${cleanTaskId},clickup_negocio_id.eq.${idWithHash}`)
+            .in('situacao', ['Ganho', 'Perdido']);
 
-        if (currentProposta && (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido')) {
-          setCurrentProposta(prev => ({
-            ...prev,
-            situacao: 'Selecionada',
-            data_fechamento: null,
-            motivo_perda: null
-          }));
-        }
-        setPropostas(prev => prev.map(p => {
-          if (p.situacao === 'Ganho' || p.situacao === 'Perdido') {
-            return { ...p, situacao: 'Selecionada', data_fechamento: null, motivo_perda: null };
+          if (currentProposta && (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido')) {
+            setCurrentProposta(prev => ({
+              ...prev,
+              situacao: 'Selecionada',
+              data_fechamento: null,
+              motivo_perda: null
+            }));
           }
-          return p;
-        }));
+          setPropostas(prev => prev.map(p => {
+            if (p.situacao === 'Ganho' || p.situacao === 'Perdido') {
+              return { ...p, situacao: 'Selecionada', data_fechamento: null, motivo_perda: null };
+            }
+            return p;
+          }));
+        } catch (reaberturaErr) {
+          console.warn("Estágio mudou com sucesso, mas falhou ao reabrir propostas associadas:", reaberturaErr);
+        }
       }
 
       showToast(`Oportunidade atualizada!`, "success");
+      return true;
     } catch (err) {
       console.error("Erro na sincronização de estado:", err);
       showToast("Não foi possível atualizar a oportunidade.", "error");
       fetchKanbanData();
+      return false;
     }
   };
 
@@ -2334,6 +2407,42 @@ function App() {
       const currentOptionId = getTaskOptionId(task, kanbanColumns);
       if (currentOptionId === targetOptionId) return;
 
+      const targetOption = kanbanColumns.find(c => c.id === targetOptionId);
+      const targetName = (targetOption?.name || '').toLowerCase();
+
+      // Arrastar direto pra Ganho/Perdido precisa passar pelo mesmo fluxo oficial de
+      // fechamento que o dropdown de Status já usa (handleConfirmClose) — só ele grava
+      // data_fechamento/motivo_perda na proposta. handleOpportunityStateChange sozinho só
+      // move o estágio do negócio; sem data_fechamento, esse negócio nunca aparece no
+      // relatório de faturamento (achado em 19/08, ver docs/resumo.md).
+      if (targetName.includes('ganho') || targetName.includes('perdido')) {
+        const idWithoutHash = taskId.startsWith('#') ? taskId.substring(1) : taskId;
+        const idWithHash = '#' + idWithoutHash;
+        const { data: props, error } = await supabaseClient
+          .from('propostas')
+          .select('*')
+          .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
+          .order('created_at', { ascending: false });
+
+        if (error || !props || props.length === 0) {
+          showToast('Não foi possível localizar a proposta deste negócio.', 'error');
+          return;
+        }
+
+        const selected = props.find(p => p.situacao === 'Selecionada') || props.find(p => p.versao === 'vA') || props[0];
+        setClickupTaskId(taskId);
+        setPropostas(props);
+        await loadProposalDetails(selected.id);
+        setCloseDate(new Date().toISOString().split('T')[0]);
+        if (targetName.includes('ganho')) {
+          setShowCloseModal('win');
+        } else {
+          setSelectedLossReason('');
+          setShowCloseModal('loss');
+        }
+        return;
+      }
+
       await handleOpportunityStateChange(taskId, targetOptionId);
     } catch (dropErr) {
       console.error("Erro ao mover o card:", dropErr);
@@ -2348,6 +2457,8 @@ function App() {
     setClickupTaskId(task.id);
     setDrawerTab('details');
     setDrawerSection('propostas');
+    setEmpresaDoNegocio(null);
+    setContatosDoNegocio([]);
     setShowDrawer(true);
   };
 
@@ -2423,7 +2534,7 @@ function App() {
       const [{ data: negData }, { data: propData }] = await Promise.all([
         supabaseClient
           .from('negocios')
-          .select('id, nome, estagio, numero_proposta_oficial, created_at')
+          .select('id, nome, estagio, numero_proposta_oficial, created_at, conta_id')
           .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
           .limit(1),
         supabaseClient
@@ -2451,12 +2562,13 @@ function App() {
           estagio: neg.estagio,
           nome: neg.nome,
           name: neg.nome,
-          numero_proposta_oficial: neg.numero_proposta_oficial
+          numero_proposta_oficial: neg.numero_proposta_oficial,
+          conta_id: neg.conta_id || (prev && prev.conta_id) || null
         }));
       }
 
       // 2. Busca secundária de metadados no ClickUp de forma assíncrona (não bloqueia a tela)
-      fetch(`/clickup-api/task/${idWithoutHash}`)
+      fetch(`/clickup-api/task/${idWithoutHash}`, { headers: { ...getSupabaseHeaders() } })
         .then(r => r.ok ? r.json() : null)
         .then(taskData => {
           if (!taskData) return;
@@ -2472,6 +2584,32 @@ function App() {
       console.error("Erro em fetchProjectContext:", err);
     }
   };
+
+  // Aba "Empresa" do drawer do negócio: carrega sob demanda (só quando a aba é
+  // aberta), e só refaz o fetch se a empresa mudou — evita recarregar ao trocar
+  // de aba dentro do mesmo drawer.
+  useEffect(() => {
+    if (drawerSection !== 'empresa' || !supabaseClient) return;
+    const contaId = selectedTask?.conta_id;
+    if (!contaId) { setEmpresaDoNegocio(null); setContatosDoNegocio([]); return; }
+    if (empresaDoNegocio && empresaDoNegocio.id === contaId) return;
+
+    setLoadingEmpresaDoNegocio(true);
+    (async () => {
+      try {
+        const [{ data: conta, error: contaErr }, { data: contatosData, error: contatosErr }] = await Promise.all([
+          supabaseClient.from('contas').select('*').eq('id', contaId).single(),
+          supabaseClient.from('contatos').select('*').eq('conta_id', contaId).order('nome'),
+        ]);
+        if (!contaErr) setEmpresaDoNegocio(conta || null);
+        if (!contatosErr) setContatosDoNegocio(contatosData || []);
+      } catch (err) {
+        console.warn("Erro ao carregar empresa do negócio:", err);
+      } finally {
+        setLoadingEmpresaDoNegocio(false);
+      }
+    })();
+  }, [drawerSection, selectedTask?.conta_id, supabaseClient]);
 
   // Carregar produtos cadastrados
   const loadProducts = async (client = supabaseClient) => {
@@ -2491,22 +2629,42 @@ function App() {
     }
   };
 
-  // Carregar vendedores cadastrados
+  // Carregar vendedores cadastrados — restrito a quem já logou no CRM com token
+  // próprio (tabela usuarios_clickup, exposta via view usuarios_clickup_registrados
+  // sem o token). Se a view falhar, cai pra lista completa do ClickUp (dropdown de
+  // conveniência, não controle de acesso — ver docs/resumo.md).
   const loadVendedores = async () => {
     try {
-      const teamsRes = await fetch('/clickup-api/team');
+      const teamsRes = await fetch('/clickup-api/team', { headers: { ...getSupabaseHeaders() } });
       if (teamsRes.ok) {
         const teamsData = await teamsRes.json();
         if (teamsData.teams && teamsData.teams.length > 0) {
           const teamId = teamsData.teams[0].id;
-          const membersRes = await fetch(`/clickup-api/team/${teamId}`);
+          const membersRes = await fetch(`/clickup-api/team/${teamId}`, { headers: { ...getSupabaseHeaders() } });
           if (membersRes.ok) {
             const membersData = await membersRes.json();
             if (membersData.team && membersData.team.members) {
-              const users = membersData.team.members.map(m => m.user);
+              let users = membersData.team.members.map(m => m.user);
+
+              if (supabaseClient) {
+                try {
+                  const { data: registrados, error: registradosErr } = await supabaseClient
+                    .from('usuarios_clickup_registrados')
+                    .select('clickup_user_id');
+                  if (!registradosErr && registrados) {
+                    const registradosIds = new Set(registrados.map(r => String(r.clickup_user_id)));
+                    users = users.filter(u => registradosIds.has(String(u.id)));
+                  } else if (registradosErr) {
+                    console.warn("Erro ao carregar usuários registrados no CRM, exibindo todo o workspace ClickUp:", registradosErr);
+                  }
+                } catch (registradosErr) {
+                  console.warn("Erro ao carregar usuários registrados no CRM, exibindo todo o workspace ClickUp:", registradosErr);
+                }
+              }
+
               const ocultos = JSON.parse(safeStorage.getItem('crm_vendedores_ocultos') || '[]');
-              const mapped = users.map(u => ({ 
-                id: u.id, 
+              const mapped = users.map(u => ({
+                id: u.id,
                 nome: u.username || u.email,
                 oculto: ocultos.includes(String(u.id)) || ocultos.includes(Number(u.id))
               }));
@@ -2583,7 +2741,9 @@ function App() {
       const idClean = String(clickupId).replace('#', '');
       let data = null;
       try {
-        const res = await fetch(`/api/atividades?clickup_negocio_id=${idClean}`);
+        const res = await fetch(`/api/atividades?clickup_negocio_id=${idClean}`, {
+          headers: { ...getSupabaseHeaders() }
+        });
         if (res.ok) {
           const text = await res.text();
           try { data = JSON.parse(text); } catch (e) {}
@@ -2622,7 +2782,7 @@ function App() {
       const idClean = String(clickupTaskId).replace('#', '');
       const res = await fetch('/api/atividades', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
         body: JSON.stringify({
           clickup_negocio_id: idClean,
           texto: novaAtividade.trim()
@@ -2650,7 +2810,7 @@ function App() {
     try {
       const res = await fetch(`/api/atividades/${atividadeId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
         body: JSON.stringify({ texto: editingAtividadeTexto.trim() })
       });
       if (res.ok) {
@@ -2674,7 +2834,10 @@ function App() {
     if (!confirm('Deseja realmente excluir esta atividade?')) return;
     setSavingAtividade(true);
     try {
-      const res = await fetch(`/api/atividades/${atividadeId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/atividades/${atividadeId}`, {
+        method: 'DELETE',
+        headers: { ...getSupabaseHeaders() }
+      });
       if (res.ok) {
         showToast('Atividade excluída com sucesso!', 'success');
         fetchAtividades(clickupTaskId);
@@ -2801,7 +2964,7 @@ function App() {
       const cuTaskId = task.clickup_negocio_id || (task.id && !String(task.id).includes('-') ? task.id : null);
       if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
         try {
-          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE' });
+          await fetch(`/clickup-api/task/${cuTaskId}`, { method: 'DELETE', headers: { ...getSupabaseHeaders() } });
         } catch (e) {
           console.warn('[ClickUp Delete] Falha ao excluir negócio no ClickUp:', e);
         }
@@ -2828,7 +2991,7 @@ function App() {
     let roData = { roInfra: '', roSw1: '', roSw2: '', roSw3: '', roSw4: '' };
     if (cuTaskId && !String(cuTaskId).startsWith('crm_neg_')) {
       try {
-        const res = await fetch(`/clickup-api/task/${cuTaskId}`);
+        const res = await fetch(`/clickup-api/task/${cuTaskId}`, { headers: { ...getSupabaseHeaders() } });
         if (res.ok) {
           const t = await res.json();
           const cfMap = new Map((t.custom_fields || []).map(f => [f.id, f.value]));
@@ -2905,7 +3068,7 @@ function App() {
 
           await fetch(`/clickup-api/task/${cuTaskId}?custom_item_id=1004`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
             body: JSON.stringify({
               name: editNegocioDrawerForm.nome.trim(),
               custom_item_id: 1004,
@@ -3329,16 +3492,29 @@ function App() {
     const allItens = rawCommercialRef.current || [];
 
     // 1. Filtrar propostas do período
+    // Blindagem: além do texto de situacao/data_fechamento na própria proposta,
+    // exige que o negócio pai esteja de fato no estágio correspondente
+    // (negocios.estagio é a fonte real da verdade — ver migration 20260819e).
+    // Isso evita que uma proposta com data_fechamento desalinhada (dado legado
+    // ou qualquer escrita futura que escape do trigger de consistência) volte
+    // a inflar os números do relatório.
+    const estagioDoNegocio = (p) => {
+      const cid = String(p?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid ? negociosEstagioRef.current.get(cid) : undefined;
+    };
+
     const isWonProp = (p) => {
       if (!p || !p.situacao || !p.data_fechamento) return false;
       const s = p.situacao.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      return estagioDoNegocio(p) === 'Ganho';
     };
 
     const isLostProp = (p) => {
       if (!p || !p.situacao) return false;
       const s = p.situacao.trim().toLowerCase();
-      return s === 'perdido' || s === 'cancelado' || s === 'desconsiderada';
+      if (s !== 'perdido' && s !== 'cancelado' && s !== 'desconsiderada') return false;
+      return estagioDoNegocio(p) === 'Perdido';
     };
 
     const currentProps = allProps.filter(p => {
@@ -3531,24 +3707,33 @@ function App() {
     setDashboardFetching(true);
     try {
       if (forceRefresh || rawProposalsRef.current.length === 0) {
-        const [propsRes, itensRes] = await Promise.all([
+        const [propsRes, itensRes, negociosRes] = await Promise.all([
           client.from('propostas').select('*').order('created_at', { ascending: false }),
           client.from('itens_proposta').select(`
             quantidade,
             preco_unitario,
             distribuidor_id,
             produto_id,
-            propostas(created_at, data_fechamento, situacao),
+            propostas(created_at, data_fechamento, situacao, clickup_negocio_id),
             distribuidores(nome),
             produtos(nome, fabricante)
-          `)
+          `),
+          client.from('negocios').select('clickup_negocio_id, estagio')
         ]);
 
         if (propsRes.error) throw propsRes.error;
         if (itensRes.error) throw itensRes.error;
+        if (negociosRes.error) throw negociosRes.error;
 
         rawProposalsRef.current = propsRes.data || [];
         rawCommercialRef.current = itensRes.data || [];
+
+        const estagioMap = new Map();
+        (negociosRes.data || []).forEach(n => {
+          const cid = String(n.clickup_negocio_id || '').replace('#', '').trim();
+          if (cid) estagioMap.set(cid, n.estagio);
+        });
+        negociosEstagioRef.current = estagioMap;
       }
 
       const activeF = currentDateFilterRef.current;
@@ -3565,13 +3750,17 @@ function App() {
   const topProductsAggregated = useMemo(() => {
     if (!commercialData || commercialData.length === 0) return [];
     
-    // Filtrar apenas itens de propostas com situação GANHO ou SELECIONADA
+    // Filtrar apenas itens de propostas com situação GANHO ou SELECIONADA, e cujo
+    // negócio pai esteja de fato em estágio Ganho (mesma blindagem de isWonProp
+    // em applyFilterRange — ver migration 20260819e).
     const wonItems = commercialData.filter(item => {
       const prop = Array.isArray(item.propostas) ? item.propostas[0] : item.propostas;
       const sit = prop?.situacao;
       if (!sit || !prop?.data_fechamento) return false;
       const s = sit.trim().toLowerCase();
-      return s === 'ganho' || s === 'selecionada';
+      if (s !== 'ganho' && s !== 'selecionada') return false;
+      const cid = String(prop?.clickup_negocio_id || '').replace('#', '').trim();
+      return cid && negociosEstagioRef.current.get(cid) === 'Ganho';
     });
 
     const groups = {};
@@ -4069,7 +4258,7 @@ function App() {
       const cuId = updatedProp.clickup_negocio_id || clickupTaskId;
       if (cuId && !updatedProp.data_inicio) {
         const cleanCuId = cuId.startsWith('#') ? cuId.substring(1) : cuId;
-        fetch(`/clickup-api/task/${cleanCuId}`).then(res => {
+        fetch(`/clickup-api/task/${cleanCuId}`, { headers: { ...getSupabaseHeaders() } }).then(res => {
           if (res.ok) return res.json();
           return null;
         }).then(taskData => {
@@ -4246,7 +4435,8 @@ function App() {
       // 1. Obter detalhes da tarefa atual (Proposta)
       const taskRes = await fetch(`/clickup-api/task/${cleanTaskId}`, {
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          ...getSupabaseHeaders()
         }
       });
       if (!taskRes.ok) {
@@ -4286,7 +4476,8 @@ function App() {
         const resVal = await fetch(urlValue, {
           method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...getSupabaseHeaders()
           },
           body: JSON.stringify(bodyFormatado)
         });
@@ -4302,7 +4493,8 @@ function App() {
             console.log(`[${new Date().toISOString()}] Iniciando verificação GET pós-POST para a tarefa ${cleanTaskId}...`);
             const verifyRes = await fetch(`/clickup-api/task/${cleanTaskId}`, {
               headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                ...getSupabaseHeaders()
               }
             });
             if (verifyRes.ok) {
@@ -4343,7 +4535,8 @@ function App() {
         const resGlobal = await fetch(urlGlobal, {
           method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...getSupabaseHeaders()
           },
           body: JSON.stringify(bodyFormatado)
         });
@@ -4359,7 +4552,8 @@ function App() {
             console.log(`[${new Date().toISOString()}] Iniciando verificação GET pós-POST para a tarefa pai ${parentTaskId}...`);
             const verifyRes = await fetch(`/clickup-api/task/${parentTaskId}`, {
               headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                ...getSupabaseHeaders()
               }
             });
             if (verifyRes.ok) {
@@ -4496,7 +4690,7 @@ function App() {
         if (Object.keys(datesPayload).length > 0) {
           fetch(`/clickup-api/task/${cleanCuId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
             body: JSON.stringify(datesPayload)
           }).catch(err => console.error("Erro ao sincronizar datas no ClickUp:", err));
         }
@@ -4788,7 +4982,8 @@ function App() {
     setSearchResult('');
     try {
       const clickupHeaders = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...getSupabaseHeaders()
       };
 
       // 1. Obter os Workspaces (Teams) para achar o team_id
@@ -5159,52 +5354,8 @@ function App() {
     }
   };
 
-  const handleCreateVendedor = async (e) => {
-    e.preventDefault();
-    if (!newVendedorName.trim()) return;
-    try {
-      const { data, error } = await supabaseClient
-        .from('vendedores')
-        .insert({ nome: newVendedorName.trim() }).select().single();
-      if (error) throw error;
-      showToast('Vendedor adicionado!', 'success');
-      setNewVendedorName('');
-      await loadVendedores();
-    } catch (err) {
-      showToast(err.message || 'Erro ao cadastrar vendedor', 'error');
-    }
-  };
-
-  const handleSaveVendedorEdit = async (e) => {
-    e.preventDefault();
-    try {
-      const { error } = await supabaseClient
-        .from('vendedores')
-        .update({ nome: editingVendedor.nome })
-        .eq('id', editingVendedor.id);
-      if (error) throw error;
-      showToast('Vendedor atualizado com sucesso!', 'success');
-      setEditingVendedor(null);
-      loadVendedores();
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao editar vendedor.', 'error');
-    }
-  };
-
-  const handleDeleteVendedor = async (id) => {
-    if (!confirm('Deseja realmente excluir este vendedor?')) return;
-    try {
-      const { error } = await supabaseClient.from('vendedores').delete().eq('id', id);
-      if (error) throw error;
-      showToast('Vendedor excluído com sucesso!', 'success');
-      loadVendedores();
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao excluir vendedor.', 'error');
-    }
-  };
-
+  // Lista de vendedores agora é derivada automaticamente (ClickUp ∩ usuarios_clickup,
+  // ver loadVendedores) — criar/editar/excluir manualmente não existe mais, só ocultar.
   const handleToggleOcultoVendedor = async (vendedor) => {
     const isOculto = !vendedor.oculto;
     const updatedVendedores = vendedores.map(v => 
@@ -6631,22 +6782,6 @@ function App() {
               </div>
             </div>
 
-            {/* Card Informativo de Integridade de Dados */}
-            <div className="p-2.5 px-3.5 rounded-xl bg-indigo-50/70 border border-indigo-100 flex items-center justify-between text-xs text-indigo-950 shadow-sm">
-              <div className="flex items-center space-x-2.5">
-                <span className="flex h-2 w-2 relative shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span className="font-semibold text-slate-800">
-                  <strong className="text-indigo-900 font-bold">Painel Executivo Calibrado:</strong> Dados e itens 100% integrados e sincronizados em tempo real entre <span className="text-indigo-600 font-semibold">Supabase</span>, <span className="text-indigo-600 font-semibold">ClickUp</span> e <span className="text-indigo-600 font-semibold">Agendor</span>.
-                </span>
-              </div>
-              <span className="hidden sm:inline-flex text-[11px] font-bold text-emerald-700 bg-emerald-100/70 border border-emerald-300/60 px-2.5 py-0.5 rounded-full">
-                100% Calibrado
-              </span>
-            </div>
-
             {/* BLOCO 1: RESUMO SAZONAL DE VENDAS */}
             <div className="bg-white border border-slate-200/80 rounded-xl p-6 flex flex-col transition-all duration-300 hover:border-slate-200 shadow-sm shadow-slate-100/50">
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
@@ -7257,6 +7392,7 @@ function App() {
                     supabaseClient={supabaseClient}
                     contaFixa={null}
                     contas={contasParaBusca}
+                    vendedores={vendedoresVisiveis}
                     onClose={() => setShowNovaOportunidadeKanban(false)}
                     onCriado={() => {
                       setShowNovaOportunidadeKanban(false);
@@ -7271,7 +7407,7 @@ function App() {
 
         {empresasTabMounted && (
           <div className={activeTab === 'empresas' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} vendedores={vendedoresVisiveis} />
           </div>
         )}
 
@@ -8112,47 +8248,9 @@ function App() {
                   <div className="space-y-6">
                     <div className="mb-4">
                       <h2 className="text-base font-bold text-slate-900">Vendedores Cadastrados</h2>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">Gerencie a equipe de vendas.</p>
-                    </div>
-
-                    <div className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs">
-                      <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-3">
-                        {editingVendedor ? 'Editar Vendedor' : 'Novo Vendedor'}
-                      </h3>
-                      <form 
-                        onSubmit={editingVendedor ? handleSaveVendedorEdit : handleCreateVendedor}
-                        className="flex gap-2"
-                      >
-                        <input 
-                          type="text" 
-                          required
-                          placeholder="Ex: Ana Silva"
-                          value={editingVendedor ? editingVendedor.nome : newVendedorName}
-                          onChange={(e) => {
-                            if (editingVendedor) {
-                              setEditingVendedor({ ...editingVendedor, nome: e.target.value });
-                            } else {
-                              setNewVendedorName(e.target.value);
-                            }
-                          }}
-                          className="flex-1 rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
-                        />
-                        <button 
-                          type="submit"
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
-                        >
-                          {editingVendedor ? 'Salvar' : 'Adicionar'}
-                        </button>
-                        {editingVendedor && (
-                          <button 
-                            type="button"
-                            onClick={() => setEditingVendedor(null)}
-                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                          >
-                            Cancelar
-                          </button>
-                        )}
-                      </form>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        Lista derivada automaticamente de quem está cadastrado no ClickUp e já fez login no CRM com o próprio token. Use "Ocultar" para remover alguém das listas de responsável sem afetar o cadastro.
+                      </p>
                     </div>
 
                     <div className="max-h-60 overflow-y-auto bg-white border border-slate-200/80 rounded-xl shadow-xs">
@@ -8173,26 +8271,12 @@ function App() {
                               <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
                                 <td className="p-3 font-semibold text-slate-800">{v.nome}</td>
                                 <td className="p-3 text-center space-x-2">
-                                  <button 
+                                  <button
                                     onClick={() => handleToggleOcultoVendedor(v)}
                                     className={`${v.oculto ? 'text-emerald-600 hover:text-emerald-800' : 'text-amber-600 hover:text-amber-800'} font-semibold cursor-pointer`}
                                     title={v.oculto ? "Exibir no CRM" : "Ocultar no CRM"}
                                   >
                                     {v.oculto ? "Exibir" : "Ocultar"}
-                                  </button>
-                                  <span className="text-slate-300">•</span>
-                                  <button 
-                                    onClick={() => setEditingVendedor(v)}
-                                    className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-                                  >
-                                    Editar
-                                  </button>
-                                  <span className="text-slate-300">•</span>
-                                  <button 
-                                    onClick={() => handleDeleteVendedor(v.id)}
-                                    className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
-                                  >
-                                    Excluir
                                   </button>
                                 </td>
                               </tr>
@@ -9111,8 +9195,8 @@ function App() {
                                       const n = (c.name || '').toLowerCase();
                                       return !n.includes('congelad') && !n.includes('ganho') && !n.includes('perdido');
                                     }) || safeColumns[0];
-                                    await handleOpportunityStateChange(selectedTask.id, firstActiveCol.id);
-                                    showToast('Negócio Descongelado! Retornou ao Pipeline ❄️', 'info');
+                                    const ok = await handleOpportunityStateChange(selectedTask.id, firstActiveCol.id);
+                                    if (ok) showToast('Negócio Descongelado! Retornou ao Pipeline ❄️', 'info');
                                   }
                                 }}
                                 className="bg-sky-500 hover:bg-sky-600 text-white px-2.5 py-0.5 rounded-full text-[10px] font-extrabold shadow-sm shadow-sky-500/30 flex items-center gap-1.5 cursor-pointer animate-pulse ring-2 ring-sky-300 transition-all"
@@ -9128,8 +9212,8 @@ function App() {
                             <button
                               onClick={async () => {
                                 if (selectedTask && congeladoOption) {
-                                  await handleOpportunityStateChange(selectedTask.id, congeladoOption.id);
-                                  showToast('Negócio Congelado ❄️', 'info');
+                                  const ok = await handleOpportunityStateChange(selectedTask.id, congeladoOption.id);
+                                  if (ok) showToast('Negócio Congelado ❄️', 'info');
                                 } else {
                                   showToast('Estágio Congelado não configurado.', 'warning');
                                 }
@@ -9183,10 +9267,25 @@ function App() {
                                 <button
                                   key={col.id || idx}
                                   onClick={async () => {
-                                    if (selectedTask) {
-                                      setSelectedTask(prev => (prev ? { ...prev, estagio: col.name } : prev));
-                                      await handleOpportunityStateChange(selectedTask.id, col.id);
+                                    if (!selectedTask) return;
+                                    const colName = (col.name || '').toLowerCase();
+                                    // Mesma proteção do drag-and-drop no Kanban (ver handleDrop):
+                                    // ir direto pra Ganho/Perdido por aqui pula o fluxo que grava
+                                    // data_fechamento/motivo_perda, deixando o negócio invisível
+                                    // no relatório de faturamento.
+                                    if (colName.includes('ganho') || colName.includes('perdido')) {
+                                      if (!currentProposta) return;
+                                      setCloseDate(new Date().toISOString().split('T')[0]);
+                                      if (colName.includes('ganho')) {
+                                        setShowCloseModal('win');
+                                      } else {
+                                        setSelectedLossReason('');
+                                        setShowCloseModal('loss');
+                                      }
+                                      return;
                                     }
+                                    setSelectedTask(prev => (prev ? { ...prev, estagio: col.name } : prev));
+                                    await handleOpportunityStateChange(selectedTask.id, col.id);
                                   }}
                                   title={`Mover para: ${col.name}`}
                                   className={`relative flex flex-col items-center justify-center py-2.5 px-1 rounded-xl transition-all duration-300 cursor-pointer group ${
@@ -9372,6 +9471,25 @@ function App() {
                       </svg>
                       <span>Atividades</span>
                       {drawerSection === 'status' && (
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
+                      )}
+                    </button>
+
+                    {/* Aba Empresa */}
+                    <button
+                      onClick={() => { setDrawerSection('empresa'); }}
+                      title="Empresa"
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+                        drawerSection === 'empresa'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l8-4v18M13 21V11l6 3v7M9 9h.01M9 12h.01M9 15h.01" />
+                      </svg>
+                      <span>Empresa</span>
+                      {drawerSection === 'empresa' && (
                         <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                     </button>
@@ -9582,6 +9700,138 @@ function App() {
                             </div>
                           )}
                         </div>
+                      </div>
+                    )}
+
+                    {/* === ABA: EMPRESA === */}
+                    {drawerSection === 'empresa' && (
+                      <div className="px-1 space-y-4 pb-4">
+                        {!selectedTask?.conta_id ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                            <div className="w-14 h-14 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center">
+                              <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l8-4v18M13 21V11l6 3v7" />
+                              </svg>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-500">Nenhuma empresa vinculada a este negócio.</p>
+                          </div>
+                        ) : loadingEmpresaDoNegocio && !empresaDoNegocio ? (
+                          <div className="flex items-center justify-center py-12">
+                            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                        ) : !empresaDoNegocio ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-2 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                            <p className="text-xs font-semibold text-slate-500">Não foi possível carregar os dados da empresa.</p>
+                          </div>
+                        ) : (() => {
+                          const tier = normalizeTier(empresaDoNegocio.account_tier);
+                          const status = normalizeStatus(empresaDoNegocio.status);
+                          return (
+                            <React.Fragment>
+                              {/* Cabeçalho */}
+                              <div className="flex items-start gap-3">
+                                <AvatarInicial nome={empresaDoNegocio.nome} size="lg" />
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-sm font-black text-slate-900 leading-tight truncate">{empresaDoNegocio.nome}</h4>
+                                  {empresaDoNegocio.razao_social && empresaDoNegocio.razao_social !== empresaDoNegocio.nome && (
+                                    <p className="text-xs text-slate-500 font-medium truncate">{empresaDoNegocio.razao_social}</p>
+                                  )}
+                                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                                    {formatCNPJ(empresaDoNegocio.cnpj) || 'CNPJ não informado'}
+                                    {empresaDoNegocio.cidade ? ` · ${empresaDoNegocio.cidade}/${empresaDoNegocio.estado}` : ''}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                    <span className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${status.color}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>{status.label}
+                                    </span>
+                                    {tier && (
+                                      <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${tier.color}`}>
+                                        <tier.Icon size={10} /> {tier.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Dados Corporativos */}
+                              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                                <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-100/80">
+                                  <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Dados Corporativos</h5>
+                                </div>
+                                <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3.5">
+                                  <DadoCampo label="CNPJ" value={formatCNPJ(empresaDoNegocio.cnpj)} mono />
+                                  <DadoCampo label="Insc. Estadual" value={empresaDoNegocio.inscricao_estadual} mono />
+                                  <DadoCampo label="Ciclo de Faturamento" value={empresaDoNegocio.billing_cycle} />
+                                  <DadoCampo label="Segmento" value={empresaDoNegocio.industry} />
+                                </dl>
+                              </div>
+
+                              {/* Contato Corporativo + Localização */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                                  <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-100/80">
+                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Contato Corporativo</h5>
+                                  </div>
+                                  <dl className="px-4 py-3.5 space-y-2.5">
+                                    <DadoCampo label="E-mail" value={empresaDoNegocio.email} href={empresaDoNegocio.email ? `mailto:${empresaDoNegocio.email}` : null} />
+                                    <DadoCampo label="Telefone" value={formatPhone(empresaDoNegocio.telefone)} href={empresaDoNegocio.telefone ? `tel:${empresaDoNegocio.telefone}` : null} />
+                                  </dl>
+                                </div>
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                                  <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-100/80">
+                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Localização</h5>
+                                  </div>
+                                  <div className="px-4 py-3.5 space-y-1">
+                                    <p className="text-xs font-bold text-slate-900">{empresaDoNegocio.rua || '—'}</p>
+                                    <p className="text-[11px] text-slate-500 font-medium">
+                                      {[empresaDoNegocio.cidade, empresaDoNegocio.estado].filter(Boolean).join(' - ') || '—'}
+                                      {empresaDoNegocio.cep ? ` · CEP ${empresaDoNegocio.cep}` : ''}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Contatos */}
+                              <div>
+                                <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                                  Contatos ({contatosDoNegocio.length})
+                                </span>
+                                {contatosDoNegocio.length === 0 ? (
+                                  <div className="text-center py-8 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                                    <p className="text-xs font-semibold text-slate-500">Nenhum contato cadastrado para esta empresa.</p>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2.5">
+                                    {contatosDoNegocio.map(c => (
+                                      <div key={c.id} className="bg-white rounded-2xl border border-slate-200/90 p-3.5">
+                                        <div className="flex items-center gap-3">
+                                          <AvatarInicial nome={c.nome} size="sm" />
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                              <p className="text-xs font-bold text-slate-900 truncate">{c.nome}</p>
+                                              {c.champion && <span className="shrink-0 text-amber-500" title="Champion / Principal Decisor">★</span>}
+                                            </div>
+                                            <p className="text-[11px] text-slate-500 font-medium truncate">{c.cargo || 'Cargo não informado'}</p>
+                                          </div>
+                                          {c.email && (
+                                            <a href={`mailto:${c.email}`} title={`Enviar e-mail para ${c.email}`} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-sky-50 text-sky-700 border border-sky-200 rounded-lg text-[10px] font-bold hover:bg-sky-100 transition-colors">
+                                              E-mail
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <p className="text-[10px] text-slate-400 text-center pt-1">
+                                Para editar os dados da empresa ou dos contatos, use a aba Empresas.
+                              </p>
+                            </React.Fragment>
+                          );
+                        })()}
                       </div>
                     )}
 
