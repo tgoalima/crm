@@ -2,8 +2,14 @@
   "name": "suprimatica-crm",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i styles.css -o dist/styles.css --minify",
+    "build:js": "esbuild empresas.js --loader:.js=jsx --jsx=transform --jsx-factory=React.createElement --jsx-fragment=React.Fragment --bundle=false --minify --sourcemap --outfile=dist/empresas.js && esbuild app.js --loader:.js=jsx --jsx=transform --jsx-factory=React.createElement --jsx-fragment=React.Fragment --bundle=false --minify --sourcemap --outfile=dist/app.js",
+    "build": "npm run build:css && npm run build:js"
+  },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.0.0"
   }
 }

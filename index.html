@@ -7,19 +7,18 @@
   
   <!-- Estilos de Produção (Tailwind v4 + Custom CSS compilados) -->
   <link rel="stylesheet" href="/dist/styles.css?v=28.0">
-  
-  <!-- Supabase JS Client CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
-  <!-- React & ReactDOM CDN -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <!-- Babel Standalone para compilação instantânea sem cache preso -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Chart.js CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Supabase JS Client CDN (versão pinada — a mesma que já estava sendo
+       servida via @2 antes, só travada pra não quebrar numa atualização
+       silenciosa do CDN) -->
+  <script defer crossorigin src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
+
+  <!-- React & ReactDOM CDN -->
+  <script defer crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script defer crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Chart.js CDN (versão pinada, mesmo motivo do Supabase acima) -->
+  <script defer crossorigin src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="h-screen overflow-hidden bg-slate-50 text-slate-800 flex flex-col antialiased">
   <!-- Root do App React -->
@@ -31,9 +30,12 @@
     </div>
   </div>
 
-  <!-- Módulos adicionais do App React -->
-  <script type="text/babel" src="/empresas.js?v=5.2"></script>
-  <!-- Script principal do App React com Babel -->
-  <script type="text/babel" src="/app.js?v=58.6"></script>
+  <!-- Módulos adicionais do App React — compilados via esbuild (npm run build),
+       não mais transpilados no navegador via Babel Standalone (removido:
+       eliminava ~2-3MB de download + parse/transpile de ~12 mil linhas de
+       JSX a cada carregamento, pra todo usuário). `defer` preserva a ordem
+       de execução dos scripts abaixo, incluindo os CDN acima. -->
+  <script defer src="/dist/empresas.js?v=5.2"></script>
+  <script defer src="/dist/app.js?v=58.6"></script>
 </body>
 </html>
