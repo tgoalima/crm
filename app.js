@@ -1,6 +1,6 @@
 // App React para o Gerador de Propostas Comerciais com Versionamento (Modelo de Produção)
 
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
 if (typeof Chart !== 'undefined') {
   Chart.Tooltip.positioners.followMouse = function(elements, eventPosition) {
@@ -1343,6 +1343,19 @@ function App() {
   // por useMemo's (distributorTotals, manufacturerTotals) que rodam antes
   // de outros hooks mais abaixo no arquivo.
   const negociosEstagioRef = useRef(new Map());
+  // TTL (60s) pra evitar rebuscar tabela inteira do zero toda vez que o
+  // usuário troca de aba e volta pro Kanban/Relatórios — antes rebuscava
+  // sempre, mesmo se a última busca tivesse sido há poucos segundos.
+  // Atualizados sempre que a busca correspondente de fato roda (por
+  // qualquer motivo, não só troca de aba), pra refletir o dado mais recente.
+  const TAB_CACHE_TTL_MS = 60000;
+  const lastKanbanFetchAtRef = useRef(0);
+  const lastDashboardFetchAtRef = useRef(0);
+  // Espelha activeTab pra uso dentro do setInterval de auto-polling — sem
+  // isso, fetchAllData (fechada dentro do useEffect do interval, que não
+  // depende de activeTab) sempre enxergaria a aba de quando o interval foi
+  // criado, não a aba atual (mesmo motivo de currentDateFilterRef abaixo).
+  const activeTabRef = useRef(null);
   const [supabaseClient, setSupabaseClient] = useState(null);
   const [dbConnected, setDbConnected] = useState(false);
   const [session, setSession] = useState(null);
@@ -1359,6 +1372,7 @@ function App() {
   };
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   // EmpresasTab é um componente próprio (empresas.js) com seu próprio
   // fetch/estado interno — sem isso, cada troca de aba para "Empresas"
   // desmontava e remontava o componente do zero, refazendo a consulta
@@ -2188,6 +2202,7 @@ function App() {
     if (kanbanTasks.length === 0 && !silent) {
       setLoadingKanban(true);
     }
+    lastKanbanFetchAtRef.current = Date.now();
     try {
       // Negócios, propostas e itens_proposta — tudo direto do Supabase agora.
       // O Kanban não faz mais nenhuma chamada ao ClickUp pra se popular (a
@@ -2317,7 +2332,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (activeTab === 'kanban') {
+    if (activeTab === 'kanban' && Date.now() - lastKanbanFetchAtRef.current > TAB_CACHE_TTL_MS) {
       fetchKanbanData();
     }
   }, [activeTab, supabaseClient]);
@@ -2438,11 +2453,15 @@ function App() {
   };
 
   // Handlers do Drag & Drop Nativo
-  const handleDragStart = (e, task) => {
+  // useCallback com deps vazias: só usa params + window, nada do escopo do
+  // componente — necessário pra o React.memo(KanbanCard) de fato evitar
+  // re-render (sem isso, cada render de App() cria uma função nova e o memo
+  // nunca bate na comparação rasa de props).
+  const handleDragStart = useCallback((e, task) => {
     window.getSelection()?.removeAllRanges();
     e.dataTransfer.setData("text/plain", task.id);
     e.dataTransfer.effectAllowed = "move";
-  };
+  }, []);
 
   const handleDrop = async (e, targetOptionId) => {
     e.preventDefault();
@@ -2501,7 +2520,9 @@ function App() {
   };
 
   // Handler de Clique para abrir o Drawer
-  const handleCardClick = (task) => {
+  // useCallback com deps vazias: só chama setters de estado (sempre estáveis
+  // pelo React), mesmo motivo do handleDragStart acima.
+  const handleCardClick = useCallback((task) => {
     setSelectedTask(task);
     setClickupTaskId(task.id);
     setDrawerTab('details');
@@ -2509,7 +2530,7 @@ function App() {
     setEmpresaDoNegocio(null);
     setContatosDoNegocio([]);
     setShowDrawer(true);
-  };
+  }, []);
 
   const resolveTaskIdFormat = async (rawId) => {
     if (!supabaseClient || !rawId) return rawId;
@@ -3780,6 +3801,7 @@ function App() {
     setDashboardFetching(true);
     try {
       if (forceRefresh || rawProposalsRef.current.length === 0) {
+        lastDashboardFetchAtRef.current = Date.now();
         const [propsRes, itensRes, negociosRes] = await Promise.all([
           client.from('propostas').select('*').order('created_at', { ascending: false }),
           client.from('itens_proposta').select(`
@@ -4177,7 +4199,8 @@ function App() {
 
   useEffect(() => {
     if (activeTab === 'relatorios' && dbConnected) {
-      loadDashboardData();
+      const stale = Date.now() - lastDashboardFetchAtRef.current > TAB_CACHE_TTL_MS;
+      loadDashboardData(supabaseClient, false, stale);
     }
   }, [activeTab, dbConnected, startDate, endDate]);
 
@@ -4195,11 +4218,18 @@ function App() {
   const fetchAllData = async (silent = false) => {
     console.log(`[DEBUG] Auto-polling: Atualizando dados ${silent ? 'silenciosamente' : 'com loading'}...`);
     try {
-      await fetchKanbanData(silent);
+      // Só atualiza as duas buscas "pesadas" (negocios+propostas+itens_proposta,
+      // a mesma tripla em ambas) pra aba que está de fato visível agora — antes
+      // rodava as duas sempre, mesmo com o usuário olhando outra aba. As demais
+      // abas continuam ficando atualizadas na hora em que o usuário troca pra
+      // elas, via o cache com TTL (ver lastKanbanFetchAtRef/lastDashboardFetchAtRef).
+      if (activeTabRef.current === 'kanban') {
+        await fetchKanbanData(silent);
+      }
       if (supabaseClient) {
         await fetchCommercialTasks(supabaseClient, silent);
       }
-      if (dbConnected) {
+      if (dbConnected && activeTabRef.current === 'relatorios') {
         await loadDashboardData(supabaseClient, silent);
       }
       if (dbConnected && clickupTaskId) {
