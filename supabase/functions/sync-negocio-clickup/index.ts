@@ -8,6 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { resolveClickUpToken } from "../_shared/resolve-token.ts";
+import { clickupFetch } from "../_shared/clickup-fetch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -67,6 +68,24 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Idempotência: o `record` do payload reflete o estado da linha NO MOMENTO
+    // do INSERT — se o mesmo evento de webhook for entregue mais de uma vez
+    // (retry do pg_net, disparo duplicado), as duas entregas veem
+    // clickup_negocio_id NULL e ambas tentariam criar a tarefa. Reconsulta o
+    // estado atual antes de criar, pra pegar o caso em que uma entrega
+    // concorrente já terminou primeiro.
+    const { data: atual } = await supabase
+      .from("negocios")
+      .select("clickup_negocio_id")
+      .eq("id", record.id)
+      .single();
+    if (atual?.clickup_negocio_id) {
+      return new Response(JSON.stringify({ success: true, message: "Já sincronizado (idempotência)" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     // 1) Buscar clickup_account_id da conta
     const { data: conta, error: contaErr } = await supabase
       .from("contas")
@@ -98,7 +117,7 @@ Deno.serve(async (req) => {
     const responsavelId = Number(record.responsavel_clickup_id);
     const assignees = Number.isFinite(responsavelId) && responsavelId > 0 ? [responsavelId] : undefined;
 
-    const createRes = await fetch(`https://api.clickup.com/api/v2/list/${NEGOCIOS_LIST_ID}/task`, {
+    const createRes = await clickupFetch(`https://api.clickup.com/api/v2/list/${NEGOCIOS_LIST_ID}/task`, {
       method: "POST",
       headers: { Authorization: clickupToken, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -119,7 +138,7 @@ Deno.serve(async (req) => {
     const novoClickupId = created.id;
 
     // 4) Vincular à Conta (não bloqueia — se falhar, o negócio já existe e fica sem vínculo visual no ClickUp)
-    const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
+    const linkRes = await clickupFetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
       method: "POST",
       headers: { Authorization: clickupToken },
     });

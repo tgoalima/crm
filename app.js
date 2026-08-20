@@ -1155,7 +1155,7 @@ const SEGMENTOS_DEFAULT_APP = [
   'Governo & Público', 'Automotivo', 'Mineração', 'Telecomunicações',
 ];
 
-const SegmentosSettings = () => {
+const SegmentosSettings = ({ client }) => {
   const [segmentos, setSegmentos] = useState(() => {
     try {
       const s = localStorage.getItem('crm_segmentos');
@@ -1166,37 +1166,82 @@ const SegmentosSettings = () => {
   const [editandoIdx, setEditandoIdx] = useState(null);
   const [editandoNome, setEditandoNome] = useState('');
   const [busca, setBusca] = useState('');
+  // nome -> id no Supabase, pra viabilizar update/delete por id (a lista em si
+  // continua sendo um array de strings, pra não mexer no resto do componente)
+  const idsRef = useRef({});
+
+  // Supabase é a fonte de verdade (antes só localStorage, divergia entre
+  // navegadores/máquinas — inclusive o módulo Empresa 360 em empresas.js lia
+  // essa mesma chave de cache). localStorage vira só cache pra load instantâneo.
+  const carregar = async () => {
+    if (!client) return;
+    const { data, error } = await client.from('segmentos').select('id, nome').eq('ativo', true).order('nome');
+    if (!error && data) {
+      idsRef.current = Object.fromEntries(data.map(s => [s.nome, s.id]));
+      const nomes = data.map(s => s.nome);
+      setSegmentos(nomes);
+      try { localStorage.setItem('crm_segmentos', JSON.stringify(nomes)); } catch (e) {}
+    }
+  };
+  useEffect(() => { carregar(); }, [client]);
 
   const salvar = (lista) => {
     setSegmentos(lista);
     localStorage.setItem('crm_segmentos', JSON.stringify(lista));
   };
 
-  const adicionar = () => {
+  const adicionar = async () => {
     const n = novoNome.trim();
     if (!n || segmentos.includes(n)) return;
-    salvar([...segmentos, n].sort((a, b) => a.localeCompare(b)));
     setNovoNome('');
+    if (client) {
+      const { error } = await client.from('segmentos').insert({ nome: n });
+      if (error) { alert('Erro ao adicionar segmento: ' + error.message); return; }
+      await carregar();
+    } else {
+      salvar([...segmentos, n].sort((a, b) => a.localeCompare(b)));
+    }
   };
 
-  const excluir = (idx) => {
-    if (!confirm(`Excluir o segmento "${segmentos[idx]}"?`)) return;
-    salvar(segmentos.filter((_, i) => i !== idx));
+  const excluir = async (idx) => {
+    const nome = segmentos[idx];
+    if (!confirm(`Excluir o segmento "${nome}"?`)) return;
+    if (client && idsRef.current[nome]) {
+      const { error } = await client.from('segmentos').delete().eq('id', idsRef.current[nome]);
+      if (error) { alert('Erro ao excluir segmento: ' + error.message); return; }
+      await carregar();
+    } else {
+      salvar(segmentos.filter((_, i) => i !== idx));
+    }
   };
 
-  const salvarEdicao = (idx) => {
+  const salvarEdicao = async (idx) => {
     const n = editandoNome.trim();
     if (!n) return;
-    const nova = [...segmentos];
-    nova[idx] = n;
-    salvar(nova.sort((a, b) => a.localeCompare(b)));
+    const nomeAntigo = segmentos[idx];
     setEditandoIdx(null);
     setEditandoNome('');
+    if (client && idsRef.current[nomeAntigo]) {
+      const { error } = await client.from('segmentos').update({ nome: n }).eq('id', idsRef.current[nomeAntigo]);
+      if (error) { alert('Erro ao renomear segmento: ' + error.message); return; }
+      await carregar();
+    } else {
+      const nova = [...segmentos];
+      nova[idx] = n;
+      salvar(nova.sort((a, b) => a.localeCompare(b)));
+    }
   };
 
-  const resetar = () => {
-    if (!confirm('Restaurar a lista padrão de segmentos?')) return;
-    salvar([...SEGMENTOS_DEFAULT_APP]);
+  const resetar = async () => {
+    if (!confirm('Restaurar os segmentos padrão? (segmentos personalizados adicionados não são removidos)')) return;
+    if (client) {
+      const rows = SEGMENTOS_DEFAULT_APP.map(nome => ({ nome }));
+      const { error } = await client.from('segmentos').upsert(rows, { onConflict: 'nome', ignoreDuplicates: true });
+      if (error) { alert('Erro ao restaurar padrão: ' + error.message); return; }
+      await carregar();
+    } else {
+      salvar([...SEGMENTOS_DEFAULT_APP]);
+    }
   };
 
   const filtrados = segmentos.filter(s => !busca.trim() || s.toLowerCase().includes(busca.toLowerCase()));
@@ -1882,6 +1927,8 @@ function App() {
         loadProducts(supabaseClient);
         loadDistributors(supabaseClient);
         loadVendedores(supabaseClient);
+        loadTiposTarefa(supabaseClient);
+        loadSegmentosCache(supabaseClient);
       } else {
         if (newSession) {
           await supabaseClient.auth.signOut();
@@ -1959,6 +2006,8 @@ function App() {
         loadProducts(client);
         loadDistributors(client);
         loadVendedores(client);
+        loadTiposTarefa(client);
+        loadSegmentosCache(client);
       } else {
         if (session) {
           await client.auth.signOut();
@@ -2626,6 +2675,30 @@ function App() {
     const { data, error } = await client.from('distribuidores').select('*').order('nome');
     if (!error && data) {
       setDistribuidores(data);
+    }
+  };
+
+  // Carregar tipos de tarefa — Supabase é a fonte de verdade (antes só localStorage,
+  // divergia entre navegadores/máquinas). localStorage continua como cache pra
+  // load instantâneo antes da resposta do Supabase chegar.
+  const loadTiposTarefa = async (client = supabaseClient) => {
+    if (!client) return;
+    const { data, error } = await client.from('tipos_tarefa').select('id, nome, emoji').eq('ativo', true).order('nome');
+    if (!error && data) {
+      setTaskTypes(data);
+      try { safeStorage.setItem('crm_cache_task_types', JSON.stringify(data)); } catch (e) {}
+    }
+  };
+
+  // Carregar segmentos — mesma lógica do loadTiposTarefa acima. Só escreve no
+  // localStorage (não há state próprio aqui) porque quem exibe é o componente
+  // SegmentosSettings (mais abaixo) e o módulo Empresa 360 (empresas.js), que
+  // lê essa mesma chave.
+  const loadSegmentosCache = async (client = supabaseClient) => {
+    if (!client) return;
+    const { data, error } = await client.from('segmentos').select('nome').eq('ativo', true).order('nome');
+    if (!error && data) {
+      try { safeStorage.setItem('crm_segmentos', JSON.stringify(data.map(s => s.nome))); } catch (e) {}
     }
   };
 
@@ -8300,18 +8373,25 @@ function App() {
                       <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-3">
                         Novo Tipo de Tarefa
                       </h3>
-                      <form 
-                        onSubmit={(e) => {
+                      <form
+                        onSubmit={async (e) => {
                           e.preventDefault();
                           if (!newTaskTypeName.trim()) return;
-                          const novo = {
-                            id: Date.now().toString(),
-                            nome: newTaskTypeName.trim(),
-                            emoji: newTaskTypeEmoji.trim() || '📋'
-                          };
-                          const atualizados = [...taskTypes, novo];
-                          setTaskTypes(atualizados);
-                          safeStorage.setItem('crm_cache_task_types', JSON.stringify(atualizados));
+                          const nome = newTaskTypeName.trim();
+                          const emoji = newTaskTypeEmoji.trim() || '📋';
+                          if (supabaseClient) {
+                            const { error } = await supabaseClient.from('tipos_tarefa').insert({ nome, emoji });
+                            if (error) {
+                              showToast('Erro ao adicionar tipo de tarefa: ' + error.message, 'error');
+                              return;
+                            }
+                            await loadTiposTarefa();
+                          } else {
+                            const novo = { id: Date.now().toString(), nome, emoji };
+                            const atualizados = [...taskTypes, novo];
+                            setTaskTypes(atualizados);
+                            safeStorage.setItem('crm_cache_task_types', JSON.stringify(atualizados));
+                          }
                           setNewTaskTypeName('');
                           setNewTaskTypeEmoji('');
                           showToast('Tipo de tarefa adicionado!', 'success');
@@ -8371,14 +8451,22 @@ function App() {
                                 <td className="p-3 text-center text-base">{t.emoji}</td>
                                 <td className="p-3 font-semibold text-slate-800">{t.nome}</td>
                                 <td className="p-3 text-center">
-                                  <button 
-                                    onClick={() => {
-                                      if (confirm('Deseja realmente excluir este tipo de tarefa?')) {
+                                  <button
+                                    onClick={async () => {
+                                      if (!confirm('Deseja realmente excluir este tipo de tarefa?')) return;
+                                      if (supabaseClient) {
+                                        const { error } = await supabaseClient.from('tipos_tarefa').delete().eq('id', t.id);
+                                        if (error) {
+                                          showToast('Erro ao excluir tipo de tarefa: ' + error.message, 'error');
+                                          return;
+                                        }
+                                        await loadTiposTarefa();
+                                      } else {
                                         const filtrados = taskTypes.filter(item => item.id !== t.id);
                                         setTaskTypes(filtrados);
                                         safeStorage.setItem('crm_cache_task_types', JSON.stringify(filtrados));
-                                        showToast('Tipo de tarefa excluído!', 'success');
                                       }
+                                      showToast('Tipo de tarefa excluído!', 'success');
                                     }}
                                     className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
                                   >
@@ -8459,7 +8547,7 @@ function App() {
 
                 {/* 6. ABA SEGMENTOS DE ATUAÇÃO */}
                 {settingsActiveTab === 'segmentos' && (
-                  <SegmentosSettings />
+                  <SegmentosSettings client={supabaseClient} />
                 )}
               </main>
             </div>

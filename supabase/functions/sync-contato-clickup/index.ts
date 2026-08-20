@@ -7,6 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { resolveClickUpToken } from "../_shared/resolve-token.ts";
+import { clickupFetch } from "../_shared/clickup-fetch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -33,7 +34,7 @@ async function marcarFalha(supabase: any, contatoId: string, mensagem: string) {
 }
 
 async function buscarCamposDaLista(token: string): Promise<Map<string, string>> {
-  const res = await fetch(`https://api.clickup.com/api/v2/list/${CONTATOS_LIST_ID}/field`, {
+  const res = await clickupFetch(`https://api.clickup.com/api/v2/list/${CONTATOS_LIST_ID}/field`, {
     headers: { Authorization: token },
   });
   const data = await res.json();
@@ -64,6 +65,20 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Idempotência: reconsulta o estado atual antes de criar, pra não duplicar
+    // a tarefa no ClickUp se o mesmo evento de webhook for entregue 2x.
+    const { data: atual } = await supabase
+      .from("contatos")
+      .select("clickup_contact_id")
+      .eq("id", record.id)
+      .single();
+    if (atual?.clickup_contact_id) {
+      return new Response(JSON.stringify({ success: true, message: "Já sincronizado (idempotência)" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     const { data: conta, error: contaErr } = await supabase
       .from("contas")
       .select("clickup_account_id")
@@ -90,7 +105,7 @@ Deno.serve(async (req) => {
     addField(CF_WHATSAPP, record.whatsapp);
     addField(CF_CHAMPION, !!record.champion);
 
-    const createRes = await fetch(`https://api.clickup.com/api/v2/list/${CONTATOS_LIST_ID}/task`, {
+    const createRes = await clickupFetch(`https://api.clickup.com/api/v2/list/${CONTATOS_LIST_ID}/task`, {
       method: "POST",
       headers: { Authorization: clickupToken, "Content-Type": "application/json" },
       body: JSON.stringify({ name: record.nome, custom_fields: customFields }),
@@ -105,7 +120,7 @@ Deno.serve(async (req) => {
     const created = await createRes.json();
     const novoClickupId = created.id;
 
-    const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
+    const linkRes = await clickupFetch(`https://api.clickup.com/api/v2/task/${novoClickupId}/link/${conta.clickup_account_id}`, {
       method: "POST",
       headers: { Authorization: clickupToken },
     });

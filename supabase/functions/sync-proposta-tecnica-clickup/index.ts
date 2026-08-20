@@ -31,6 +31,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { resolveClickUpToken } from "../_shared/resolve-token.ts";
+import { clickupFetch } from "../_shared/clickup-fetch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -86,7 +87,7 @@ function rankToLetters(rank: number): string {
 // Maior letra de versão já existente entre as tarefas "Enviar Proposta vX"
 // da lista técnica (0 se a lista estiver vazia ou não tiver nenhuma).
 async function getMaxVersionRankInList(listaId: string, token: string): Promise<number> {
-  const res = await fetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true`, {
+  const res = await clickupFetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true`, {
     headers: { Authorization: token },
   });
   if (!res.ok) return 0;
@@ -105,7 +106,7 @@ async function getMaxVersionRankInList(listaId: string, token: string): Promise<
 }
 
 async function findListaTecnica(nome: string, token: string): Promise<string | null> {
-  const listRes = await fetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
+  const listRes = await clickupFetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
     headers: { Authorization: token },
   });
   if (!listRes.ok) return null;
@@ -118,7 +119,7 @@ async function getOrCreateListaTecnica(nome: string, token: string): Promise<str
   const existenteId = await findListaTecnica(nome, token);
   if (existenteId) return existenteId;
 
-  const createRes = await fetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
+  const createRes = await clickupFetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/json" },
     body: JSON.stringify({ name: nome }),
@@ -164,7 +165,7 @@ Deno.serve(async (req) => {
       }
 
       const clickupToken = await resolveClickUpToken(deletedRecord.criado_por_user_id, supabase);
-      const delRes = await fetch(`https://api.clickup.com/api/v2/task/${deletedRecord.clickup_proposta_tecnica_id}`, {
+      const delRes = await clickupFetch(`https://api.clickup.com/api/v2/task/${deletedRecord.clickup_proposta_tecnica_id}`, {
         method: "DELETE",
         headers: { Authorization: clickupToken },
       });
@@ -249,7 +250,7 @@ Deno.serve(async (req) => {
 
     // 4) Cria a tarefa técnica "Enviar Proposta vX"
     const nomeTarefa = `${PREFIX_TASK}${versaoFinal}`.trim();
-    const createRes = await fetch(`https://api.clickup.com/api/v2/list/${listaId}/task`, {
+    const createRes = await clickupFetch(`https://api.clickup.com/api/v2/list/${listaId}/task`, {
       method: "POST",
       headers: { Authorization: clickupToken, "Content-Type": "application/json" },
       body: JSON.stringify({ name: nomeTarefa, custom_item_id: TECH_CUSTOM_ITEM_ID }),
@@ -285,7 +286,7 @@ Deno.serve(async (req) => {
 
     // 6) Linka de volta ao negócio de origem (não bloqueia)
     if (negocio.clickup_negocio_id) {
-      const linkRes = await fetch(`https://api.clickup.com/api/v2/task/${tarefaTecnicaId}/link/${normalizeId(negocio.clickup_negocio_id)}`, {
+      const linkRes = await clickupFetch(`https://api.clickup.com/api/v2/task/${tarefaTecnicaId}/link/${normalizeId(negocio.clickup_negocio_id)}`, {
         method: "POST",
         headers: { Authorization: clickupToken },
       });

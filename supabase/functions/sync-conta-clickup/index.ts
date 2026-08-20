@@ -7,6 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { resolveClickUpToken } from "../_shared/resolve-token.ts";
+import { clickupFetch } from "../_shared/clickup-fetch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -56,6 +57,21 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // Idempotência: reconsulta o estado atual antes de criar, pra não duplicar
+    // a tarefa no ClickUp se o mesmo evento de webhook for entregue 2x.
+    const { data: atual } = await supabase
+      .from("contas")
+      .select("clickup_account_id")
+      .eq("id", record.id)
+      .single();
+    if (atual?.clickup_account_id) {
+      return new Response(JSON.stringify({ success: true, message: "Já sincronizado (idempotência)" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     const clickupToken = await resolveClickUpToken(record.criado_por_user_id, supabase);
 
     // 1) Criar a tarefa no ClickUp
@@ -74,7 +90,7 @@ Deno.serve(async (req) => {
     addField(CF_RUA, record.rua);
     addField(CF_CEP, record.cep);
 
-    const createRes = await fetch(`https://api.clickup.com/api/v2/list/${CONTAS_LIST_ID}/task`, {
+    const createRes = await clickupFetch(`https://api.clickup.com/api/v2/list/${CONTAS_LIST_ID}/task`, {
       method: "POST",
       headers: { Authorization: clickupToken, "Content-Type": "application/json" },
       body: JSON.stringify({
