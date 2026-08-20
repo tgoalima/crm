@@ -2202,7 +2202,15 @@ function App() {
     if (kanbanTasks.length === 0 && !silent) {
       setLoadingKanban(true);
     }
-    lastKanbanFetchAtRef.current = Date.now();
+    // Só marca "acabou de buscar" quando existe cliente de verdade — no
+    // primeiro render supabaseClient ainda é null (conexão ainda not resolvida)
+    // e essa função roda mesmo assim sem buscar nada; marcar o timestamp nesse
+    // caso fazia o TTL do useEffect de troca de aba (abaixo) achar que já tinha
+    // buscado recentemente e bloquear a busca de verdade assim que o cliente
+    // ficasse pronto, deixando o Kanban vazio até o usuário trocar de aba.
+    if (supabaseClient) {
+      lastKanbanFetchAtRef.current = Date.now();
+    }
     try {
       // Negócios, propostas e itens_proposta — tudo direto do Supabase agora.
       // O Kanban não faz mais nenhuma chamada ao ClickUp pra se popular (a
@@ -2332,7 +2340,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (activeTab === 'kanban' && Date.now() - lastKanbanFetchAtRef.current > TAB_CACHE_TTL_MS) {
+    if (activeTab === 'kanban' && (kanbanTasks.length === 0 || Date.now() - lastKanbanFetchAtRef.current > TAB_CACHE_TTL_MS)) {
       fetchKanbanData();
     }
   }, [activeTab, supabaseClient]);
