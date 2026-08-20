@@ -229,3 +229,18 @@ ssh suprimatica-vps "docker exec -i supabase-db psql -U postgres -d postgres" < 
 ```bash
 ssh suprimatica-vps "cp -r /home/ubuntu/apps/suprimatica-crm/supabase/functions/* /home/ubuntu/apps/supabase/docker/volumes/functions/ && cd /home/ubuntu/apps/supabase/docker && docker compose up -d functions"
 ```
+
+---
+
+## 10. Revisão de Segurança (19/08, pré-release v1)
+
+Revisão manual antes do push pro GitHub como v1. Nada crítico o suficiente pra bloquear o release; dois achados foram conscientemente registrados como débito técnico em vez de corrigidos às pressas (risco de regressão maior que o risco do achado em si nesta janela):
+
+- **RLS ampla para `anon` (débito conhecido, decisão consciente de adiar):** `contas`, `contatos`, `negocios`, `propostas`, `itens_proposta`, `atividades_negocio`, `tarefas_comerciais` e `vendedores` liberam SELECT/INSERT/UPDATE(/DELETE em alguns casos) pra role `anon` com `USING (true)` — a chave anônima do Supabase (pública por definição, embutida no bundle JS e servida por `/api/config`) já dá acesso total de leitura/escrita a praticamente todo o dado comercial, sem exigir login. As policies de `authenticated` hoje são redundantes, já que `anon` libera tudo primeiro. Não é uma falha introduzida nesta sessão — é a arquitetura herdada do projeto. Próximo passo, quando houver tempo pra mapear com cuidado todos os fluxos que hoje dependem do `anon` sem quebrar nada: restringir escrita a `authenticated` e manter `anon` só onde realmente fizer sentido (se fizer).
+- **`clickup-status-webhook` sem validação de assinatura (débito conhecido, decisão consciente de adiar):** a function não confere se o payload recebido realmente veio do ClickUp — exige configurar/confirmar o segredo do webhook no ClickUp antes de implementar a verificação HMAC.
+- **Achados sem ação necessária:**
+  - Anon key do Supabase hardcoded como fallback em `app.js` (~linha 1844) além de servida por `/api/config` — não é segredo (chave pública, protegida por RLS), só fica duplicada em 2 lugares; se rotacionada, atualizar as duas.
+  - Remote `origin` do GitHub tem um Personal Access Token embutido na própria URL (`.git/config`) — não vai pro repositório, mas vale rotacionar o token via GitHub se este `.git/config` for exposto por qualquer motivo.
+  - `server.py` usa `Access-Control-Allow-Origin: *` em todos os endpoints — mas só roda localmente em dev, nunca em produção (nginx.conf documenta isso), risco desprezível.
+  - Nenhum `dangerouslySetInnerHTML` em `app.js`/`empresas.js` — sem vetor óbvio de XSS via HTML injetado.
+  - O proxy nginx pra `/clickup-api/*` e pras Edge Functions repassa o header `Authorization` tal como recebido, sem misturar tokens entre usuários — cada requisição carrega só o token de quem a fez.
