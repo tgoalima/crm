@@ -447,6 +447,13 @@ def main():
                 'data_fechamento': data_fechamento_iso,
                 'criado_por': responsavel,
                 'cenario': TIPO_OPORTUNIDADE_DEFAULT,
+                # Desde 18/08/2026 existe um trigger AFTER INSERT em propostas
+                # (sync_proposta_tecnica_clickup_insert, ver migrations/20260818k_usuarios_clickup.sql)
+                # que cria uma subtask "Enviar Proposta vX" no ClickUp sempre que
+                # clickup_proposta_tecnica_id vem NULL. Pré-preenchendo com um
+                # marcador aqui, a Edge Function vê o campo já setado e não cria
+                # a subtask — evita ruído no ClickUp para negócios já mortos.
+                'clickup_proposta_tecnica_id': f'HISTORICO-PERDIDO-AGENDOR-{ag_id}',
             }
             inserted_prop = supabase_request('propostas', method='POST', data=prop_payload)
             if inserted_prop:
