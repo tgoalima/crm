@@ -678,6 +678,31 @@ const ForecastFunnelPanel = ({
 // Lista de negócios estilo "Negócios" do Agendor: busca + filtros por status,
 // etapa, responsável e período de fechamento, com colunas Cliente / Responsável /
 // Status / Etapa / Data de Fechamento / Valor.
+// Exportação CSV client-side (sem backend) — ponto e vírgula como separador
+// (não vírgula), porque o Excel em locale pt-BR usa vírgula como separador
+// decimal e interpretaria um CSV com vírgula como campo único quebrado.
+function downloadCsv(filename, headers, rows) {
+  const escapeCsvField = (val) => {
+    const str = val === null || val === undefined ? '' : String(val);
+    if (str.includes(';') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+  const lines = [headers, ...rows].map(row => row.map(escapeCsvField).join(';'));
+  // BOM (﻿) pra o Excel reconhecer UTF-8 e não corromper acentos.
+  const csvContent = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 const DealsListView = ({
   kanbanTasks,
   kanbanColumns,
@@ -838,12 +863,32 @@ const DealsListView = ({
               {filtered.length} {filtered.length === 1 ? 'negócio' : 'negócios'}
             </span>
           </h3>
-          <button
-            onClick={onClose}
-            className="text-xs text-slate-400 hover:text-slate-600 font-semibold cursor-pointer"
-          >
-            ✕ Fechar Lista
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                const headers = ['Cliente', 'Responsável', 'Status', 'Etapa', 'Data de Fechamento', 'Valor (R$)'];
+                const rows = sorted.map(t => [
+                  t.name || '',
+                  t.responsavel_negocio || '',
+                  getStatus(t),
+                  getEtapaName(t),
+                  formatDateDisplay(t.data_fechamento),
+                  (getOpportunityValue(t) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                ]);
+                downloadCsv(`negocios_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+              }}
+              disabled={sorted.length === 0}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ⬇ Exportar CSV
+            </button>
+            <button
+              onClick={onClose}
+              className="text-xs text-slate-400 hover:text-slate-600 font-semibold cursor-pointer"
+            >
+              ✕ Fechar Lista
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center flex-wrap gap-2">
