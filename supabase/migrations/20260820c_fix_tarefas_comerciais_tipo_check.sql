@@ -1,0 +1,18 @@
+-- supabase/migrations/20260820c_fix_tarefas_comerciais_tipo_check.sql
+--
+-- Causa raiz do erro "new row for relation tarefas_comerciais violates check
+-- constraint tarefas_comerciais_tipo_check" ao criar uma tarefa comercial:
+-- 20260713_create_tasks_table.sql travou tarefas_comerciais.tipo numa CHECK
+-- fixa com só os 4 valores originais ('Ligação','Reunião','E-mail',
+-- 'Follow-up'). A migration de hoje (20260820a_tipos_tarefa_segmentos.sql)
+-- tornou "Tipos de Tarefa" totalmente editável pelo usuário via Configurações
+-- (tabela tipos_tarefa, nome livre) — sem atualizar essa CHECK. Qualquer tipo
+-- customizado (ex: o "Follow Up" sem hífen criado hoje, ou "WhatsApp",
+-- "Prospecção" etc. do próprio seletor de emoji da tela de Configurações)
+-- nunca vai bater com a lista antiga e falha sempre, com 500 genérico pro
+-- usuário.
+--
+-- Remove a CHECK travada — a validação de "tipo existe" já é responsabilidade
+-- da tabela tipos_tarefa (nome UNIQUE), não faz sentido duplicá-la aqui com
+-- uma lista que trava exatamente o que a Configurações promete deixar aberto.
+ALTER TABLE public.tarefas_comerciais DROP CONSTRAINT IF EXISTS tarefas_comerciais_tipo_check;

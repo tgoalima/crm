@@ -105,28 +105,45 @@ async function getMaxVersionRankInList(listaId: string, token: string): Promise<
   return maxRank;
 }
 
-async function findListaTecnica(nome: string, token: string): Promise<string | null> {
+// Comparação sem diferenciar maiúsculas/minúsculas: negócios legados (lista
+// técnica já criada manualmente pelo Apps Script antigo, antes do CRM
+// existir) usam a lista em CAIXA ALTA, enquanto `negocios.nome` no Supabase
+// guarda o nome como foi digitado (case misto) — um match exato (`===`)
+// nunca reconhece essa lista como já existente e tenta recriá-la.
+function normalizeNomeLista(nome: string): string {
+  return nome.trim().toLowerCase();
+}
+
+async function findListaTecnica(nome: string, token: string): Promise<{ id: string | null; erro: string | null }> {
   const listRes = await clickupFetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
     headers: { Authorization: token },
   });
-  if (!listRes.ok) return null;
+  if (!listRes.ok) {
+    const errText = await listRes.text();
+    return { id: null, erro: `GET lista (folder ${FOLDER_PROJETOS_ID}): ${listRes.status} ${errText}` };
+  }
   const listData = await listRes.json();
-  const existente = (listData.lists || []).find((l: any) => (l.name || "").trim() === nome);
-  return existente ? existente.id : null;
+  const alvo = normalizeNomeLista(nome);
+  const existente = (listData.lists || []).find((l: any) => normalizeNomeLista(l.name || "") === alvo);
+  return { id: existente ? existente.id : null, erro: null };
 }
 
-async function getOrCreateListaTecnica(nome: string, token: string): Promise<string | null> {
-  const existenteId = await findListaTecnica(nome, token);
-  if (existenteId) return existenteId;
+async function getOrCreateListaTecnica(nome: string, token: string): Promise<{ id: string | null; erro: string | null }> {
+  const { id: existenteId, erro: erroFind } = await findListaTecnica(nome, token);
+  if (existenteId) return { id: existenteId, erro: null };
+  if (erroFind) return { id: null, erro: erroFind };
 
   const createRes = await clickupFetch(`https://api.clickup.com/api/v2/folder/${FOLDER_PROJETOS_ID}/list`, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/json" },
     body: JSON.stringify({ name: nome }),
   });
-  if (!createRes.ok) return null;
+  if (!createRes.ok) {
+    const errText = await createRes.text();
+    return { id: null, erro: `POST lista (folder ${FOLDER_PROJETOS_ID}): ${createRes.status} ${errText}` };
+  }
   const created = await createRes.json();
-  return created.id || null;
+  return { id: created.id || null, erro: null };
 }
 
 Deno.serve(async (req) => {
@@ -232,10 +249,11 @@ Deno.serve(async (req) => {
 
     // 2) Nome da lista técnica e get-or-create
     const nomeLista = `${negocio.numero_proposta_oficial} - ${negocio.nome}`;
-    const listaId = await getOrCreateListaTecnica(nomeLista, clickupToken);
+    const { id: listaId, erro: erroLista } = await getOrCreateListaTecnica(nomeLista, clickupToken);
     if (!listaId) {
-      console.error(`[sync-proposta-tecnica-clickup] Falha ao obter/criar lista técnica "${nomeLista}".`);
-      await supabase.from("propostas").update({ sync_status: "failed", sync_error: `Falha ao obter/criar lista técnica "${nomeLista}"` }).eq("id", record.id);
+      const detalhe = erroLista || "motivo desconhecido";
+      console.error(`[sync-proposta-tecnica-clickup] Falha ao obter/criar lista técnica "${nomeLista}": ${detalhe}`);
+      await supabase.from("propostas").update({ sync_status: "failed", sync_error: `Falha ao obter/criar lista técnica "${nomeLista}": ${detalhe}` }).eq("id", record.id);
       return new Response(JSON.stringify({ success: false }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     }
 

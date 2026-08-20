@@ -1804,6 +1804,14 @@ function App() {
   useEffect(() => {
     itensRef.current = itens;
   }, [itens]);
+  // Mesma proteção do itensRef acima, mas para os campos da proposta editados
+  // direto no formulário (Data de Fechamento, Data de Início, Tipo de Projeto,
+  // Vendedor/Responsável): sem isso, o polling silencioso de 3 em 3 minutos
+  // (fetchAllData) sobrescrevia uma edição em andamento assim que o usuário
+  // digitava, antes de clicar em Salvar — o campo "salvava" vazio porque
+  // currentProposta.data_fechamento já tinha voltado a null quando o clique
+  // no Salvar disparava.
+  const propostaDirtyRef = useRef(false);
 
   // Edição no Painel de Gestão (Produtos e Distribuidores)
   const [editingProduct, setEditingProduct] = useState(null);
@@ -4503,8 +4511,14 @@ function App() {
     // recarregar a proposta: isso apagaria o que o usuário está digitando antes de salvar.
     // Lê de itensRef (não do estado `itens` direto) porque o polling roda dentro de um
     // setInterval de closure antiga — ver comentário na declaração de itensRef.
-    if (silent && itensRef.current.some(it => String(it.id).startsWith('temp-'))) {
+    if (silent && (itensRef.current.some(it => String(it.id).startsWith('temp-')) || propostaDirtyRef.current)) {
       return;
+    }
+    // Carga explícita (usuário abrindo uma proposta/versão) sempre reseta o
+    // rastreamento de edição — não faz sentido preservar "sujeira" de uma
+    // proposta diferente da que está sendo aberta agora.
+    if (!silent) {
+      propostaDirtyRef.current = false;
     }
     // Instant Hydration: se a proposta já estiver no array local, atualiza imediatamente a UI sem delay
     const existingProp = propostas.find(p => p.id === proposalId);
@@ -5022,6 +5036,7 @@ function App() {
         await syncClickUpProposta(targetTaskIdForClickup, realTimeGrandTotal, 'Save');
       }
 
+      propostaDirtyRef.current = false;
       showToast('Proposta salva com sucesso!', 'success');
       setIsEditingProposal(false);
       loadPropostas(currentProposta.id);
@@ -6367,6 +6382,7 @@ function App() {
                   value={getTipoOportunidade()}
                   onChange={(e) => {
                     const val = e.target.value;
+                    propostaDirtyRef.current = true;
                     if (val === 'PROJETO') {
                       setIsProjeto(true);
                       setCurrentProposta({ ...currentProposta, cenario: '' });
@@ -6395,7 +6411,7 @@ function App() {
                 <select
                   className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.cenario || ""}
-                  onChange={(e) => setCurrentProposta({ ...currentProposta, cenario: e.target.value })}
+                  onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, cenario: e.target.value }); }}
                   disabled={isReadOnly || !isProjeto}
                 >
                   <option value="">Selecione o tipo...</option>
@@ -6414,7 +6430,7 @@ function App() {
                 <select
                   className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.criado_por || ""}
-                  onChange={(e) => setCurrentProposta({ ...currentProposta, criado_por: e.target.value })}
+                  onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, criado_por: e.target.value }); }}
                   disabled={isReadOnly}
                 >
                   <option value="">Selecione o vendedor...</option>
@@ -6436,7 +6452,7 @@ function App() {
                   type="date"
                   className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_inicio ? currentProposta.data_inicio.substring(0, 10) : (clickupTaskDates?.start_date || '')}
-                  onChange={(e) => setCurrentProposta({ ...currentProposta, data_inicio: e.target.value })}
+                  onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, data_inicio: e.target.value }); }}
                   disabled={isReadOnly}
                 />
               </div>
@@ -6453,7 +6469,7 @@ function App() {
                   type="date"
                   className="h-10 rounded-xl border border-slate-300 bg-slate-50 shadow-xs hover:bg-slate-100/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_fechamento ? currentProposta.data_fechamento.substring(0, 10) : ''}
-                  onChange={(e) => setCurrentProposta({ ...currentProposta, data_fechamento: e.target.value })}
+                  onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, data_fechamento: e.target.value }); }}
                   disabled={isReadOnly}
                 />
               </div>
