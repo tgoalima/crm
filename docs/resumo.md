@@ -94,8 +94,15 @@ Anteriormente, toda ação síncrona ou assíncrona feita no CRM era criada no C
 2. **Criptografia na Edge Function:**
    - A Edge Function `save-clickup-credentials` recebe o token em texto puro, criptografa com **Web Crypto AES-GCM (256-bit)** usando `TOKEN_ENCRYPTION_KEY` e grava no cofre `usuarios_clickup`.
 3. **Resolução Assíncrona em Background:**
-   - As Edge Functions de sincronização (`sync-negocio-clickup`, `sync-contato-clickup`, `sync-proposta-tecnica-clickup`) importam `supabase/functions/_shared/resolve-token.ts`.
+   - As 4 Edge Functions de sincronização (`sync-negocio-clickup`, `sync-contato-clickup`, `sync-conta-clickup`, `sync-proposta-tecnica-clickup`) importam `supabase/functions/_shared/resolve-token.ts`.
    - Elas leem `record.criado_por_user_id`, buscam o token pessoal descriptografado e realizam a chamada à API do ClickUp **com a identidade real do vendedor**. Se não houver token cadastrado, aplicam fallback transparente para o token global.
+
+### Revisão e correções (19/08):
+Esta funcionalidade foi implementada em paralelo por duas sessões de IA sem coordenação (uma delas nesta branch, direto na `main`). Revisão encontrou e corrigiu:
+- `sync-negocio-clickup` e `sync-contato-clickup` referenciavam `CLICKUP_API_TOKEN` sem declará-lo (removido na refatoração pro módulo compartilhado, guard de env vars esquecido) — **ReferenceError em 100% das criações de negócio/contato**. Corrigido.
+- `save-clickup-credentials` confiava no `{user: {email, id}}` enviado pelo próprio cliente no corpo da requisição, sem validar o JWT de sessão — como o endpoint é público, qualquer requisição podia sobrescrever o token de outro vendedor. Corrigido: a identidade agora vem de `supabase.auth.getUser()` usando o JWT recebido, e o token do ClickUp é conferido na origem antes de salvar.
+- `sync-conta-clickup` tinha uma implementação própria (duplicada, desatualizada) de `resolveClickUpToken` com nomes de coluna que não existem no schema real — a busca sempre falhava silenciosamente. Trocado para importar do mesmo `_shared/resolve-token.ts` que as outras 3 functions usam.
+- Trigger duplicado em `propostas` (`sync_proposta_tecnica_clickup` + `sync_proposta_tecnica_clickup_insert`, ambos `AFTER INSERT` chamando a mesma function) fazia cada nova versão de proposta criar **duas** tarefas técnicas no ClickUp. Removido o mais antigo (migration `20260819a_fix_trigger_duplicado_proposta_tecnica.sql`).
 
 ---
 
@@ -115,11 +122,15 @@ Anteriormente, toda ação síncrona ou assíncrona feita no CRM era criada no C
 
 ## 6. Automação "Enviar Proposta vX" & Vínculos Técnicos
 
+Replica a automação que a equipe já usava via Google Apps Script antes do CRM existir — **decisão confirmada com o usuário em 19/08** depois de uma reescrita paralela ter mudado esse comportamento sem coordenação (ver abaixo).
+
 - **Trigger de Proposta Técnica (`sync_proposta_tecnica_clickup_insert`):**
-  - Ao criar uma versão inicial (`vA`) ou nova versão (`vB`, `vC`...) no Gerador de Propostas, a Edge Function `sync-proposta-tecnica-clickup` cria automaticamente uma subtarefa técnica `[Nome do Negócio] — Enviar Proposta vX` dentro da oportunidade no ClickUp, com os valores e com o vendedor como responsável.
-  - O ID da subtarefa criada é salvo em `propostas.clickup_proposta_tecnica_id`.
+  - Ao criar uma versão (`vA`, `vB`, `vC`...) no Gerador de Propostas, a Edge Function `sync-proposta-tecnica-clickup` cria (ou reaproveita) uma **lista técnica** na pasta PRE-VENDAS/PROJETOS chamada `"{numero_proposta_oficial} - {nome_do_negócio}"`, e dentro dela cria a tarefa **"Enviar Proposta vX"** (`custom_item_id` = 1014, tipo "Técnico"), linkada de volta à tarefa do negócio.
+  - **Autocorreção de versão:** antes de criar, checa a maior versão já existente na lista técnica; se um negócio legado (controlado manualmente pelo ClickUp antes do CRM) já estiver com o histórico à frente do que o CRM calculou, pula direto pra próxima letra depois da maior existente — e corrige `propostas.versao` no Supabase pra bater com o que foi usado de fato.
+  - O ID da tarefa técnica criada é salvo em `propostas.clickup_proposta_tecnica_id` (idempotência: se o webhook disparar mais de uma vez pra mesma proposta, não cria uma segunda tarefa).
 - **Exclusão Limpa (`sync_proposta_tecnica_clickup_delete`):**
-  - Se uma versão for excluída pelo CRM, a Edge Function remove automaticamente a subtarefa correspondente no ClickUp, evitando tarefas técnicas órfãs.
+  - Se uma versão for excluída pelo CRM, a Edge Function usa o `clickup_proposta_tecnica_id` salvo pra excluir diretamente a tarefa técnica correspondente no ClickUp — nunca apaga a lista técnica inteira, só a tarefa daquela versão.
+- **Nota histórica (19/08):** uma reescrita paralela desta automação (feita sem coordenação, direto na `main`) trocou temporariamente esse design por criar a tarefa como **subtask do próprio negócio** (sem lista técnica, sem `custom_item_id`, sem a autocorreção de versão). Revisado e restaurado ao design original nesta data — o formato "lista técnica" é o que replica o Apps Script antigo e o que a equipe já está acostumada a usar.
 
 ---
 

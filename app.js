@@ -2075,6 +2075,7 @@ function App() {
             versao: 'vA',
             situacao: 'Selecionada',
             criado_por: responsavelNome,
+            criado_por_user_id: userProfile?.id ? String(userProfile.id) : null,
             cenario: '',
             total_proposta: 0
           });
