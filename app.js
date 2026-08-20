@@ -712,7 +712,9 @@ const DealsListView = ({
   statusFilter,
   setStatusFilter,
   onClose,
+  supabaseClient,
 }) => {
+  const [exportingCompleto, setExportingCompleto] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [etapaFilter, setEtapaFilter] = useState('');
   const [responsavelFilter, setResponsavelFilter] = useState('');
@@ -852,6 +854,80 @@ const DealsListView = ({
     }
   };
 
+  // Exportação "completa" — uma linha por item de produto (denormalizada,
+  // formato padrão de export pra importação em outro sistema), com dados de
+  // empresa/CNPJ e produto/fabricante/distribuidor, não só o resumo do
+  // negócio. Busca itens_proposta/contas sob demanda (só ao clicar) em vez
+  // de sempre, já que é bem mais dado do que a lista normalmente precisa.
+  const handleExportCompleto = async () => {
+    if (!supabaseClient || sorted.length === 0) return;
+    setExportingCompleto(true);
+    try {
+      const [{ data: itens, error: itensErr }, { data: contas, error: contasErr }] = await Promise.all([
+        supabaseClient.from('itens_proposta').select('proposta_id, quantidade, preco_unitario, produtos(nome, fabricante), distribuidores(nome)'),
+        supabaseClient.from('contas').select('id, nome, cnpj'),
+      ]);
+      if (itensErr) throw itensErr;
+      if (contasErr) throw contasErr;
+
+      const itensByProposta = new Map();
+      (itens || []).forEach(it => {
+        if (!it.proposta_id) return;
+        if (!itensByProposta.has(it.proposta_id)) itensByProposta.set(it.proposta_id, []);
+        itensByProposta.get(it.proposta_id).push(it);
+      });
+      const contaById = new Map((contas || []).map(c => [c.id, c]));
+
+      const headers = [
+        'Cliente (Negócio)', 'Empresa', 'CNPJ', 'Responsável', 'Status', 'Etapa',
+        'Situação Proposta', 'Motivo Perda', 'Data de Fechamento', 'Valor Total Negócio (R$)',
+        'Produto', 'Fabricante', 'Distribuidor', 'Quantidade', 'Preço Unitário (R$)', 'Total Item (R$)',
+      ];
+      const rows = [];
+      sorted.forEach(t => {
+        const conta = t.conta_id ? contaById.get(t.conta_id) : null;
+        const itensDoNegocio = t.proposta_id ? (itensByProposta.get(t.proposta_id) || []) : [];
+        const baseFields = [
+          t.name || '',
+          conta?.nome || '',
+          conta?.cnpj || '',
+          t.responsavel_negocio || '',
+          getStatus(t),
+          getEtapaName(t),
+          t.situacao || '',
+          t.motivo_perda || '',
+          formatDateDisplay(t.data_fechamento),
+          (getOpportunityValue(t) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        ];
+        if (itensDoNegocio.length === 0) {
+          rows.push([...baseFields, '', '', '', '', '', '']);
+        } else {
+          itensDoNegocio.forEach(it => {
+            const prod = Array.isArray(it.produtos) ? it.produtos[0] : it.produtos;
+            const dist = Array.isArray(it.distribuidores) ? it.distribuidores[0] : it.distribuidores;
+            const qty = parseFloat(it.quantidade) || 0;
+            const preco = parseFloat(it.preco_unitario) || 0;
+            rows.push([
+              ...baseFields,
+              prod?.nome || '',
+              prod?.fabricante || '',
+              dist?.nome || '',
+              qty,
+              preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+              (qty * preco).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            ]);
+          });
+        }
+      });
+      downloadCsv(`negocios_completo_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+    } catch (err) {
+      console.error('Erro ao exportar CSV completo:', err);
+      alert('Erro ao gerar exportação completa: ' + (err?.message || err));
+    } finally {
+      setExportingCompleto(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white">
       {/* Barra de filtros */}
@@ -881,6 +957,14 @@ const DealsListView = ({
               className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               ⬇ Exportar CSV
+            </button>
+            <button
+              onClick={handleExportCompleto}
+              disabled={sorted.length === 0 || exportingCompleto || !supabaseClient}
+              title="Exporta todos os dados do negócio, incluindo produtos, empresa e CNPJ — uma linha por item, útil pra migração/backup"
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {exportingCompleto ? '⏳ Gerando...' : '⬇ Exportar Completo'}
             </button>
             <button
               onClick={onClose}
@@ -2275,7 +2359,7 @@ function App() {
         : Promise.resolve({ data: [], error: null });
 
       const propsPromise = supabaseClient
-        ? supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, criado_por, data_fechamento')
+        ? supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, criado_por, data_fechamento, motivo_perda')
         : Promise.resolve({ data: [], error: null });
 
       const itensPromise = supabaseClient
@@ -2364,6 +2448,13 @@ function App() {
           dataFechamento = best.data_fechamento || null;
         }
 
+        const bestProp = matchedProps.find(p => p.situacao === 'Selecionada')
+          || matchedProps.find(p => p.situacao === 'Ganho')
+          || matchedProps.find(p => p.situacao === 'Ativa')
+          || matchedProps.find(p => p.situacao === 'Desconsiderada')
+          || matchedProps[0]
+          || null;
+
         return {
           id: idClean,
           name: n.nome,
@@ -2377,6 +2468,12 @@ function App() {
           fabricantes,
           valorPorFabricante,
           data_fechamento: dataFechamento,
+          // Id da proposta no Supabase (não o do ClickUp) — usado pela
+          // exportação completa (com produtos) da Lista de Negócios, pra
+          // achar os itens_proposta ligados a esse negócio.
+          proposta_id: bestProp?.id || null,
+          situacao: bestProp?.situacao || null,
+          motivo_perda: bestProp?.motivo_perda || null,
         };
       });
 
@@ -7490,6 +7587,7 @@ function App() {
                     statusFilter={dealsListStatus}
                     setStatusFilter={setDealsListStatus}
                     onClose={() => setShowDealsList(false)}
+                    supabaseClient={supabaseClient}
                   />
                 )}
 
