@@ -847,7 +847,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
 // ─────────────────────────────────────────────
 // MODAL NOVA OPORTUNIDADE
 // ─────────────────────────────────────────────
-const TIPO_OPORTUNIDADE_CLICKUP = {
+const TIPO_OPORTUNIDADE_CLICKUP_EMPRESAS = {
   'Projeto': 'fa509e92-7528-4a8b-a9bc-11f2f5da3350',
   'Garantias': '52b4285a-1e92-4ecb-b8b9-7a2348461882',
   'Serviços': '2e351ad7-2af5-4532-be83-fe24423a1994',
@@ -856,7 +856,7 @@ const TIPO_OPORTUNIDADE_CLICKUP = {
   'Upgrade': 'e55ef41f-51e6-436e-bb53-79ff688960c7'
 };
 
-const RO_CLICKUP_IDS = {
+const RO_CLICKUP_IDS_EMPRESAS = {
   roInfra: '673b8e3f-f6b2-4b09-b536-fe881b9e5780',
   roSw1: '769281a2-dade-47ae-8867-453fbac6adb3',
   roSw2: 'e1a271ac-107d-4131-b63c-87dfb2e2396d',
@@ -1167,11 +1167,11 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
             ...p,
             descricao: t.text_content || t.description || p.descricao,
             dataPrevisao: t.due_date ? new Date(parseInt(t.due_date)).toISOString().split('T')[0] : p.dataPrevisao,
-            roInfra: cfMap.get(RO_CLICKUP_IDS.roInfra) || p.roInfra,
-            roSw1: cfMap.get(RO_CLICKUP_IDS.roSw1) || p.roSw1,
-            roSw2: cfMap.get(RO_CLICKUP_IDS.roSw2) || p.roSw2,
-            roSw3: cfMap.get(RO_CLICKUP_IDS.roSw3) || p.roSw3,
-            roSw4: cfMap.get(RO_CLICKUP_IDS.roSw4) || p.roSw4,
+            roInfra: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roInfra) || p.roInfra,
+            roSw1: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roSw1) || p.roSw1,
+            roSw2: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roSw2) || p.roSw2,
+            roSw3: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roSw3) || p.roSw3,
+            roSw4: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roSw4) || p.roSw4,
           }));
         }
       } catch (e) {}
@@ -1218,14 +1218,14 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
           const customFields = [
             { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: 'cd6922b0-34f4-45e3-853a-cba995a2591c' }, // Negócio
             ...(ESTAGIO_CLICKUP_IDS[form.estagio] ? [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: ESTAGIO_CLICKUP_IDS[form.estagio] }] : []),
-            ...(TIPO_OPORTUNIDADE_CLICKUP[form.tipo] ? [{ id: '5d384245-0640-4621-a2dd-98370f7efa82', value: TIPO_OPORTUNIDADE_CLICKUP[form.tipo] }] : []),
+            ...(TIPO_OPORTUNIDADE_CLICKUP_EMPRESAS[form.tipo] ? [{ id: '5d384245-0640-4621-a2dd-98370f7efa82', value: TIPO_OPORTUNIDADE_CLICKUP_EMPRESAS[form.tipo] }] : []),
             ...(valorNum > 0 ? [{ id: 'ee65221a-029d-4d0a-a981-b71b5a29b4b4', value: valorNum }] : []),
             ...(probNum ? [{ id: '2c667b12-79c6-4949-b995-5c3938e7ff51', value: probNum }] : []),
-            ...(form.roInfra !== undefined ? [{ id: RO_CLICKUP_IDS.roInfra, value: form.roInfra.trim() }] : []),
-            ...(form.roSw1 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw1, value: form.roSw1.trim() }] : []),
-            ...(form.roSw2 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw2, value: form.roSw2.trim() }] : []),
-            ...(form.roSw3 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw3, value: form.roSw3.trim() }] : []),
-            ...(form.roSw4 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw4, value: form.roSw4.trim() }] : [])
+            ...(form.roInfra !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roInfra, value: form.roInfra.trim() }] : []),
+            ...(form.roSw1 !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roSw1, value: form.roSw1.trim() }] : []),
+            ...(form.roSw2 !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roSw2, value: form.roSw2.trim() }] : []),
+            ...(form.roSw3 !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roSw3, value: form.roSw3.trim() }] : []),
+            ...(form.roSw4 !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roSw4, value: form.roSw4.trim() }] : [])
           ];
 
           await fetch(`/clickup-api/task/${negocio.clickup_negocio_id}?custom_item_id=1004`, {
