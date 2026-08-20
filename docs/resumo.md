@@ -151,6 +151,8 @@ Como consequência, o CRUD de criar/editar/excluir "Vendedor" em Configurações
 - **Campos Específicos de Negócios:**
   - Suporte a Registros de Oportunidade (R.O.) dos fabricantes Dell, Veeam, Fortinet, VMware e RedHat.
   - Campos de Probabilidade, Tipo de Oportunidade, Data de Fechamento e Contato Principal.
+- **Responsável na criação/edição do negócio (19/08):** `negocios.responsavel_nome`/`responsavel_clickup_id` (migration `20260819g_negocios_responsavel.sql`, mesmo padrão de `contas.responsavel_nome`) ficam disponíveis desde a criação — sem depender do `clickup_negocio_id` assíncrono chegar, ao contrário do mecanismo antigo (`propostas.criado_por`, só gravável depois da sync com ClickUp). `NovaOportunidadeModal`/`EditarOportunidadeModal` ganharam o campo "Responsável"; `sync-negocio-clickup` já cria a tarefa no ClickUp com o assignee nativo certo. As duas fontes (`negocios.responsavel_nome` e `propostas.criado_por`) são mantidas em sincronia pelo mesmo evento de escrita (`handleResponsavelChange` em `app.js`) — não foi uma migração completa pra um único lugar, deliberadamente, pra não alterar comportamento de nada que já dependia de `propostas.criado_por`.
+- **Aba "Empresa" no drawer do negócio (19/08):** 4º tab ao lado de Propostas/Tarefas/Atividades, mostrando dados corporativos, contato e lista de contatos da conta vinculada — somente leitura (edição continua exclusiva do módulo Empresas). Carrega sob demanda via `negocios.conta_id`, que precisou ser propagado por `fetchKanbanData`, `fetchProjectContext` e o clique em "Oportunidades" dentro da ficha da empresa (nenhum desses caminhos selecionava esse campo antes).
 
 ---
 
