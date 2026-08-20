@@ -4453,6 +4453,37 @@ function App() {
     return () => clearInterval(intervalId);
   }, [session, dbConnected, clickupTaskId, supabaseClient]);
 
+  // Realtime: além do polling de 3 em 3 minutos acima (mantido como rede de
+  // segurança), assina mudanças ao vivo nas 3 tabelas que Kanban/Propostas
+  // usam como fonte de verdade, pra refletir a mudança de outro usuário em
+  // segundos em vez de esperar o próximo ciclo do polling. O handler só
+  // dispara o mesmo fetchAllData(true) do polling — silent=true já passa
+  // pelas guardas existentes (itensRef/propostaDirtyRef) contra sobrescrever
+  // edição em andamento. Ver docs/superpowers/specs/2026-08-20-realtime-sync-design.md.
+  const realtimeDebounceRef = useRef(null);
+  useEffect(() => {
+    if (!session || !supabaseClient) return;
+
+    const scheduleRefresh = () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      realtimeDebounceRef.current = setTimeout(() => {
+        fetchAllData(true);
+      }, 1500);
+    };
+
+    const channel = supabaseClient
+      .channel('crm-realtime-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'negocios' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'propostas' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'itens_proposta' }, scheduleRefresh)
+      .subscribe();
+
+    return () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      supabaseClient.removeChannel(channel);
+    };
+  }, [session, supabaseClient]);
+
   const loadPropostas = async (targetId = null, silent = false) => {
     if (!supabaseClient || !clickupTaskId || typeof clickupTaskId !== 'string' || !clickupTaskId.trim()) return;
     if (!silent) setLoading(true);
