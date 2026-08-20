@@ -867,7 +867,7 @@ const RO_CLICKUP_IDS = {
 // ─────────────────────────────────────────────
 // MODAL NOVA OPORTUNIDADE (PRO B2B v4.9)
 // ─────────────────────────────────────────────
-const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contatos = [], onClose, onCriado }) => {
+const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contatos = [], vendedores = [], onClose, onCriado }) => {
   const [form, setForm] = React.useState({
     nome: '',
     estagio: 'Registro',
@@ -876,6 +876,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
     probabilidade: '50',
     dataPrevisao: '',
     contatoId: '',
+    responsavelId: '',
     roInfra: '',
     roSw1: '',
     roSw2: '',
@@ -922,6 +923,9 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
 
       const valorNum = parseFloat(form.valor) || 0;
       const probNum = parseInt(form.probabilidade) || 50;
+      const vendedorEscolhido = form.responsavelId
+        ? vendedores.find(v => String(v.id) === form.responsavelId)
+        : null;
 
       // 2. Grava no Supabase primeiro (clickup_negocio_id NULL, sync_status
       // 'pending') e retorna na hora — a Edge Function sync-negocio-clickup
@@ -944,6 +948,8 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
         ro_sw3: form.roSw3 ? form.roSw3.trim() : null,
         ro_sw4: form.roSw4 ? form.roSw4.trim() : null,
         contato_principal_id: form.contatoId || null,
+        responsavel_nome: vendedorEscolhido ? vendedorEscolhido.nome : null,
+        responsavel_clickup_id: vendedorEscolhido ? String(vendedorEscolhido.id) : null,
         criado_por_user_id: getCriadoPorUserId(),
         sync_status: 'pending',
       });
@@ -1034,7 +1040,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           {/* SEÇÃO 2: PIPELINE & CLASSIFICAÇÃO */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Classificação & Pipeline</SectionTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
               <CRMSelect label="Estágio do Funil" name="estagio" value={form.estagio} onChange={handleChange}>
                 {['Registro','Qualificação','Proposta','Desenvolvimento','Negociação','Termo de aceite','Ganho','Perdido','Congelado'].map(est => (
                   <option key={est} value={est}>{est}</option>
@@ -1057,6 +1063,13 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
                 <option value="70">70%</option>
                 <option value="90">90%</option>
                 <option value="100">100%</option>
+              </CRMSelect>
+
+              <CRMSelect label="Responsável" name="responsavelId" value={form.responsavelId} onChange={handleChange}>
+                <option value="">Selecione o responsável...</option>
+                {vendedores.map(v => (
+                  <option key={v.id} value={String(v.id)}>{v.nome}</option>
+                ))}
               </CRMSelect>
             </div>
           </div>
@@ -1114,7 +1127,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
 // ─────────────────────────────────────────────
 // MODAL EDITAR OPORTUNIDADE (PRO B2B v4.9)
 // ─────────────────────────────────────────────
-const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClose, onSalvo }) => {
+const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vendedores = [], onClose, onSalvo }) => {
   const [form, setForm] = React.useState({
     nome: negocio?.nome || '',
     estagio: negocio?.estagio || 'Registro',
@@ -1122,6 +1135,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
     valor: negocio?.valor_clickup_fallback ? String(negocio.valor_clickup_fallback) : '',
     probabilidade: '50',
     dataPrevisao: '',
+    responsavelId: negocio?.responsavel_clickup_id || '',
     roInfra: '',
     roSw1: '',
     roSw2: '',
@@ -1176,6 +1190,13 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
     try {
       const valorNum = parseFloat(form.valor) || 0;
       const probNum = parseInt(form.probabilidade) || 50;
+      // Se o responsável não mudou mas está oculto (fora de vendedoresVisiveis),
+      // não achar na lista não pode significar "limpar" — mantém o nome original.
+      const responsavelInalterado = form.responsavelId === (negocio?.responsavel_clickup_id || '');
+      const vendedorEscolhido = form.responsavelId
+        ? (vendedores.find(v => String(v.id) === form.responsavelId)
+          || (responsavelInalterado ? { id: negocio.responsavel_clickup_id, nome: negocio.responsavel_nome } : null))
+        : null;
 
       // 1. Atualiza no Supabase
       const { error } = await supabaseClient
@@ -1184,6 +1205,8 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
           nome: form.nome.trim(),
           estagio: form.estagio,
           valor_clickup_fallback: valorNum > 0 ? valorNum : null,
+          responsavel_nome: vendedorEscolhido ? vendedorEscolhido.nome : null,
+          responsavel_clickup_id: vendedorEscolhido ? String(vendedorEscolhido.id) : null,
           updated_at: new Date().toISOString()
         })
         .eq('id', negocio.id);
@@ -1269,7 +1292,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
           {/* SEÇÃO 2: PIPELINE & CLASSIFICAÇÃO */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Classificação & Pipeline</SectionTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
               <CRMSelect label="Estágio do Funil" name="estagio" value={form.estagio} onChange={handleChange}>
                 {['Registro','Qualificação','Proposta','Desenvolvimento','Negociação','Termo de aceite','Ganho','Perdido','Congelado'].map(est => (
                   <option key={est} value={est}>{est}</option>
@@ -1292,6 +1315,13 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], onClo
                 <option value="70">70%</option>
                 <option value="90">90%</option>
                 <option value="100">100%</option>
+              </CRMSelect>
+
+              <CRMSelect label="Responsável" name="responsavelId" value={form.responsavelId} onChange={handleChange}>
+                <option value="">Selecione o responsável...</option>
+                {vendedores.map(v => (
+                  <option key={v.id} value={String(v.id)}>{v.nome}</option>
+                ))}
               </CRMSelect>
             </div>
           </div>
@@ -1655,7 +1685,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   const valor = resolveNegocioValor(n, propostasPorNegocio);
                   const isGanho = n.estagio==='Ganho', isPerdido = n.estagio==='Perdido', isCongelado = n.estagio==='Congelado', isAberto = !isGanho && !isPerdido && !isCongelado;
                   return (
-                    <div key={n.id} onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: String(n.clickup_negocio_id).replace('#', '').trim(), name: n.nome, estagio: n.estagio, clickup_negocio_id: n.clickup_negocio_id, numero_proposta_oficial: n.numero_proposta_oficial })} className={`bg-white rounded-2xl border transition-all cursor-pointer hover:shadow-md group ${isGanho ? 'border-l-4 border-l-emerald-500 border-slate-200' : isPerdido ? 'border-l-4 border-l-rose-400 border-slate-200 opacity-80' : isCongelado ? 'border-l-4 border-l-blue-300 border-slate-200' : 'border-l-4 border-l-indigo-600 border-slate-200'}`}>
+                    <div key={n.id} onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: String(n.clickup_negocio_id).replace('#', '').trim(), name: n.nome, estagio: n.estagio, clickup_negocio_id: n.clickup_negocio_id, numero_proposta_oficial: n.numero_proposta_oficial, conta_id: n.conta_id })} className={`bg-white rounded-2xl border transition-all cursor-pointer hover:shadow-md group ${isGanho ? 'border-l-4 border-l-emerald-500 border-slate-200' : isPerdido ? 'border-l-4 border-l-rose-400 border-slate-200 opacity-80' : isCongelado ? 'border-l-4 border-l-blue-300 border-slate-200' : 'border-l-4 border-l-indigo-600 border-slate-200'}`}>
                       <div className="px-4 py-3.5 flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <h5 className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-700 transition-colors leading-snug">{n.nome}</h5>
@@ -1691,7 +1721,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
 // ─────────────────────────────────────────────
 // ABA PRINCIPAL — EMPRESAS v3.2
 // ─────────────────────────────────────────────
-const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
+const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
   const [contas, setContas] = React.useState([]);
   const [negocios, setNegocios] = React.useState([]);
   const [propostasPorNegocio, setPropostasPorNegocio] = React.useState(new Map());
@@ -1714,7 +1744,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
     try {
       const [{ data: c }, { data: n }, { data: p }, { data: ct }] = await Promise.all([
         supabaseClient.from('contas').select('id,clickup_account_id,nome,cnpj,inscricao_estadual,cidade,estado,status,account_tier,industry,billing_cycle,razao_social,rua,cep,email,telefone,sync_status,sync_error').order('nome'),
-        supabaseClient.from('negocios').select('id,clickup_negocio_id,nome,conta_id,estagio,numero_proposta_oficial,sync_status,sync_error,valor_clickup_fallback'),
+        supabaseClient.from('negocios').select('id,clickup_negocio_id,nome,conta_id,estagio,numero_proposta_oficial,sync_status,sync_error,valor_clickup_fallback,responsavel_nome,responsavel_clickup_id'),
         supabaseClient.from('propostas').select('id,clickup_negocio_id,total_proposta,situacao'),
         supabaseClient.from('contatos').select('id,clickup_contact_id,nome,cargo,email,celular,whatsapp,champion,conta_id,sync_status'),
       ]);
@@ -1981,8 +2011,8 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio }) => {
       )}
       {showEmpresaModal && (<EmpresaFormModal supabaseClient={supabaseClient} conta={empresaParaEditar} onClose={() => setShowEmpresaModal(false)} onSalvo={() => { setShowEmpresaModal(false); carregarDados(); }} />)}
       {showNovoContato && contaSelecionada && (<ContatoFormModal supabaseClient={supabaseClient} conta={contaSelecionada} contas={contas} todosContatos={contatos} contato={contatoParaEditar} onClose={() => setShowNovoContato(false)} onSalvo={() => { setShowNovoContato(false); carregarDados(); }} />)}
-      {showNovaOportunidade && (<NovaOportunidadeModal supabaseClient={supabaseClient} contaFixa={contaSelecionada} contas={contas} contatos={contatos} onClose={() => setShowNovaOportunidade(false)} onCriado={() => { setShowNovaOportunidade(false); carregarDados(); }} />)}
-      {showEditarNegocio && negocioParaEditar && (<EditarOportunidadeModal supabaseClient={supabaseClient} negocio={negocioParaEditar} contatos={contatos} onClose={() => setShowEditarNegocio(false)} onSalvo={() => { setShowEditarNegocio(false); carregarDados(); }} />)}
+      {showNovaOportunidade && (<NovaOportunidadeModal supabaseClient={supabaseClient} contaFixa={contaSelecionada} contas={contas} contatos={contatos} vendedores={vendedores} onClose={() => setShowNovaOportunidade(false)} onCriado={() => { setShowNovaOportunidade(false); carregarDados(); }} />)}
+      {showEditarNegocio && negocioParaEditar && (<EditarOportunidadeModal supabaseClient={supabaseClient} negocio={negocioParaEditar} contatos={contatos} vendedores={vendedores} onClose={() => setShowEditarNegocio(false)} onSalvo={() => { setShowEditarNegocio(false); carregarDados(); }} />)}
     </div>
   );
 };

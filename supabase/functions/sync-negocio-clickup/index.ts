@@ -93,6 +93,11 @@ Deno.serve(async (req) => {
       customFields.push({ id: CF_NUMERO_PROPOSTA, value: record.numero_proposta_oficial });
     }
 
+    // Responsável escolhido na criação (negocios.responsavel_clickup_id, ver
+    // migration 20260819g) já nasce como assignee nativo da tarefa no ClickUp.
+    const responsavelId = Number(record.responsavel_clickup_id);
+    const assignees = Number.isFinite(responsavelId) && responsavelId > 0 ? [responsavelId] : undefined;
+
     const createRes = await fetch(`https://api.clickup.com/api/v2/list/${NEGOCIOS_LIST_ID}/task`, {
       method: "POST",
       headers: { Authorization: clickupToken, "Content-Type": "application/json" },
@@ -100,6 +105,7 @@ Deno.serve(async (req) => {
         name: record.nome,
         custom_item_id: CUSTOM_ITEM_ID_NEGOCIO,
         custom_fields: customFields,
+        ...(assignees ? { assignees } : {}),
       }),
     });
 

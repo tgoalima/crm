@@ -147,6 +147,7 @@ const safeStorage = {
       try {
         localStorage.removeItem('crm_cache_kanban_tasks_v2');
         localStorage.removeItem('crm_cache_kanban_tasks_v3');
+        localStorage.removeItem('crm_cache_kanban_tasks_v4');
         localStorage.removeItem('crm_cache_vendedores');
         localStorage.setItem(key, val);
       } catch (err) {}
@@ -1350,7 +1351,9 @@ function App() {
     // não achar nenhum estágio e o Kanban parecer vazio até a busca nova completar).
     // v3: adicionado valorPorFabricante (19/08) — chave nova pra não reidratar com
     // cache antigo sem esse campo (Forecast filtrado por fabricante ficaria em R$ 0).
-    const cached = localStorage.getItem('crm_cache_kanban_tasks_v3');
+    // v4: adicionado conta_id/responsavel_clickup_id (19/08) — chave nova pra não
+    // reidratar sem eles (aba Empresa do drawer ficaria vazia até a busca completar).
+    const cached = localStorage.getItem('crm_cache_kanban_tasks_v4');
     return cached ? JSON.parse(cached) : [];
   });
   const [kanbanColumns, setKanbanColumns] = useState(ESTAGIO_OPTIONS);
@@ -1402,7 +1405,10 @@ function App() {
   const [newTaskTime, setNewTaskTime] = useState('09:00');
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
-  const [drawerSection, setDrawerSection] = useState('propostas'); // 'propostas' | 'tarefas' | 'status'
+  const [drawerSection, setDrawerSection] = useState('propostas'); // 'propostas' | 'tarefas' | 'status' | 'empresa'
+  const [empresaDoNegocio, setEmpresaDoNegocio] = useState(null);
+  const [contatosDoNegocio, setContatosDoNegocio] = useState([]);
+  const [loadingEmpresaDoNegocio, setLoadingEmpresaDoNegocio] = useState(false);
   const [atividades, setAtividades] = useState([]);
   const [loadingAtividades, setLoadingAtividades] = useState(false);
   const [novaAtividade, setNovaAtividade] = useState('');
@@ -2108,6 +2114,20 @@ function App() {
           });
       }
 
+      // Mantém negocios.responsavel_nome/responsavel_clickup_id em sincronia —
+      // é a fonte que fetchKanbanData prioriza (ver migration 20260819g).
+      try {
+        await supabaseClient
+          .from('negocios')
+          .update({
+            responsavel_nome: responsavelNome || null,
+            responsavel_clickup_id: responsavelId ? String(responsavelId) : null,
+          })
+          .eq('clickup_negocio_id', cleanId);
+      } catch (negErr) {
+        console.warn("Erro silencioso ao sincronizar responsável em negocios:", negErr);
+      }
+
       await refreshSupabaseProposalsList();
       loadDashboardData();
     } catch (err) {
@@ -2124,7 +2144,7 @@ function App() {
       // O Kanban não faz mais nenhuma chamada ao ClickUp pra se popular (a
       // SPA é a fonte de verdade; ver docs/resumo.md, tabela `negocios`).
       const negociosPromise = supabaseClient
-        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback')
+        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback, conta_id, responsavel_nome, responsavel_clickup_id')
         : Promise.resolve({ data: [], error: null });
 
       const propsPromise = supabaseClient
@@ -2192,7 +2212,10 @@ function App() {
           ...(idClean ? propsByClickupId.get('#' + idClean) || [] : []),
         ];
 
-        let resp = '';
+        // Responsável: prioriza negocios.responsavel_nome (disponível desde a
+        // criação, ver migration 20260819g) — só cai pro criado_por da melhor
+        // proposta em negócios antigos que ainda não têm esse campo preenchido.
+        let resp = n.responsavel_nome || '';
         let supabaseDealValue = null;
         let fabricantes = [];
         let valorPorFabricante = {};
@@ -2206,7 +2229,7 @@ function App() {
             matchedProps.find(p => p.situacao === 'Desconsiderada') ||
             matchedProps[0];
 
-          resp = best.criado_por || '';
+          if (!resp) resp = best.criado_por || '';
           const v = parseFloat(best.total_proposta);
           if (!isNaN(v)) supabaseDealValue = v;
           fabricantes = Array.from(fabricantesByPropId.get(best.id) || []);
@@ -2219,8 +2242,10 @@ function App() {
           name: n.nome,
           estagio: n.estagio,
           valor_clickup_fallback: n.valor_clickup_fallback,
+          conta_id: n.conta_id || null,
           custom_fields: [],
           responsavel_negocio: resp,
+          responsavel_clickup_id: n.responsavel_clickup_id || null,
           supabase_deal_value: supabaseDealValue,
           fabricantes,
           valorPorFabricante,
@@ -2230,7 +2255,7 @@ function App() {
 
       setKanbanTasks(enrichedTasks);
       try {
-        safeStorage.setItem('crm_cache_kanban_tasks_v3', JSON.stringify(enrichedTasks));
+        safeStorage.setItem('crm_cache_kanban_tasks_v4', JSON.stringify(enrichedTasks));
       } catch (storageErr) {
         // Ignora cota excedida do Safari silenciosamente
       }
@@ -2432,6 +2457,8 @@ function App() {
     setClickupTaskId(task.id);
     setDrawerTab('details');
     setDrawerSection('propostas');
+    setEmpresaDoNegocio(null);
+    setContatosDoNegocio([]);
     setShowDrawer(true);
   };
 
@@ -2507,7 +2534,7 @@ function App() {
       const [{ data: negData }, { data: propData }] = await Promise.all([
         supabaseClient
           .from('negocios')
-          .select('id, nome, estagio, numero_proposta_oficial, created_at')
+          .select('id, nome, estagio, numero_proposta_oficial, created_at, conta_id')
           .or(`clickup_negocio_id.eq.${idWithoutHash},clickup_negocio_id.eq.${idWithHash}`)
           .limit(1),
         supabaseClient
@@ -2535,7 +2562,8 @@ function App() {
           estagio: neg.estagio,
           nome: neg.nome,
           name: neg.nome,
-          numero_proposta_oficial: neg.numero_proposta_oficial
+          numero_proposta_oficial: neg.numero_proposta_oficial,
+          conta_id: neg.conta_id || (prev && prev.conta_id) || null
         }));
       }
 
@@ -2556,6 +2584,32 @@ function App() {
       console.error("Erro em fetchProjectContext:", err);
     }
   };
+
+  // Aba "Empresa" do drawer do negócio: carrega sob demanda (só quando a aba é
+  // aberta), e só refaz o fetch se a empresa mudou — evita recarregar ao trocar
+  // de aba dentro do mesmo drawer.
+  useEffect(() => {
+    if (drawerSection !== 'empresa' || !supabaseClient) return;
+    const contaId = selectedTask?.conta_id;
+    if (!contaId) { setEmpresaDoNegocio(null); setContatosDoNegocio([]); return; }
+    if (empresaDoNegocio && empresaDoNegocio.id === contaId) return;
+
+    setLoadingEmpresaDoNegocio(true);
+    (async () => {
+      try {
+        const [{ data: conta, error: contaErr }, { data: contatosData, error: contatosErr }] = await Promise.all([
+          supabaseClient.from('contas').select('*').eq('id', contaId).single(),
+          supabaseClient.from('contatos').select('*').eq('conta_id', contaId).order('nome'),
+        ]);
+        if (!contaErr) setEmpresaDoNegocio(conta || null);
+        if (!contatosErr) setContatosDoNegocio(contatosData || []);
+      } catch (err) {
+        console.warn("Erro ao carregar empresa do negócio:", err);
+      } finally {
+        setLoadingEmpresaDoNegocio(false);
+      }
+    })();
+  }, [drawerSection, selectedTask?.conta_id, supabaseClient]);
 
   // Carregar produtos cadastrados
   const loadProducts = async (client = supabaseClient) => {
@@ -7338,6 +7392,7 @@ function App() {
                     supabaseClient={supabaseClient}
                     contaFixa={null}
                     contas={contasParaBusca}
+                    vendedores={vendedoresVisiveis}
                     onClose={() => setShowNovaOportunidadeKanban(false)}
                     onCriado={() => {
                       setShowNovaOportunidadeKanban(false);
@@ -7352,7 +7407,7 @@ function App() {
 
         {empresasTabMounted && (
           <div className={activeTab === 'empresas' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} />
+            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} vendedores={vendedoresVisiveis} />
           </div>
         )}
 
@@ -9419,6 +9474,25 @@ function App() {
                         <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
                       )}
                     </button>
+
+                    {/* Aba Empresa */}
+                    <button
+                      onClick={() => { setDrawerSection('empresa'); }}
+                      title="Empresa"
+                      className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+                        drawerSection === 'empresa'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l8-4v18M13 21V11l6 3v7M9 9h.01M9 12h.01M9 15h.01" />
+                      </svg>
+                      <span>Empresa</span>
+                      {drawerSection === 'empresa' && (
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>
+                      )}
+                    </button>
                   </div>
 
                   {/* Conteúdo da Aba Selecionada */}
@@ -9626,6 +9700,138 @@ function App() {
                             </div>
                           )}
                         </div>
+                      </div>
+                    )}
+
+                    {/* === ABA: EMPRESA === */}
+                    {drawerSection === 'empresa' && (
+                      <div className="px-1 space-y-4 pb-4">
+                        {!selectedTask?.conta_id ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                            <div className="w-14 h-14 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center">
+                              <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l8-4v18M13 21V11l6 3v7" />
+                              </svg>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-500">Nenhuma empresa vinculada a este negócio.</p>
+                          </div>
+                        ) : loadingEmpresaDoNegocio && !empresaDoNegocio ? (
+                          <div className="flex items-center justify-center py-12">
+                            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                        ) : !empresaDoNegocio ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-2 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                            <p className="text-xs font-semibold text-slate-500">Não foi possível carregar os dados da empresa.</p>
+                          </div>
+                        ) : (() => {
+                          const tier = normalizeTier(empresaDoNegocio.account_tier);
+                          const status = normalizeStatus(empresaDoNegocio.status);
+                          return (
+                            <React.Fragment>
+                              {/* Cabeçalho */}
+                              <div className="flex items-start gap-3">
+                                <AvatarInicial nome={empresaDoNegocio.nome} size="lg" />
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-sm font-black text-slate-900 leading-tight truncate">{empresaDoNegocio.nome}</h4>
+                                  {empresaDoNegocio.razao_social && empresaDoNegocio.razao_social !== empresaDoNegocio.nome && (
+                                    <p className="text-xs text-slate-500 font-medium truncate">{empresaDoNegocio.razao_social}</p>
+                                  )}
+                                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                                    {formatCNPJ(empresaDoNegocio.cnpj) || 'CNPJ não informado'}
+                                    {empresaDoNegocio.cidade ? ` · ${empresaDoNegocio.cidade}/${empresaDoNegocio.estado}` : ''}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                    <span className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${status.color}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>{status.label}
+                                    </span>
+                                    {tier && (
+                                      <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${tier.color}`}>
+                                        <tier.Icon size={10} /> {tier.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Dados Corporativos */}
+                              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                                <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-100/80">
+                                  <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Dados Corporativos</h5>
+                                </div>
+                                <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3.5">
+                                  <DadoCampo label="CNPJ" value={formatCNPJ(empresaDoNegocio.cnpj)} mono />
+                                  <DadoCampo label="Insc. Estadual" value={empresaDoNegocio.inscricao_estadual} mono />
+                                  <DadoCampo label="Ciclo de Faturamento" value={empresaDoNegocio.billing_cycle} />
+                                  <DadoCampo label="Segmento" value={empresaDoNegocio.industry} />
+                                </dl>
+                              </div>
+
+                              {/* Contato Corporativo + Localização */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                                  <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-100/80">
+                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Contato Corporativo</h5>
+                                  </div>
+                                  <dl className="px-4 py-3.5 space-y-2.5">
+                                    <DadoCampo label="E-mail" value={empresaDoNegocio.email} href={empresaDoNegocio.email ? `mailto:${empresaDoNegocio.email}` : null} />
+                                    <DadoCampo label="Telefone" value={formatPhone(empresaDoNegocio.telefone)} href={empresaDoNegocio.telefone ? `tel:${empresaDoNegocio.telefone}` : null} />
+                                  </dl>
+                                </div>
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
+                                  <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-100/80">
+                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Localização</h5>
+                                  </div>
+                                  <div className="px-4 py-3.5 space-y-1">
+                                    <p className="text-xs font-bold text-slate-900">{empresaDoNegocio.rua || '—'}</p>
+                                    <p className="text-[11px] text-slate-500 font-medium">
+                                      {[empresaDoNegocio.cidade, empresaDoNegocio.estado].filter(Boolean).join(' - ') || '—'}
+                                      {empresaDoNegocio.cep ? ` · CEP ${empresaDoNegocio.cep}` : ''}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Contatos */}
+                              <div>
+                                <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                                  Contatos ({contatosDoNegocio.length})
+                                </span>
+                                {contatosDoNegocio.length === 0 ? (
+                                  <div className="text-center py-8 bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl">
+                                    <p className="text-xs font-semibold text-slate-500">Nenhum contato cadastrado para esta empresa.</p>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2.5">
+                                    {contatosDoNegocio.map(c => (
+                                      <div key={c.id} className="bg-white rounded-2xl border border-slate-200/90 p-3.5">
+                                        <div className="flex items-center gap-3">
+                                          <AvatarInicial nome={c.nome} size="sm" />
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                              <p className="text-xs font-bold text-slate-900 truncate">{c.nome}</p>
+                                              {c.champion && <span className="shrink-0 text-amber-500" title="Champion / Principal Decisor">★</span>}
+                                            </div>
+                                            <p className="text-[11px] text-slate-500 font-medium truncate">{c.cargo || 'Cargo não informado'}</p>
+                                          </div>
+                                          {c.email && (
+                                            <a href={`mailto:${c.email}`} title={`Enviar e-mail para ${c.email}`} className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-sky-50 text-sky-700 border border-sky-200 rounded-lg text-[10px] font-bold hover:bg-sky-100 transition-colors">
+                                              E-mail
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <p className="text-[10px] text-slate-400 text-center pt-1">
+                                Para editar os dados da empresa ou dos contatos, use a aba Empresas.
+                              </p>
+                            </React.Fragment>
+                          );
+                        })()}
                       </div>
                     )}
 
