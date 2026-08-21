@@ -2194,6 +2194,27 @@ function App() {
     return opt ? opt.id : null;
   };
 
+  // Único lugar que decide "qual proposta representa o valor do negócio hoje"
+  // quando nenhuma foi Selecionada/Ganho — usado por getOpportunityValue e por
+  // fetchKanbanData (antes duplicado em 3 pontos, risco real de divergência).
+  // Ordem: uma decisão real do cliente (Selecionada/Ganho) sempre vence; abaixo
+  // dela, a referência de forecast marcada manualmente vence sobre cair
+  // cegamente na proposta mais recente — mas só enquanto a proposta ainda está
+  // 'Ativa' (assim a flag nunca precisa ser limpa explicitamente quando a
+  // proposta muda de situação: ou uma camada acima já venceu, ou o guard
+  // 'Ativa' a exclui).
+  const resolveBestProposta = (props) => {
+    if (!props || props.length === 0) return null;
+    return (
+      props.find(p => p.situacao === 'Selecionada') ||
+      props.find(p => p.situacao === 'Ganho') ||
+      props.find(p => p.referencia_forecast === true && p.situacao === 'Ativa') ||
+      props.find(p => p.situacao === 'Ativa') ||
+      props.find(p => p.situacao === 'Desconsiderada') ||
+      props[0]
+    );
+  };
+
   const getOpportunityValue = (task) => {
     if (!task) return null;
 
@@ -2212,12 +2233,7 @@ function App() {
         return pClean === cleanId;
       });
       if (props.length > 0) {
-        let best =
-          props.find(p => p.situacao === 'Selecionada') ||
-          props.find(p => p.situacao === 'Ganho') ||
-          props.find(p => p.situacao === 'Ativa') ||
-          props.find(p => p.situacao === 'Desconsiderada') ||
-          props[0];
+        const best = resolveBestProposta(props);
         const val = parseFloat(best.total_proposta);
         if (!isNaN(val)) return val;
       }
@@ -2268,7 +2284,7 @@ function App() {
     try {
       const { data } = await supabaseClient
         .from('propostas')
-        .select('clickup_negocio_id, total_proposta, situacao, criado_por');
+        .select('clickup_negocio_id, total_proposta, situacao, criado_por, referencia_forecast');
       if (data) {
         setSupabaseProposalsList(data);
       }
@@ -2367,7 +2383,7 @@ function App() {
         : Promise.resolve({ data: [], error: null });
 
       const propsPromise = supabaseClient
-        ? supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, criado_por, data_fechamento, motivo_perda')
+        ? supabaseClient.from('propostas').select('id, clickup_negocio_id, total_proposta, situacao, criado_por, data_fechamento, motivo_perda, referencia_forecast')
         : Promise.resolve({ data: [], error: null });
 
       const itensPromise = supabaseClient
@@ -2440,14 +2456,9 @@ function App() {
         let valorPorFabricante = {};
         let dataFechamento = null;
 
-        if (matchedProps.length > 0) {
-          const best =
-            matchedProps.find(p => p.situacao === 'Selecionada') ||
-            matchedProps.find(p => p.situacao === 'Ganho') ||
-            matchedProps.find(p => p.situacao === 'Ativa') ||
-            matchedProps.find(p => p.situacao === 'Desconsiderada') ||
-            matchedProps[0];
+        const best = matchedProps.length > 0 ? resolveBestProposta(matchedProps) : null;
 
+        if (best) {
           if (!resp) resp = best.criado_por || '';
           const v = parseFloat(best.total_proposta);
           if (!isNaN(v)) supabaseDealValue = v;
@@ -2455,13 +2466,6 @@ function App() {
           valorPorFabricante = valorPorFabricantePropId.get(best.id) || {};
           dataFechamento = best.data_fechamento || null;
         }
-
-        const bestProp = matchedProps.find(p => p.situacao === 'Selecionada')
-          || matchedProps.find(p => p.situacao === 'Ganho')
-          || matchedProps.find(p => p.situacao === 'Ativa')
-          || matchedProps.find(p => p.situacao === 'Desconsiderada')
-          || matchedProps[0]
-          || null;
 
         return {
           id: idClean,
@@ -2479,9 +2483,9 @@ function App() {
           // Id da proposta no Supabase (não o do ClickUp) — usado pela
           // exportação completa (com produtos) da Lista de Negócios, pra
           // achar os itens_proposta ligados a esse negócio.
-          proposta_id: bestProp?.id || null,
-          situacao: bestProp?.situacao || null,
-          motivo_perda: bestProp?.motivo_perda || null,
+          proposta_id: best?.id || null,
+          situacao: best?.situacao || null,
+          motivo_perda: best?.motivo_perda || null,
         };
       });
 
@@ -5570,17 +5574,15 @@ function App() {
 
       if (error) throw error;
 
-      // Se a proposta estava fechada e foi reaberta para Selecionada ou Em Andamento, move no ClickUp de volta ao Pipeline
+      // Sincroniza o valor da proposta selecionada com o Deal Value no ClickUp.
+      // NÃO mexe em negocios.estagio: selecionar uma versão é uma decisão sobre
+      // QUAL proposta vale, não sobre em que fase do pipeline o negócio está
+      // (bug corrigido em 21/08 — este bloco chamava handleOpportunityStateChange
+      // e resetava o negócio pro primeiro estágio do Kanban toda vez que uma
+      // proposta era selecionada, pois kanbanColumns[0] é sempre 'Registro').
+      // Estágio só muda por ação explícita: Kanban (drag/dropdown),
+      // Editar Negócio/Oportunidade, ou o fluxo de Ganho/Perdido em handleConfirmClose.
       if (newStatus === 'Selecionada' || newStatus === 'Em Andamento') {
-        const activeStage = kanbanColumns.find(c => {
-          const n = (c.name || '').toLowerCase();
-          return !n.includes('congelad') && !n.includes('ganho') && !n.includes('perdido');
-        }) || kanbanColumns[0];
-
-        if (activeStage && taskId) {
-          await handleOpportunityStateChange(taskId, activeStage.id);
-        }
-
         const targetProp = propostas.find(p => p.id === versionId) || currentProposta;
         const valToSync = targetProp ? parseFloat(targetProp.total_proposta) || 0 : realTimeGrandTotal;
         await syncClickUpProposta(taskId, valToSync, 'Select');
@@ -5595,6 +5597,62 @@ function App() {
     } catch (err) {
       console.warn("Erro silencioso de PostgREST ou rede na sincronização de propostas:", err);
       // O front-end otimista garante que a UI continuará funcionando sem travar os botões
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Alterar "Referência de Forecast" de uma versão — mecanismo independente de
+  // `situacao`/`estagio`. Ao contrário de handleUpdateVersionStatus, NUNCA marca
+  // as irmãs como 'Desconsiderada' e NUNCA chama handleOpportunityStateChange.
+  const handleToggleForecastReference = async (targetTaskId, versionId, newValue) => {
+    if (!versionId || !targetTaskId) return;
+    const taskId = String(targetTaskId).replace('#', '').trim();
+
+    // 1. Interface Otimista
+    if (currentProposta && currentProposta.id === versionId) {
+      setCurrentProposta(prev => ({ ...prev, referencia_forecast: newValue }));
+    }
+    setPropostas(prev => prev.map(p => {
+      if (p.id === versionId) return { ...p, referencia_forecast: newValue };
+      if (newValue === true) return { ...p, referencia_forecast: false };
+      return p;
+    }));
+
+    setSaving(true);
+    try {
+      // 2. Exclusividade própria da referência de forecast — independente da
+      // exclusividade de 'Selecionada' (não mexe em situacao das irmãs).
+      if (newValue === true) {
+        await supabaseClient
+          .from('propostas')
+          .update({ referencia_forecast: false })
+          .eq('clickup_negocio_id', targetTaskId)
+          .neq('id', versionId);
+      }
+
+      const { error } = await supabaseClient
+        .from('propostas')
+        .update({ referencia_forecast: newValue })
+        .eq('id', versionId);
+
+      if (error) throw error;
+
+      // 3. Sincroniza o valor com o ClickUp apenas ao MARCAR (mesma função usada
+      // pelo fluxo oficial de "Selecionar Versão"). Desmarcar não re-sincroniza
+      // — fica como estava até a próxima ação.
+      if (newValue === true) {
+        const targetProp = propostas.find(p => p.id === versionId) || currentProposta;
+        const valToSync = targetProp ? parseFloat(targetProp.total_proposta) || 0 : realTimeGrandTotal;
+        await syncClickUpProposta(taskId, valToSync, 'ForecastReference');
+      }
+
+      await loadPropostas(versionId);
+      await refreshSupabaseProposalsList();
+      loadDashboardData();
+      fetchKanbanData();
+    } catch (err) {
+      console.warn("Erro silencioso ao atualizar referência de forecast:", err);
     } finally {
       setSaving(false);
     }
@@ -6005,6 +6063,14 @@ function App() {
                           <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`}></span>
                           {prop.situacao}
                         </span>
+                        {prop.referencia_forecast && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-semibold bg-amber-50 text-amber-700 border-amber-200"
+                            title="Referência de valor para o Forecast"
+                          >
+                            🎯 Forecast
+                          </span>
+                        )}
                       <div className="relative">
                         <button 
                           type="button"
@@ -6301,6 +6367,32 @@ function App() {
                     title="Definir esta versão como a ativa comercialmente e sincronizar valor com o ClickUp"
                   >
                     <span>⭐ Selecionar Versão</span>
+                  </button>
+                )}
+
+                {/* Botão 🎯 Referência de Forecast — independente de `situacao` */}
+                {currentProposta.referencia_forecast ? (
+                  <button
+                    onClick={async () => {
+                      await handleToggleForecastReference(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, false);
+                      showToast('Removida como referência de forecast.', 'info');
+                    }}
+                    className="bg-amber-50 hover:bg-amber-100/80 text-amber-700 border border-amber-300/80 font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-xs cursor-pointer transition-all hover:scale-[1.01]"
+                    title="Esta versão é a referência de valor para o Forecast enquanto o cliente decide. Clique para remover."
+                  >
+                    <span>🎯 Referência de Forecast</span>
+                    <span className="text-[10px] text-amber-600 font-medium underline ml-1">Remover</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      await handleToggleForecastReference(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, true);
+                      showToast('Versão marcada como referência de forecast. Valor sincronizado com o ClickUp.', 'success');
+                    }}
+                    className="bg-white hover:bg-amber-50 text-amber-700 border border-amber-200 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all hover:scale-[1.01]"
+                    title="Usar o valor desta versão como referência do Forecast enquanto o cliente ainda não confirmou qual proposta vai escolher"
+                  >
+                    <span>🎯 Usar no Forecast</span>
                   </button>
                 )}
 
