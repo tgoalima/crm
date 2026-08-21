@@ -6412,7 +6412,11 @@ function App() {
                         setSelectedLossReason('');
                         setShowCloseModal('loss');
                       } else if (val === 'Em Andamento') {
-                        await handleUpdateVersionStatus(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, 'Selecionada');
+                        // 'Ativa', não 'Selecionada' — "Em Andamento" é o estado neutro/rascunho,
+                        // não uma seleção oficial. Usar 'Selecionada' aqui desconsiderava a(s)
+                        // proposta(s) irmã(s) automaticamente, sem o usuário ter clicado em
+                        // "Selecionar Versão" (bug corrigido em 21/08).
+                        await handleUpdateVersionStatus(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, 'Ativa');
                         showToast('Proposta atualizada para Em Andamento!', 'success');
                       } else if (val === 'Desconsiderada') {
                         await handleUpdateVersionStatus(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, 'Desconsiderada');
