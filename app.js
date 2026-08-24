@@ -5147,6 +5147,10 @@ function App() {
         .eq('id', currentProposta.id)
         .single();
 
+      if (dbPropErr) {
+        console.error('Erro ao buscar proposta base atualizada, usando dados em memória:', dbPropErr);
+      }
+
       const basePropData = dbBaseProp || currentProposta;
 
       // 3. Busca os itens da proposta base (vA) direto do banco
@@ -5173,10 +5177,13 @@ function App() {
 
       // Garante que o valor da proposta base (vA) fique preservado intacto no banco Supabase
       if (finalBaseTotal > 0 && parseFloat(basePropData.total_proposta) !== finalBaseTotal) {
-        await supabaseClient
+        const { error: baseUpdateErr } = await supabaseClient
           .from('propostas')
           .update({ total_proposta: finalBaseTotal })
           .eq('id', currentProposta.id);
+        if (baseUpdateErr) {
+          console.error('Erro ao atualizar valor da proposta base:', baseUpdateErr);
+        }
       }
 
       // 5. Calcula a próxima versão (ex: vA -> vB)
@@ -7093,7 +7100,7 @@ function App() {
 
       {/* Alertas Globais */}
       {errorMsg && (
-        <div className="fixed top-20 right-6 z-50 bg-red-950/90 border border-red-500/30 text-red-200 px-4 py-3 rounded-xl flex items-center space-x-2 shadow-2xl backdrop-blur-md animate-bounce">
+        <div className="fixed top-20 right-6 z-[9999] bg-red-950/90 border border-red-500/30 text-red-200 px-4 py-3 rounded-xl flex items-center space-x-2 shadow-2xl backdrop-blur-md animate-bounce">
           <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
@@ -7102,7 +7109,7 @@ function App() {
       )}
 
       {successMsg && (
-        <div className="fixed top-20 right-6 z-50 bg-emerald-950/90 border border-emerald-500/30 text-emerald-200 px-4 py-3 rounded-xl flex items-center space-x-2 shadow-2xl backdrop-blur-md">
+        <div className="fixed top-20 right-6 z-[9999] bg-emerald-950/90 border border-emerald-500/30 text-emerald-200 px-4 py-3 rounded-xl flex items-center space-x-2 shadow-2xl backdrop-blur-md">
           <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
