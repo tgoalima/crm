@@ -86,6 +86,24 @@ const CHART_UI_COLORS_DARK = {
   tooltipBody: '#334155',
 };
 
+// Estabiliza a saída de um useMemo por VALOR, não só por referência. O poll
+// de 3 em 3 min de Relatórios sempre força um refetch (loadDashboardData com
+// forceRefresh padrão true no caminho do polling) e setCommercialData sempre
+// recebe um array novo de .filter() — mesmo quando o conteúdo é idêntico ao
+// que já estava na tela. Sem isso, distributorTotals/manufacturerTotals/
+// topProductsAggregated (que dependem de commercialData) ganham uma
+// referência nova a cada poll, o que invalida por referência o useEffect que
+// cria os gráficos Chart.js (suas dependências), causando destroy+recreate
+// (o "piscar") mesmo sem nenhuma mudança real de valor. Usado com um useRef
+// por chamador — guarda a última versão serializada + o objeto retornado, e
+// devolve o objeto ANTIGO quando o novo é igual por valor.
+function stabilizeByValue(ref, newValue) {
+  const key = JSON.stringify(newValue);
+  if (ref.current && ref.current.key === key) return ref.current.value;
+  ref.current = { key, value: newValue };
+  return newValue;
+}
+
 const getCleanBusinessName = (raw) => {
   if (!raw) return 'Projeto';
   return String(raw)
@@ -974,7 +992,7 @@ const DealsListView = ({
                 downloadCsv(`negocios_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
               }}
               disabled={sorted.length === 0}
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               ⬇ Exportar CSV
             </button>
@@ -982,7 +1000,7 @@ const DealsListView = ({
               onClick={handleExportCompleto}
               disabled={sorted.length === 0 || exportingCompleto || !supabaseClient}
               title="Exporta todos os dados do negócio, incluindo produtos, empresa e CNPJ — uma linha por item, útil pra migração/backup"
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {exportingCompleto ? '⏳ Gerando...' : '⬇ Exportar Completo'}
             </button>
@@ -1116,7 +1134,7 @@ const DealsListView = ({
                 <tr
                   key={task.id}
                   onClick={() => onCardClick && onCardClick(task)}
-                  className="border-b border-slate-100 dark:border-slate-800 hover:bg-indigo-50/50 cursor-pointer transition-colors"
+                  className="border-b border-slate-100 dark:border-slate-800 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-2.5 text-sm font-semibold text-slate-800 dark:text-slate-200 max-w-xs truncate">{task.name}</td>
                   <td className="px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300">{task.responsavel_negocio || 'Sem responsável'}</td>
@@ -1244,7 +1262,7 @@ const LoginScreen = ({ onLogin, error }) => {
               <button 
                 type="button"
                 onClick={() => setShowTokenHelp(!showTokenHelp)}
-                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold transition-colors cursor-pointer"
+                className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-bold transition-colors cursor-pointer"
               >
                 {showTokenHelp ? "Ocultar Dica" : "Como obter?"}
               </button>
@@ -1994,6 +2012,7 @@ function App() {
   const [saving, setSaving] = useState(false);
 
   // Cálculos consolidados para os gráficos da aba de relatórios (Todos os itens de propostas GANHAS/SELECIONADAS)
+  const distributorTotalsStableRef = useRef(null);
   const { distributorTotals, distributorTotalSum } = useMemo(() => {
     const totals = {};
     const wonItems = (commercialData || []).filter(item => {
@@ -2025,9 +2044,10 @@ function App() {
       });
 
     const sum = Object.values(sortedTotals).reduce((a, b) => a + b, 0);
-    return { distributorTotals: sortedTotals, distributorTotalSum: sum };
+    return stabilizeByValue(distributorTotalsStableRef, { distributorTotals: sortedTotals, distributorTotalSum: sum });
   }, [commercialData, selectedDistributorFilter]);
 
+  const manufacturerTotalsStableRef = useRef(null);
   const { manufacturerTotals, manufacturerTotalSum } = useMemo(() => {
     const totals = {};
     const wonItems = (commercialData || []).filter(item => {
@@ -2060,7 +2080,7 @@ function App() {
       });
 
     const sum = Object.values(sortedTotals).reduce((a, b) => a + b, 0);
-    return { manufacturerTotals: sortedTotals, manufacturerTotalSum: sum };
+    return stabilizeByValue(manufacturerTotalsStableRef, { manufacturerTotals: sortedTotals, manufacturerTotalSum: sum });
   }, [commercialData, selectedManufacturerFilter]);
 
   // 1. Carregar Config do Servidor e Inicializar Cliente Supabase
@@ -3965,7 +3985,7 @@ function App() {
     // Timeline Sazonal (geração de 1 ou 2 séries)
     const timelineData = generateMonthlyTimeline(start, end, wonCurrent, compStart, compEnd, wonComp);
 
-    setBiMetrics({
+    const newBiMetrics = {
       wonCount: wonCountCurrent,
       wonValue: wonValueCurrent,
       wonCountComp,
@@ -3997,7 +4017,12 @@ function App() {
       seasonalityCompValues: timelineData.compValues,
       currentYearLabel: timelineData.currentYearLabel,
       compYearLabel: timelineData.compYearLabel
-    });
+    };
+    // Mesmo motivo do stabilizeByValue acima: sem essa comparação, todo poll
+    // de 3 em 3 min (mesmo sem mudança real de dado) trocava a referência de
+    // biMetrics, cuja seasonalityLabels/Values/CompValues estão nas
+    // dependências do useEffect que recria os gráficos — causando o "piscar".
+    setBiMetrics(prev => (JSON.stringify(prev) === JSON.stringify(newBiMetrics)) ? prev : newBiMetrics);
   };
 
   // Carregar dados brutos para o painel de relatórios (uma única busca paralela)
@@ -4071,8 +4096,9 @@ function App() {
   };
 
   // Agregação em tempo real dos produtos mais vendidos para propostas GANHAS
+  const topProductsAggregatedStableRef = useRef(null);
   const topProductsAggregated = useMemo(() => {
-    if (!commercialData || commercialData.length === 0) return [];
+    if (!commercialData || commercialData.length === 0) return stabilizeByValue(topProductsAggregatedStableRef, []);
     
     // Filtrar apenas itens de propostas com situação GANHO ou SELECIONADA, e cujo
     // negócio pai esteja de fato em estágio Ganho (mesma blindagem de isWonProp
@@ -4123,7 +4149,8 @@ function App() {
       };
     });
 
-    return result.sort((a, b) => topProductsFilterMode === 'value' ? b.val - a.val : b.qty - a.qty);
+    const sorted = result.sort((a, b) => topProductsFilterMode === 'value' ? b.val - a.val : b.qty - a.qty);
+    return stabilizeByValue(topProductsAggregatedStableRef, sorted);
   }, [commercialData, topProductsFilterMode]);
 
   // Efeito para criar/destruir e atualizar gráficos do Chart.js
@@ -6034,8 +6061,8 @@ function App() {
 
         {propostas.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
-            <div className="w-14 h-14 bg-gradient-to-br from-indigo-50 to-slate-100 rounded-2xl border border-indigo-100/80 flex items-center justify-center">
-              <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-14 h-14 bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-indigo-950/50 dark:to-slate-800 rounded-2xl border border-indigo-100/80 dark:border-indigo-800/50 flex items-center justify-center">
+              <svg className="w-7 h-7 text-indigo-400 dark:text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
@@ -6263,7 +6290,7 @@ function App() {
     if (!currentProposta) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto space-y-6">
-          <div className="w-20 h-20 bg-gradient-to-br from-indigo-50 to-indigo-100/80 rounded-3xl border border-indigo-200/60 shadow-sm flex items-center justify-center text-indigo-600">
+          <div className="w-20 h-20 bg-gradient-to-br from-indigo-50 to-indigo-100/80 dark:from-indigo-950/50 dark:to-indigo-900/50 rounded-3xl border border-indigo-200/60 dark:border-indigo-800/50 shadow-sm flex items-center justify-center text-indigo-600 dark:text-indigo-300">
             <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
@@ -6290,7 +6317,7 @@ function App() {
         <div className="px-6 py-3 bg-white dark:bg-slate-800 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 flex items-center justify-between z-10 shadow-sm shadow-slate-200/40">
           <button 
             onClick={() => setDrawerTab('details')}
-            className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 px-3 py-1.5 rounded-xl hover:bg-indigo-50/50 transition-all cursor-pointer group"
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 px-3 py-1.5 rounded-xl hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 transition-all cursor-pointer group"
           >
             <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -6674,7 +6701,7 @@ function App() {
               {!isReadOnly && (
                 <button 
                   onClick={() => setShowProductModal(true)}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1.5 transition-colors cursor-pointer group"
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-bold flex items-center gap-1.5 transition-colors cursor-pointer group"
                 >
                   <span className="w-5 h-5 rounded-md bg-indigo-50 group-hover:bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-black">+</span>
                   <span>Adicionar Novo Item ao Catálogo</span>
@@ -6683,7 +6710,7 @@ function App() {
             </div>
 
             {itens.length === 0 ? (
-              <div className="bg-gradient-to-b from-white to-slate-50/80 border border-dashed border-slate-300/90 dark:border-slate-600/90 rounded-3xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-2xs">
+              <div className="bg-gradient-to-b from-white to-slate-50/80 dark:from-slate-800 dark:to-slate-900/80 border border-dashed border-slate-300/90 dark:border-slate-600/90 rounded-3xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-2xs">
                 <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-center text-indigo-500">
                   <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -6818,7 +6845,7 @@ function App() {
                                             });
                                           }}
                                           className={`p-2.5 text-xs cursor-pointer flex justify-between items-center transition-colors ${
-                                            (item.highlightedIndex || 0) === idx ? 'bg-indigo-50/80 text-indigo-900 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300 font-medium'
+                                            (item.highlightedIndex || 0) === idx ? 'bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300 font-medium'
                                           }`}
                                         >
                                           <div>
@@ -6919,7 +6946,7 @@ function App() {
             {!isReadOnly && (
               <button
                 onClick={handleAddItem}
-                className="w-full py-3 border border-dashed border-slate-300 dark:border-slate-600 hover:border-indigo-500 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 bg-white dark:bg-slate-800 hover:bg-indigo-50/40 transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
+                className="w-full py-3 border border-dashed border-slate-300 dark:border-slate-600 hover:border-indigo-500 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-white dark:bg-slate-800 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
               >
                 <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
@@ -7463,7 +7490,7 @@ function App() {
 
               {/* Rodapé com ação */}
               <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-                <button className="text-indigo-600 font-bold hover:text-indigo-800 text-xs flex items-center gap-1 transition-colors cursor-pointer">
+                <button className="text-indigo-600 dark:text-indigo-400 font-bold hover:text-indigo-800 dark:hover:text-indigo-300 text-xs flex items-center gap-1 transition-colors cursor-pointer">
                   <span>Ver lista completa</span>
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -7645,8 +7672,8 @@ function App() {
                               <span className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide truncate">{prod.name}</span>
                             </div>
                             <div className="flex items-center space-x-3 text-xs shrink-0">
-                              <span className="text-slate-500 dark:text-slate-400 font-medium">
-                                {topProductsFilterMode === 'value' 
+                              <span className="text-slate-500 dark:text-slate-300 font-medium">
+                                {topProductsFilterMode === 'value'
                                   ? `R$ ${prod.val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
                                   : `${prod.qty} un.`}
                               </span>
@@ -8172,23 +8199,30 @@ function App() {
                       </select>
                     </div>
 
-                    {/* Datas Customizadas quando o filtro de período é 'custom' */}
+                    {/* Datas Customizadas quando o filtro de período é 'custom' — mesmo
+                        padrão visual (label em caixa + input em caixa) do filtro de
+                        período do Relatórios, ver "Personalizar período" ali. Filtro
+                        aqui é 100% local (sem necessidade de botão "Filtrar"). */}
                     {tasksPeriodFilter === 'custom' && (
-                      <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1 text-xs">
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">De:</span>
-                        <input
-                          type="date"
-                          value={tasksCustomStartDate}
-                          onChange={(e) => setTasksCustomStartDate(e.target.value)}
-                          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 dark:text-slate-300 focus:outline-none"
-                        />
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">Até:</span>
-                        <input
-                          type="date"
-                          value={tasksCustomEndDate}
-                          onChange={(e) => setTasksCustomEndDate(e.target.value)}
-                          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 dark:text-slate-300 focus:outline-none"
-                        />
+                      <div className="flex flex-wrap items-center gap-3 bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-2.5 shadow-lg">
+                        <div className="flex items-center space-x-2">
+                          <label className="text-[10px] font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">De</label>
+                          <input
+                            type="date"
+                            value={tasksCustomStartDate}
+                            onChange={(e) => setTasksCustomStartDate(e.target.value)}
+                            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
+                          />
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <label className="text-[10px] font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Até</label>
+                          <input
+                            type="date"
+                            value={tasksCustomEndDate}
+                            onChange={(e) => setTasksCustomEndDate(e.target.value)}
+                            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer hover:border-slate-600 transition-colors shadow-inner"
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -8272,8 +8306,8 @@ function App() {
                   </div>
                 ) : filtered.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-center space-y-4 max-w-sm mx-auto">
-                    <div className="w-16 h-16 bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                      <svg className="w-8 h-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-16 h-16 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                      <svg className="w-8 h-8 text-slate-300 dark:text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
                     </div>
@@ -8600,14 +8634,14 @@ function App() {
                                 <td className="p-3 text-center space-x-2">
                                   <button 
                                     onClick={() => setEditingProduct(p)}
-                                    className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                                    className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold cursor-pointer"
                                   >
                                     Editar
                                   </button>
                                   <span className="text-slate-300">•</span>
                                   <button 
                                     onClick={() => handleDeleteProduct(p.id)}
-                                    className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
+                                    className="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 font-semibold cursor-pointer"
                                   >
                                     Excluir
                                   </button>
@@ -8735,14 +8769,14 @@ function App() {
                                 <td className="p-3 text-center space-x-2">
                                   <button 
                                     onClick={() => setEditingDistributor(d)}
-                                    className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                                    className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold cursor-pointer"
                                   >
                                     Editar
                                   </button>
                                   <span className="text-slate-300">•</span>
                                   <button 
                                     onClick={() => handleDeleteDistributor(d.id)}
-                                    className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
+                                    className="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 font-semibold cursor-pointer"
                                   >
                                     Excluir
                                   </button>
@@ -8786,7 +8820,7 @@ function App() {
                                 <td className="p-3 text-center space-x-2">
                                   <button
                                     onClick={() => handleToggleOcultoVendedor(v)}
-                                    className={`${v.oculto ? 'text-emerald-600 hover:text-emerald-800' : 'text-amber-600 hover:text-amber-800'} font-semibold cursor-pointer`}
+                                    className={`${v.oculto ? 'text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300' : 'text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300'} font-semibold cursor-pointer`}
                                     title={v.oculto ? "Exibir no CRM" : "Ocultar no CRM"}
                                   >
                                     {v.oculto ? "Exibir" : "Ocultar"}
@@ -8908,7 +8942,7 @@ function App() {
                                       }
                                       showToast('Tipo de tarefa excluído!', 'success');
                                     }}
-                                    className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
+                                    className="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 font-semibold cursor-pointer"
                                   >
                                     Excluir
                                   </button>
@@ -9604,7 +9638,7 @@ function App() {
                         const numProp = selectedTask?.numero_proposta_oficial;
                         if (!numProp) return null;
                         return (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md mt-0.5">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/60 px-2 py-0.5 rounded-md mt-0.5">
                             Nº da Oportunidade: {numProp}
                           </span>
                         );
@@ -9615,7 +9649,7 @@ function App() {
                   <div className="flex items-center gap-2 shrink-0">
                     <button 
                       onClick={() => handleAbrirEditarNegocioDrawer(selectedTask)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
                       title="Editar oportunidade"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
@@ -9626,7 +9660,7 @@ function App() {
 
                     <button 
                       onClick={() => handleExcluirNegocioDrawer(selectedTask)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
                       title="Excluir oportunidade"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
@@ -9682,7 +9716,7 @@ function App() {
                         <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         Valor Estimado
                       </span>
-                      <span className="text-base font-black text-emerald-600 tracking-tight mt-1.5 block">
+                      <span className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-1.5 block">
                         {(() => {
                           if (currentProposta && currentProposta.situacao === 'Selecionada') {
                             return `R$ ${Number(realTimeGrandTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -9697,7 +9731,7 @@ function App() {
                   </div>
 
                   {/* Pipeline Premium — Estágio da Venda */}
-                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50">
+                  <div className="bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-sm">
@@ -9746,7 +9780,7 @@ function App() {
                                   showToast('Estágio Congelado não configurado.', 'warning');
                                 }
                               }}
-                              className="bg-slate-100 dark:bg-slate-700 hover:bg-sky-50 text-slate-600 dark:text-slate-300 hover:text-sky-700 border border-slate-200 dark:border-slate-700 hover:border-sky-300 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                              className="bg-slate-100 dark:bg-slate-700 hover:bg-sky-50 dark:hover:bg-sky-950/50 text-slate-600 dark:text-slate-300 hover:text-sky-700 dark:hover:text-sky-300 border border-slate-200 dark:border-slate-700 hover:border-sky-300 dark:hover:border-sky-800 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                               title="Clique para Congelar este negócio"
                             >
                               <span>❄️ Congelar</span>
@@ -9820,7 +9854,7 @@ function App() {
                                     isCurrent
                                       ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03] ring-2 ring-indigo-400/30 ring-offset-1'
                                       : isPassed
-                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 hover:from-indigo-100 hover:to-indigo-200'
+                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950/60 dark:to-indigo-900/60 text-indigo-700 dark:text-indigo-300 hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-indigo-900 dark:hover:to-indigo-800'
                                       : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-600/80 hover:text-slate-700 dark:hover:text-slate-300'
                                   }`}
                                 >
@@ -9828,21 +9862,21 @@ function App() {
                                     isCurrent
                                       ? 'bg-white/25 dark:bg-slate-800/25'
                                       : isPassed
-                                      ? 'bg-indigo-200/60'
+                                      ? 'bg-indigo-200/60 dark:bg-indigo-800/60'
                                       : 'bg-slate-200/60 dark:bg-slate-600/60'
                                   }`}>
                                     {isCurrent ? (
                                       <span className="w-2 h-2 bg-white dark:bg-slate-800 rounded-full animate-pulse" />
                                     ) : isPassed ? (
-                                      <svg className="w-3 h-3 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                      <svg className="w-3 h-3 text-indigo-600 dark:text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                       </svg>
                                     ) : (
-                                      <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
+                                      <span className="w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full" />
                                     )}
                                   </div>
                                   <span className={`text-[10px] font-bold text-center leading-tight ${
-                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
+                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                                   }`}>
                                     {col.name}
                                   </span>
@@ -9868,8 +9902,8 @@ function App() {
                                 isWon
                                   ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/30 scale-[1.03] ring-2 ring-emerald-400 ring-offset-1 cursor-pointer'
                                   : hasSelectedProposal
-                                  ? 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 border border-transparent cursor-pointer'
-                                  : 'bg-slate-100/50 dark:bg-slate-700/50 text-slate-300 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50'
+                                  ? 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-700 dark:hover:text-emerald-300 hover:border-emerald-200 dark:hover:border-emerald-800 border border-transparent cursor-pointer'
+                                  : 'bg-slate-100/50 dark:bg-slate-700/50 text-slate-300 dark:text-slate-600 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50'
                               }`}
                             >
                               <div className={`w-5 h-5 rounded-full flex items-center justify-center mb-1 ${isWon ? 'bg-white/25 dark:bg-slate-800/25' : 'bg-slate-200/60 dark:bg-slate-600/60'}`}>
@@ -9895,8 +9929,8 @@ function App() {
                                 isLost
                                   ? 'bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/30 scale-[1.03] ring-2 ring-rose-400 ring-offset-1 cursor-pointer'
                                   : hasSelectedProposal
-                                  ? 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-transparent cursor-pointer'
-                                  : 'bg-slate-100/50 dark:bg-slate-700/50 text-slate-300 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50'
+                                  ? 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-700 dark:hover:text-rose-300 hover:border-rose-200 dark:hover:border-rose-800 border border-transparent cursor-pointer'
+                                  : 'bg-slate-100/50 dark:bg-slate-700/50 text-slate-300 dark:text-slate-600 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50'
                               }`}
                             >
                               <div className={`w-5 h-5 rounded-full flex items-center justify-center mb-1 ${isLost ? 'bg-white/25 dark:bg-slate-800/25' : 'bg-slate-200/60 dark:bg-slate-600/60'}`}>
