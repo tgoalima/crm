@@ -68,7 +68,7 @@ const normalizeTier = (t) => {
   if (!t || t === '0' || t === 'none' || t === '') return null;
   if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', Icon: IconDiamond, color: 'bg-violet-50 text-violet-700 border-violet-200', cardColor: 'bg-violet-50 text-violet-700 border-violet-200', accentBorder: 'border-l-violet-400' };
   if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', Icon: IconStar, color: 'bg-amber-50 text-amber-700 border-amber-200', cardColor: 'bg-amber-50 text-amber-700 border-amber-200', accentBorder: 'border-l-amber-400' };
-  if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', Icon: IconPackage, color: 'bg-slate-100 text-slate-500 border-slate-200', cardColor: 'bg-slate-50 text-slate-500 border-slate-200', accentBorder: 'border-l-slate-300' };
+  if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', Icon: IconPackage, color: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700', cardColor: 'bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700', accentBorder: 'border-l-slate-300' };
   return null;
 };
 
@@ -79,7 +79,7 @@ const normalizeStatus = (s) => {
     'prospect':      { label: 'Prospect',      color: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500'    },
     'at risk':       { label: 'At Risk',        color: 'bg-rose-50 text-rose-700 border-rose-200',          dot: 'bg-rose-500'    },
   };
-  return map[(s || '').toLowerCase()] || { label: s || '—', color: 'bg-slate-100 text-slate-500 border-slate-200', dot: 'bg-slate-400' };
+  return map[(s || '').toLowerCase()] || { label: s || '—', color: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700', dot: 'bg-slate-400' };
 };
 
 // Paleta de cores sólidas de alto contraste (sem degradê)
@@ -293,7 +293,7 @@ const CRMInput = ({ label, name, value, onChange, type = 'text', placeholder, mo
     <input
       type={type} required={required} placeholder={placeholder} value={value}
       onChange={e => onChange(name, mask ? mask(e.target.value) : e.target.value)}
-      className={`w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
+      className={`w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
     />
   </div>
 );
@@ -323,9 +323,9 @@ const CRMCurrencyInput = ({ label, name, value, onChange, placeholder = '0,00', 
     <div className={className}>
       <label className="block text-xs font-bold text-slate-600 mb-1">{label}{required && ' *'}</label>
       <div className="relative">
-        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold pointer-events-none">R$</span>
+        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm font-bold pointer-events-none">R$</span>
         <input type="text" inputMode="decimal" required={required} placeholder={placeholder} value={display} onChange={handleInput}
-          className="w-full pl-9 pr-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-semibold text-slate-900 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+          className="w-full pl-9 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
       </div>
     </div>
   );
@@ -334,14 +334,14 @@ const CRMCurrencyInput = ({ label, name, value, onChange, placeholder = '0,00', 
 const CRMSelect = ({ label, name, value, onChange, children, className = '' }) => (
   <div className={className}>
     <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>
-    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
+    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 dark:text-slate-100 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
   </div>
 );
 
 const DadoCampo = ({ label, value, href, mono }) => (
   <div>
-    <dt className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">{label}</dt>
-    <dd className={`text-sm font-semibold ${mono ? 'font-mono tracking-wide' : ''} ${value ? 'text-slate-900' : 'text-slate-300'}`}>
+    <dt className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{label}</dt>
+    <dd className={`text-sm font-semibold ${mono ? 'font-mono tracking-wide' : ''} ${value ? 'text-slate-900 dark:text-slate-100' : 'text-slate-300'}`}>
       {href && value ? <a href={href} className="text-indigo-600 hover:underline">{value}</a> : (value || '—')}
     </dd>
   </div>
@@ -404,13 +404,13 @@ const SegmentoCombobox = ({ value, onChange }) => {
     <div className="relative">
       <label className="block text-xs font-bold text-slate-600 mb-1">Segmento de Atuação</label>
       <input type="text" placeholder="Digite ou selecione..." value={value || busca} onChange={handleInputChange} onKeyDown={handleKeyDown} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
-        className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
       {open && filtered.length > 0 && (
-        <div className="absolute z-[110] top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="absolute z-[110] top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
           <div ref={listRef} className="max-h-44 overflow-y-auto divide-y divide-slate-50">
             {filtered.map((s, i) => (
               <button key={s} type="button" onMouseDown={() => handleSelect(s)} onMouseEnter={() => setHighlight(i)}
-                className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-800 hover:bg-indigo-50 hover:text-indigo-700'}`}>{s}</button>
+                className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-800 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700'}`}>{s}</button>
             ))}
           </div>
         </div>
@@ -520,25 +520,25 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
   const SectionTitle = ({ children }) => (
     <div className="flex items-center gap-2.5 mb-3">
       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
-      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{children}</span>
-      <div className="flex-1 h-px bg-slate-200"></div>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{children}</span>
+      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600"></div>
     </div>
   );
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <AvatarInicial nome={form.nome || 'N'} size="lg" />
           <div className="flex-1">
-            <h3 className="font-black text-base text-slate-900">{isEdit ? 'Editar Empresa' : 'Nova Empresa'}</h3>
-            <p className="text-xs text-slate-400 font-medium">{isEdit ? conta.nome : 'Cadastre uma nova empresa'}</p>
+            <h3 className="font-black text-base text-slate-900 dark:text-slate-100">{isEdit ? 'Editar Empresa' : 'Nova Empresa'}</h3>
+            <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">{isEdit ? conta.nome : 'Cadastre uma nova empresa'}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
-        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70">
+        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70 dark:bg-slate-700/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Identificação</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="Nome Fantasia / Comercial" name="nome" value={form.nome} onChange={handleChange} placeholder="Ex: Hospital do Câncer de Londrina" required className="col-span-2" />
@@ -566,14 +566,14 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
               </CRMSelect>
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Canais de Contato</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="E-mail Corporativo" name="email" type="email" value={form.email} onChange={handleChange} placeholder="contato@empresa.com.br" />
               <CRMInput label="Telefone Principal" name="telefone" value={form.telefone} onChange={handleChange} placeholder="(11) 3333-0000" />
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Endereço</SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <CRMInput label="Logradouro / Endereço" name="rua" value={form.rua} onChange={handleChange} placeholder="Av. Paulista, 1000" className="col-span-2" />
@@ -585,7 +585,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
             </div>
           </div>
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-xs transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : (isEdit ? '✓ Atualizar Empresa' : '+ Cadastrar Empresa')}
             </button>
@@ -745,39 +745,39 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl ring-1 border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-lg shadow-2xl ring-1 border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <AvatarInicial nome={form.nome || 'CT'} size="md" />
           <div className="flex-1 min-w-0">
-            <h3 className="font-black text-base text-slate-900 leading-tight">{isEdit ? 'Editar Contato' : 'Novo Contato'}</h3>
-            <p className="text-xs text-slate-500 font-medium truncate">
+            <h3 className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">{isEdit ? 'Editar Contato' : 'Novo Contato'}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
               {empresasVinculadas.length === 1 ? empresasVinculadas[0].nome : `${empresasVinculadas.length} empresas vinculadas`}
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
 
         <form onSubmit={salvar} className="p-6 space-y-4 overflow-y-auto flex-1">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
 
           {/* VÍNCULO DE EMPRESAS (MULTI-SELEÇÃO) */}
-          <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
-            <label className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+          <div className="space-y-1.5 p-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl">
+            <label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
               <IconBuilding size={12} /> Empresas Vinculadas <span className="text-indigo-600 font-bold">({empresasVinculadas.length})</span>
             </label>
-            <p className="text-[11px] text-slate-500 mb-2">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
               Vincule este contato a uma ou mais empresas (ex: matriz e filiais) ou troque de empresa caso ele tenha mudado de emprego.
             </p>
 
             {/* Tags das empresas selecionadas */}
             <div className="flex flex-wrap gap-1.5 mb-2">
               {empresasVinculadas.map(emp => (
-                <span key={emp.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-indigo-200 text-indigo-900 text-xs font-extrabold rounded-lg shadow-2xs">
+                <span key={emp.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-slate-800 border border-indigo-200 text-indigo-900 text-xs font-extrabold rounded-lg shadow-2xs">
                   <span className="flex items-center gap-1"><IconBuilding size={11} /> {emp.nome}</span>
                   <button
                     type="button"
                     onClick={() => removerVinculo(emp.id)}
-                    className="text-slate-400 hover:text-rose-600 rounded-md p-0.5 transition-colors cursor-pointer"
+                    className="text-slate-400 dark:text-slate-500 hover:text-rose-600 rounded-md p-0.5 transition-colors cursor-pointer"
                     title="Remover vínculo desta empresa"
                   >
                     ✕
@@ -794,11 +794,11 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
                 value={buscaEmpresa}
                 onChange={(e) => { setBuscaEmpresa(e.target.value); setShowDropdownEmpresa(true); }}
                 onFocus={() => setShowDropdownEmpresa(true)}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
               />
 
               {showDropdownEmpresa && empresasDisponiveis.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100">
                   {empresasDisponiveis.map(emp => (
                     <button
                       key={emp.id}
@@ -806,7 +806,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
                       onClick={() => adicionarVinculo(emp)}
                       className="w-full text-left px-3 py-2 hover:bg-indigo-50 flex items-center justify-between text-xs transition-colors cursor-pointer"
                     >
-                      <span className="font-bold text-slate-800">{emp.nome}</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{emp.nome}</span>
                       <span className="text-[10px] font-black text-indigo-600 uppercase bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">+ Vincular</span>
                     </button>
                   ))}
@@ -832,8 +832,8 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
             </div>
           </label>
 
-          <div className="flex gap-3 pt-3 border-t border-slate-100 shrink-0">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">Cancelar</button>
+          <div className="flex gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : (isEdit ? '✓ Atualizar Contato' : '+ Adicionar Contato')}
             </button>
@@ -962,34 +962,34 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
   const SectionTitle = ({ children }) => (
     <div className="flex items-center gap-2.5 pt-1">
       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
-      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{children}</span>
-      <div className="flex-1 h-px bg-slate-200"></div>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{children}</span>
+      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600"></div>
     </div>
   );
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
               <IconBriefcase size={20} />
             </div>
             <div>
-              <h3 className="font-black text-base text-slate-900 leading-tight">Nova Oportunidade</h3>
-              <p className="text-xs text-slate-400 font-medium">Cadastre um negócio comercial estruturado</p>
+              <h3 className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">Nova Oportunidade</h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">Cadastre um negócio comercial estruturado</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
 
         {/* FORM */}
-        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70">
+        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70 dark:bg-slate-700/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
 
           {/* SEÇÃO 1: IDENTIFICAÇÃO */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Identificação da Oportunidade</SectionTitle>
             <div className="space-y-3 mt-2">
               <CRMInput label="Título da Oportunidade" name="nome" value={form.nome} onChange={handleChange} placeholder="Ex: Expansão Servidores Dell PowerEdge R750" required />
@@ -998,23 +998,23 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Empresa / Conta *</label>
                 {contaFixa ? (
-                  <div className="flex items-center gap-3 p-3 bg-white border border-slate-300 shadow-xs rounded-xl">
+                  <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 border border-slate-300 shadow-xs rounded-xl">
                     <AvatarInicial nome={contaFixa.nome} size="sm" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-black text-slate-900 truncate">{contaFixa.nome}</p>
-                      <p className="text-[11px] text-slate-400">{normalizeStatus(contaFixa.status).label}</p>
+                      <p className="text-xs font-black text-slate-900 dark:text-slate-100 truncate">{contaFixa.nome}</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500">{normalizeStatus(contaFixa.status).label}</p>
                     </div>
                   </div>
                 ) : (
                   <div className="relative">
                     <input placeholder="Digite o nome da empresa..." value={contaEscolhida ? contaEscolhida.nome : buscaConta} onChange={e => { setContaEscolhida(null); setBuscaConta(e.target.value); }}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     {contasFiltradas.length > 0 && (
-                      <div className="absolute z-20 bg-white border border-slate-200 rounded-2xl mt-1 w-full max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-50">
+                      <div className="absolute z-20 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl mt-1 w-full max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-50">
                         {contasFiltradas.map(c => (
                           <div key={c.id} onClick={() => { setContaEscolhida(c); setBuscaConta(''); }} className="px-4 py-2.5 hover:bg-indigo-50/80 cursor-pointer flex items-center gap-2.5 transition-colors">
                             <AvatarInicial nome={c.nome} size="xs" />
-                            <div><p className="text-xs font-bold text-slate-900">{c.nome}</p><p className="text-[10px] text-slate-400">{c.cidade || '—'}</p></div>
+                            <div><p className="text-xs font-bold text-slate-900 dark:text-slate-100">{c.nome}</p><p className="text-[10px] text-slate-400 dark:text-slate-500">{c.cidade || '—'}</p></div>
                           </div>
                         ))}
                       </div>
@@ -1038,7 +1038,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 2: PIPELINE & CLASSIFICAÇÃO */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Classificação & Pipeline</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
               <CRMSelect label="Estágio do Funil" name="estagio" value={form.estagio} onChange={handleChange}>
@@ -1075,7 +1075,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 3: VALORES & PREVISÃO */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Valores & Previsão</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               <CRMCurrencyInput label="Valor Estimado" name="valor" value={form.valor} onChange={handleChange} />
@@ -1084,7 +1084,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 4: REGISTROS DE OPORTUNIDADE (R.O.) */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Registros de Oportunidade (R.O.)</SectionTitle>
             <div className="space-y-2.5 mt-2">
               <CRMInput label="R.O: Infraestrutura" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
@@ -1098,7 +1098,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
           </div>
 
           {/* SEÇÃO 5: ESCOPO & NOTAS */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Escopo & Solução Técnica</SectionTitle>
             <div className="mt-2">
               <textarea
@@ -1106,14 +1106,14 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
                 value={form.descricao}
                 onChange={e => handleChange('descricao', e.target.value)}
                 rows={3}
-                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
             </div>
           </div>
 
           {/* FOOTER */}
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-xs transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Criando...' : '+ Criar Oportunidade'}
             </button>
@@ -1251,22 +1251,22 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
   const SectionTitle = ({ children }) => (
     <div className="flex items-center gap-2.5 pt-1">
       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
-      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">{children}</span>
-      <div className="flex-1 h-px bg-slate-200"></div>
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{children}</span>
+      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600"></div>
     </div>
   );
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
               <IconBriefcase size={20} />
             </div>
             <div>
-              <h3 className="font-black text-base text-slate-900 leading-tight">Editar Oportunidade</h3>
+              <h3 className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">Editar Oportunidade</h3>
               {negocio?.numero_proposta_oficial && (
                 <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg mt-0.5">
                   Nº da Oportunidade: {negocio.numero_proposta_oficial}
@@ -1274,15 +1274,15 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
               )}
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
 
         {/* FORM */}
-        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70">
+        <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70 dark:bg-slate-700/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
 
           {/* SEÇÃO 1: IDENTIFICAÇÃO */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Identificação da Oportunidade</SectionTitle>
             <div className="space-y-3 mt-2">
               <CRMInput label="Título da Oportunidade" name="nome" value={form.nome} onChange={handleChange} required />
@@ -1290,7 +1290,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
           </div>
 
           {/* SEÇÃO 2: PIPELINE & CLASSIFICAÇÃO */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Classificação & Pipeline</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
               <CRMSelect label="Estágio do Funil" name="estagio" value={form.estagio} onChange={handleChange}>
@@ -1327,7 +1327,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
           </div>
 
           {/* SEÇÃO 3: VALORES & PREVISÃO */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Valores & Previsão</SectionTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               <CRMCurrencyInput label="Valor Estimado" name="valor" value={form.valor} onChange={handleChange} />
@@ -1336,7 +1336,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
           </div>
 
           {/* SEÇÃO 4: REGISTROS DE OPORTUNIDADE (R.O.) */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Registros de Oportunidade (R.O.)</SectionTitle>
             <div className="space-y-2.5 mt-2">
               <CRMInput label="R.O: Infraestrutura" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
@@ -1350,7 +1350,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
           </div>
 
           {/* SEÇÃO 5: ESCOPO & NOTAS */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Escopo & Solução Técnica</SectionTitle>
             <div className="mt-2">
               <textarea
@@ -1358,14 +1358,14 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
                 value={form.descricao}
                 onChange={e => handleChange('descricao', e.target.value)}
                 rows={3}
-                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 shadow-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
             </div>
           </div>
 
           {/* FOOTER */}
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 shadow-xs transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : '✓ Salvar Alterações'}
             </button>
@@ -1422,7 +1422,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
   const renderPipelineBar = (estagio) => {
     const idx = ESTAGIOS_ORDEM.indexOf(estagio);
     const pct = Math.round(((idx >= 0 ? idx+1 : 1) / ESTAGIOS_ORDEM.length) * 100);
-    return (<div className="w-24 bg-slate-100 rounded-full h-1.5 overflow-hidden"><div className="bg-indigo-600 h-full rounded-full" style={{ width: `${pct}%` }}></div></div>);
+    return (<div className="w-24 bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden"><div className="bg-indigo-600 h-full rounded-full" style={{ width: `${pct}%` }}></div></div>);
   };
 
   const tier = normalizeTier(conta.account_tier);
@@ -1430,19 +1430,19 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-xs" onClick={onClose}>
-      <div className="w-full max-w-2xl bg-white h-full flex flex-col shadow-2xl border-l border-slate-200" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-2xl bg-white dark:bg-slate-800 h-full flex flex-col shadow-2xl border-l border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
 
         {/* HEADER */}
-        <div className="shrink-0 border-b border-slate-100">
+        <div className="shrink-0 border-b border-slate-100 dark:border-slate-800">
           <div className="px-6 pt-5 pb-3">
             <div className="flex items-start gap-4">
               <AvatarInicial nome={conta.nome} size="xl" />
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-black text-slate-900 leading-tight">{conta.nome}</h2>
+                <h2 className="text-lg font-black text-slate-900 dark:text-slate-100 leading-tight">{conta.nome}</h2>
                 {conta.razao_social && conta.razao_social !== conta.nome && (
-                  <p className="text-xs text-slate-500 font-medium truncate">{conta.razao_social}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">{conta.razao_social}</p>
                 )}
-                <p className="text-xs text-slate-400 font-mono mt-0.5">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}{conta.cidade ? ` · ${conta.cidade}/${conta.estado}` : ''}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 font-mono mt-0.5">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}{conta.cidade ? ` · ${conta.cidade}/${conta.estado}` : ''}</p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full border ${status.color}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>{status.label}
@@ -1452,19 +1452,19 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                       <tier.Icon size={10} /> {tier.label}
                     </span>
                   )}
-                  {conta.industry && (<span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{conta.industry}</span>)}
+                  {conta.industry && (<span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2.5 py-1 rounded-full">{conta.industry}</span>)}
                   {conta.sync_status === 'pending' && <span className="text-[10px] font-bold text-amber-500">sincronizando...</span>}
                   {conta.sync_status === 'failed' && <span className="text-[10px] font-bold text-rose-500" title={conta.sync_error}>falha ao sincronizar</span>}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => onEditarEmpresa(conta)} title="Editar dados da empresa" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-bold transition-all shadow-xs cursor-pointer hover:border-indigo-300 hover:text-indigo-600">
+                <button onClick={() => onEditarEmpresa(conta)} title="Editar dados da empresa" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 text-xs font-bold transition-all shadow-xs cursor-pointer hover:border-indigo-300 hover:text-indigo-600">
                   <IconEdit size={13} /> Editar
                 </button>
-                <button onClick={() => onExcluirEmpresa(conta)} title="Excluir esta empresa" className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 hover:border-rose-300 transition-all shadow-xs cursor-pointer">
+                <button onClick={() => onExcluirEmpresa(conta)} title="Excluir esta empresa" className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-rose-50 text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:border-rose-300 transition-all shadow-xs cursor-pointer">
                   <IconTrash size={13} />
                 </button>
-                <button onClick={onClose} title="Fechar (ESC)" className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer">
+                <button onClick={onClose} title="Fechar (ESC)" className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors cursor-pointer">
                   <IconClose size={14} />
                 </button>
               </div>
@@ -1472,60 +1472,60 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           </div>
 
           {/* KPI DASHBOARD — 4 Cards Executivos Estruturados */}
-          <div className="p-4 bg-gradient-to-b from-slate-100 to-slate-100/60 border-t border-slate-200">
+          <div className="p-4 bg-gradient-to-b from-slate-100 to-slate-100/60 border-t border-slate-200 dark:border-slate-700">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {/* Card 1: Ganhos */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200 border-t-2 border-t-emerald-400 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
+              <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 border-t-2 border-t-emerald-400 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Total Ganho</span>
+                  <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Ganho</span>
                   <IconDollar size={13} className="text-emerald-500" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-emerald-600 tracking-tight tabular-nums">
                   {kpis.qtdGanho > 0 ? formatCurrency(kpis.ganho) : '—'}
                 </p>
-                <p className="text-[10px] font-bold text-slate-400 mt-1">
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
                   {kpis.qtdGanho} {kpis.qtdGanho === 1 ? 'negócio ganho' : 'negócios ganhos'}
                 </p>
               </div>
 
               {/* Card 2: Pipeline */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200 border-t-2 border-t-indigo-400 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
+              <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 border-t-2 border-t-indigo-400 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Pipeline</span>
+                  <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pipeline</span>
                   <IconZap size={13} className="text-indigo-500" />
                 </div>
                 <p className="text-sm sm:text-base font-black text-indigo-600 tracking-tight tabular-nums">
                   {kpis.qtdAberto > 0 ? formatCurrency(kpis.pipeline) : '—'}
                 </p>
-                <p className="text-[10px] font-bold text-slate-400 mt-1">
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
                   {kpis.qtdAberto} em andamento
                 </p>
               </div>
 
               {/* Card 3: Histórico de Negócios */}
-              <div className="bg-white p-3 rounded-2xl border border-slate-200 border-t-2 border-t-slate-300 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
+              <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 border-t-2 border-t-slate-300 shadow-sm shadow-slate-200/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Negócios</span>
-                  <IconDocument size={13} className="text-slate-400" />
+                  <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Negócios</span>
+                  <IconDocument size={13} className="text-slate-400 dark:text-slate-500" />
                 </div>
-                <p className="text-sm sm:text-base font-black text-slate-900 tracking-tight tabular-nums">
+                <p className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 tracking-tight tabular-nums">
                   {kpis.total}
                 </p>
-                <p className="text-[10px] font-bold text-slate-400 mt-1">
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
                   {kpis.qtdGanho}G · {kpis.qtdPerdido}P · {kpis.qtdAberto}A
                 </p>
               </div>
 
               {/* Card 4: Taxa de Conversão */}
-              <div className={`bg-white p-3 rounded-2xl border border-slate-200 border-t-2 shadow-sm shadow-slate-200/60 flex flex-col justify-between ${kpis.taxa >= 60 ? 'border-t-emerald-400' : kpis.taxa > 0 ? 'border-t-amber-400' : 'border-t-slate-300'}`}>
+              <div className={`bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 border-t-2 shadow-sm shadow-slate-200/60 flex flex-col justify-between ${kpis.taxa >= 60 ? 'border-t-emerald-400' : kpis.taxa > 0 ? 'border-t-amber-400' : 'border-t-slate-300'}`}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Conversão</span>
-                  <IconTrophy size={13} className={kpis.taxa >= 60 ? 'text-emerald-500' : kpis.taxa > 0 ? 'text-amber-500' : 'text-slate-400'} />
+                  <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Conversão</span>
+                  <IconTrophy size={13} className={kpis.taxa >= 60 ? 'text-emerald-500' : kpis.taxa > 0 ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'} />
                 </div>
-                <p className={`text-sm sm:text-base font-black tracking-tight tabular-nums ${kpis.taxa >= 60 ? 'text-emerald-600' : kpis.taxa > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                <p className={`text-sm sm:text-base font-black tracking-tight tabular-nums ${kpis.taxa >= 60 ? 'text-emerald-600' : kpis.taxa > 0 ? 'text-amber-600' : 'text-slate-400 dark:text-slate-500'}`}>
                   {kpis.total > 0 ? `${kpis.taxa}%` : '—'}
                 </p>
-                <p className="text-[10px] font-bold text-slate-400 mt-1">
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
                   {kpis.taxa >= 60 ? 'Alta taxa' : kpis.taxa > 0 ? 'Taxa média' : 'Sem histórico'}
                 </p>
               </div>
@@ -1533,21 +1533,21 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           </div>
 
           {/* ABAS */}
-          <div className="flex border-t border-slate-200 bg-white px-4 gap-1">
+          <div className="flex border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 gap-1">
             {[['visao_geral','Visão Geral'],['contatos',`Contatos (${contatos.length})`],['oportunidades',`Oportunidades (${negocios.length})`]].map(([id,label]) => (
-              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 text-indigo-600 bg-indigo-50/60' : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}>{label}</button>
+              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 text-indigo-600 bg-indigo-50/60' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'}`}>{label}</button>
             ))}
           </div>
         </div>
 
         {/* CONTEÚDO */}
-        <div className="flex-1 overflow-y-auto bg-slate-50/40">
+        <div className="flex-1 overflow-y-auto bg-slate-50/40 dark:bg-slate-900/40">
 
           {/* ABA VISÃO GERAL */}
           {aba === 'visao_geral' && (
             <div className="p-5 space-y-4">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-100/80">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
                   <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconBuilding size={12} className="text-indigo-500" /> Dados Corporativos</h4>
                   <button onClick={() => onEditarEmpresa(conta)} className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"><IconEdit size={11} /> Editar</button>
                 </div>
@@ -1562,8 +1562,8 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
-                  <div className="px-5 py-3 border-b border-slate-200 bg-slate-100/80">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
                     <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconPhone size={12} className="text-indigo-500" /> Contato Corporativo</h4>
                   </div>
                   <dl className="px-5 py-4 space-y-3">
@@ -1571,13 +1571,13 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                     <DadoCampo label="Telefone" value={formatPhone(conta.telefone)} href={conta.telefone ? `tel:${conta.telefone}` : null} />
                   </dl>
                 </div>
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/50 overflow-hidden">
-                  <div className="px-5 py-3 border-b border-slate-200 bg-slate-100/80">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
                     <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconMapPin size={12} className="text-indigo-500" /> Localização</h4>
                   </div>
                   <div className="px-5 py-4 space-y-1.5">
-                    <p className="text-sm font-bold text-slate-900">{conta.rua || '—'}</p>
-                    <p className="text-xs text-slate-500 font-medium">{[conta.cidade,conta.estado].filter(Boolean).join(' - ')}{conta.cep ? ` · CEP ${conta.cep}` : ''}</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{conta.rua || '—'}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{[conta.cidade,conta.estado].filter(Boolean).join(' - ')}{conta.cep ? ` · CEP ${conta.cep}` : ''}</p>
                   </div>
                 </div>
               </div>
@@ -1588,27 +1588,27 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           {aba === 'contatos' && (
             <div className="p-5 space-y-3">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs font-extrabold uppercase tracking-widest text-slate-400">Equipe & Decisores</p>
+                <p className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">Equipe & Decisores</p>
                 <button onClick={onNovoContato} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-200 cursor-pointer">+ Adicionar Contato</button>
               </div>
               {contatos.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3"><IconUsers size={20} className="text-slate-400" /></div>
-                  <p className="text-sm font-semibold text-slate-500">Nenhum contato cadastrado</p>
+                <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center mx-auto mb-3"><IconUsers size={20} className="text-slate-400 dark:text-slate-500" /></div>
+                  <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Nenhum contato cadastrado</p>
                   <button onClick={onNovoContato} className="mt-2 text-xs font-bold text-indigo-600 hover:underline cursor-pointer">+ Cadastrar Primeiro Contato</button>
                 </div>
               ) : contatos.map(c => (
-                <div key={c.id} className="bg-white rounded-2xl border border-slate-200/90 hover:border-indigo-200 hover:shadow-md transition-all group overflow-hidden">
+                <div key={c.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/90 dark:border-slate-700/90 hover:border-indigo-200 hover:shadow-md transition-all group overflow-hidden">
                   <div className="flex items-center gap-3.5 p-4">
                     <div onClick={() => onEditarContato(c)} className="cursor-pointer flex items-center gap-3.5 flex-1 min-w-0" title="Clique para editar">
                       <AvatarInicial nome={c.nome} size="md" />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <h5 className="font-bold text-sm text-slate-900 group-hover:text-indigo-600 transition-colors truncate">{c.nome}</h5>
+                          <h5 className="font-bold text-sm text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 transition-colors truncate">{c.nome}</h5>
                           {c.champion && <span className="shrink-0 text-amber-500" title="Champion / Principal Decisor"><IconStar size={12} /></span>}
                         </div>
-                        <p className="text-xs text-slate-500 font-medium truncate">{c.cargo || 'Cargo não informado'}</p>
-                        {c.email && <p className="text-[11px] text-slate-400 truncate mt-0.5">{c.email}</p>}
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">{c.cargo || 'Cargo não informado'}</p>
+                        {c.email && <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{c.email}</p>}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
@@ -1638,8 +1638,8 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                           <span>WhatsApp</span>
                         </a>
                       )}
-                      <button onClick={() => onEditarContato(c)} title="Editar contato" className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer"><IconEdit size={13} /></button>
-                      <button onClick={() => onExcluirContato(c)} title="Excluir contato" className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><IconTrash size={13} /></button>
+                      <button onClick={() => onEditarContato(c)} title="Editar contato" className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer"><IconEdit size={13} /></button>
+                      <button onClick={() => onExcluirContato(c)} title="Excluir contato" className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><IconTrash size={13} /></button>
                     </div>
                   </div>
                   {c.champion && (<div className="px-4 py-2 border-t border-amber-100 bg-amber-50/60 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800 flex items-center gap-1.5"><IconStar size={11} /> Champion — Principal decisor desta conta</p></div>)}
@@ -1652,7 +1652,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           {aba === 'oportunidades' && (
             <div className="p-5 space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-1 bg-white border border-slate-200/80 p-1 rounded-xl shadow-2xs overflow-x-auto">
+                <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 p-1 rounded-xl shadow-2xs overflow-x-auto">
                   {[
                     ['todos', `Todas (${statsNegocios.total})`, 'bg-slate-900'],
                     ['aberto', `Abertas (${statsNegocios.aberto})`, 'bg-indigo-600'],
@@ -1663,7 +1663,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                       key={id}
                       onClick={() => setFiltroEstagio(id)}
                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                        filtroEstagio === id ? `${ac} text-white shadow-2xs` : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                        filtroEstagio === id ? `${ac} text-white shadow-2xs` : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
                       }`}
                     >
                       {label}
@@ -1685,30 +1685,30 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   const valor = resolveNegocioValor(n, propostasPorNegocio);
                   const isGanho = n.estagio==='Ganho', isPerdido = n.estagio==='Perdido', isCongelado = n.estagio==='Congelado', isAberto = !isGanho && !isPerdido && !isCongelado;
                   return (
-                    <div key={n.id} onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: String(n.clickup_negocio_id).replace('#', '').trim(), name: n.nome, estagio: n.estagio, clickup_negocio_id: n.clickup_negocio_id, numero_proposta_oficial: n.numero_proposta_oficial, conta_id: n.conta_id })} className={`bg-white rounded-2xl border transition-all cursor-pointer hover:shadow-md group ${isGanho ? 'border-l-4 border-l-emerald-500 border-slate-200' : isPerdido ? 'border-l-4 border-l-rose-400 border-slate-200 opacity-80' : isCongelado ? 'border-l-4 border-l-blue-300 border-slate-200' : 'border-l-4 border-l-indigo-600 border-slate-200'}`}>
+                    <div key={n.id} onClick={() => n.clickup_negocio_id && onOpenNegocio && onOpenNegocio({ id: String(n.clickup_negocio_id).replace('#', '').trim(), name: n.nome, estagio: n.estagio, clickup_negocio_id: n.clickup_negocio_id, numero_proposta_oficial: n.numero_proposta_oficial, conta_id: n.conta_id })} className={`bg-white dark:bg-slate-800 rounded-2xl border transition-all cursor-pointer hover:shadow-md group ${isGanho ? 'border-l-4 border-l-emerald-500 border-slate-200 dark:border-slate-700' : isPerdido ? 'border-l-4 border-l-rose-400 border-slate-200 dark:border-slate-700 opacity-80' : isCongelado ? 'border-l-4 border-l-blue-300 border-slate-200 dark:border-slate-700' : 'border-l-4 border-l-indigo-600 border-slate-200 dark:border-slate-700'}`}>
                       <div className="px-4 py-3.5 flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
-                          <h5 className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-700 transition-colors leading-snug">{n.nome}</h5>
+                          <h5 className="font-extrabold text-sm text-slate-900 dark:text-slate-100 group-hover:text-indigo-700 transition-colors leading-snug">{n.nome}</h5>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                             <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${isGanho ? 'bg-emerald-50 text-emerald-700' : isPerdido ? 'bg-rose-50 text-rose-700' : isCongelado ? 'bg-blue-50 text-blue-700' : 'bg-indigo-50 text-indigo-700'}`}>
                               {isGanho ? <><IconTrophy size={10} /> Ganho</> : isPerdido ? <><IconFrown size={10} /> Perdido</> : isCongelado ? <><IconSnowflake size={10} /> Congelado</> : n.estagio}
                             </span>
-                            {n.numero_proposta_oficial && (<span className="text-[11px] font-mono font-bold text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-lg">Nº {n.numero_proposta_oficial}</span>)}
+                            {n.numero_proposta_oficial && (<span className="text-[11px] font-mono font-bold text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 px-2 py-0.5 rounded-lg">Nº {n.numero_proposta_oficial}</span>)}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className={`text-base font-black ${isGanho ? 'text-emerald-600' : isPerdido ? 'text-rose-600' : isCongelado ? 'text-blue-600' : 'text-slate-900'}`}>{valor > 0 ? formatCurrency(valor) : '—'}</span>
+                          <span className={`text-base font-black ${isGanho ? 'text-emerald-600' : isPerdido ? 'text-rose-600' : isCongelado ? 'text-blue-600' : 'text-slate-900 dark:text-slate-100'}`}>{valor > 0 ? formatCurrency(valor) : '—'}</span>
                           <div className="flex items-center gap-0.5 ml-1" onClick={e => e.stopPropagation()}>
-                            <button onClick={() => onEditarNegocio && onEditarNegocio(n)} title="Editar oportunidade" className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"><IconEdit size={13} /></button>
-                            <button onClick={() => onExcluirNegocio && onExcluirNegocio(n)} title="Excluir oportunidade" className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"><IconTrash size={13} /></button>
+                            <button onClick={() => onEditarNegocio && onEditarNegocio(n)} title="Editar oportunidade" className="w-7 h-7 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"><IconEdit size={13} /></button>
+                            <button onClick={() => onExcluirNegocio && onExcluirNegocio(n)} title="Excluir oportunidade" className="w-7 h-7 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"><IconTrash size={13} /></button>
                           </div>
                         </div>
                       </div>
-                      {isAberto && (<div className="px-4 pb-3 flex items-center gap-2"><span className="text-[10px] text-slate-400 font-medium">Progresso:</span>{renderPipelineBar(n.estagio)}</div>)}
+                      {isAberto && (<div className="px-4 pb-3 flex items-center gap-2"><span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Progresso:</span>{renderPipelineBar(n.estagio)}</div>)}
                     </div>
                   );
                 })}
-                {negociosFiltrados.length === 0 && (<div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200"><p className="text-sm font-semibold text-slate-500">Nenhuma oportunidade para este filtro.</p></div>)}
+                {negociosFiltrados.length === 0 && (<div className="text-center py-12 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700"><p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Nenhuma oportunidade para este filtro.</p></div>)}
               </div>
             </div>
           )}
@@ -1871,21 +1871,21 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
   if (loading && !contas.length) {
     return (
       <div className="flex-1 flex items-center justify-center flex-col space-y-4">
-        <div className="w-12 h-12 border-4 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
-        <p className="text-slate-500 text-sm font-medium">Carregando diretório de empresas...</p>
+        <div className="w-12 h-12 border-4 border-slate-200 dark:border-slate-700 border-t-indigo-600 rounded-full animate-spin"></div>
+        <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Carregando diretório de empresas...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-50 min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-900 min-h-0 overflow-hidden">
       {/* TOPBAR */}
-      <div className="shrink-0 px-6 py-3.5 bg-white border-b border-slate-200/80 flex items-center justify-between gap-4">
+      <div className="shrink-0 px-6 py-3.5 bg-white dark:bg-slate-800 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md"><IconBuilding size={18} /></div>
           <div>
-            <h2 className="text-base font-extrabold text-slate-900 leading-tight">Diretório de Empresas</h2>
-            <p className="text-xs font-bold text-slate-400 mt-0.5">
+            <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100 leading-tight">Diretório de Empresas</h2>
+            <p className="text-xs font-bold text-slate-400 dark:text-slate-500 mt-0.5">
               <span className="text-indigo-600 font-extrabold">{contasFiltradas.length}</span> / {contas.length} empresas
             </p>
           </div>
@@ -1894,20 +1894,20 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
       </div>
 
       {/* FILTROS */}
-      <div className="shrink-0 px-6 py-3 bg-white border-b border-slate-200 shadow-sm shadow-slate-200/40 flex flex-wrap items-center gap-2.5 relative z-10">
+      <div className="shrink-0 px-6 py-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/40 flex flex-wrap items-center gap-2.5 relative z-10">
         <div className="flex-1 min-w-[220px] relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconSearch size={13} /></span>
-          <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400" />
-          {busca && <button onClick={() => setBusca('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"><IconX size={11} /></button>}
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"><IconSearch size={13} /></span>
+          <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500" />
+          {busca && <button onClick={() => setBusca('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 cursor-pointer"><IconX size={11} /></button>}
         </div>
-        <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
+        <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Todos os status</option>
           <option value="customer base">Customer Base</option>
           <option value="active">Active</option>
           <option value="prospect">Prospect</option>
           <option value="at risk">At Risk</option>
         </select>
-        <select value={filtroTier} onChange={e => setFiltroTier(e.target.value)} className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
+        <select value={filtroTier} onChange={e => setFiltroTier(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Todos os Tiers</option>
           <option value="Tier 1">💎 Tier 1</option>
           <option value="Tier 2">⭐ Tier 2</option>
@@ -1916,7 +1916,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
       </div>
 
       {/* GRID DE CARDS v3.2 */}
-      <div className="flex-1 overflow-y-auto p-5 bg-slate-100/70">
+      <div className="flex-1 overflow-y-auto p-5 bg-slate-100/70 dark:bg-slate-700/70">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {contasFiltradas.map(conta => {
             const numC = mapaMetricas.contMap.get(conta.id) || 0;
@@ -1928,27 +1928,27 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
             const status = normalizeStatus(conta.status);
 
             return (
-              <div key={conta.id} onClick={() => setContaSelecionada(conta)} className={`bg-white rounded-2xl border border-slate-200 border-l-4 ${tier ? tier.accentBorder : 'border-l-indigo-200'} cursor-pointer hover:border-indigo-300 hover:shadow-xl hover:-translate-y-0.5 transition-all group shadow-sm shadow-slate-200/60 overflow-hidden`}>
+              <div key={conta.id} onClick={() => setContaSelecionada(conta)} className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 border-l-4 ${tier ? tier.accentBorder : 'border-l-indigo-200'} cursor-pointer hover:border-indigo-300 hover:shadow-xl hover:-translate-y-0.5 transition-all group shadow-sm shadow-slate-200/60 overflow-hidden`}>
                 <div className="p-4">
                   {/* Linha 1: Avatar + Nome + Tier */}
                   <div className="flex items-start gap-3 mb-2.5">
                     <AvatarInicial nome={conta.nome} size="md" className="rounded-xl" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">{conta.nome}</h4>
+                        <h4 className="font-extrabold text-sm text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">{conta.nome}</h4>
                         {tier && (
                           <span className={`inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-lg border shrink-0 ${tier.cardColor}`} title={tier.label}>
                             <tier.Icon size={9} /> <span>{tier.label.replace('Tier ','T')}</span>
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5 truncate">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}</p>
                     </div>
                   </div>
 
                   {/* Linha 2: Localização */}
                   {(conta.cidade || conta.estado) && (
-                    <p className="text-xs text-slate-500 font-medium mb-2.5 flex items-center gap-1">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-2.5 flex items-center gap-1">
                       <IconMapPin size={11} className="text-slate-300" />{[conta.cidade,conta.estado].filter(Boolean).join(', ')}
                     </p>
                   )}
@@ -1957,7 +1957,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                   {pipelineValor > 0 && (
                     <div className="bg-indigo-50/60 border border-indigo-100 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Pipeline em Aberto</span>
+                        <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Pipeline em Aberto</span>
                         <span className="text-base font-black text-indigo-700 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
                       </div>
                       <div className="px-2 py-1 bg-indigo-50 border border-indigo-200/80 rounded-lg text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
@@ -1968,24 +1968,24 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                   )}
 
                   {/* Footer: Status + Métricas com SVG icons */}
-                  <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
+                  <div className="flex items-center justify-between pt-2.5 border-t border-slate-100 dark:border-slate-800">
                     <span className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase px-2 py-1 rounded-full border ${status.color}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>
                       {status.label}
                     </span>
                     <div className="flex items-center gap-3">
                       <span className="flex items-center gap-1 text-[11px]" title={`${numC} contato${numC !== 1 ? 's' : ''}`}>
-                        <IconUsers size={12} className="text-slate-400" />
+                        <IconUsers size={12} className="text-slate-400 dark:text-slate-500" />
                         <span className="font-bold text-slate-700">{numC}</span>
                       </span>
                       <span className="flex items-center gap-1 text-[11px]" title={`${numN} negócio${numN !== 1 ? 's' : ''}`}>
-                        <IconBriefcase size={12} className="text-slate-400" />
+                        <IconBriefcase size={12} className="text-slate-400 dark:text-slate-500" />
                         <span className="font-bold text-slate-700">{numN}</span>
                       </span>
                       {taxa !== null && (
                         <span className="flex items-center gap-1 text-[11px]" title={`Taxa de conversão: ${taxa}%`}>
-                          <IconPercent size={11} className={taxa >= 60 ? 'text-emerald-500' : taxa > 0 ? 'text-amber-500' : 'text-slate-400'} />
-                          <span className={`font-bold ${taxa >= 60 ? 'text-emerald-600' : taxa > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{taxa}%</span>
+                          <IconPercent size={11} className={taxa >= 60 ? 'text-emerald-500' : taxa > 0 ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'} />
+                          <span className={`font-bold ${taxa >= 60 ? 'text-emerald-600' : taxa > 0 ? 'text-amber-600' : 'text-slate-400 dark:text-slate-500'}`}>{taxa}%</span>
                         </span>
                       )}
                     </div>
@@ -1997,10 +1997,10 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
         </div>
 
         {contasFiltradas.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200 mt-4">
+          <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 mt-4">
             <div className="flex justify-center mb-3 text-slate-300"><IconSearch size={40} /></div>
             <p className="text-base font-bold text-slate-700">Nenhuma empresa encontrada</p>
-            <p className="text-xs text-slate-400 mt-1">Ajuste os termos da busca ou os filtros.</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Ajuste os termos da busca ou os filtros.</p>
           </div>
         )}
       </div>

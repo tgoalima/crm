@@ -1,7 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+/* Dark mode via classe .dark na <html> (não media query) — permite o
+   botão manual sobrepor a preferência do sistema. Ver index.html pro
+   script que aplica a classe antes do primeiro paint, e o toggle no
+   cabeçalho do app.js. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @source "./app.js";
+@source "./empresas.js";
 @source "./index.html";
 
 /* Custom Styles for Commercial Proposal Generator */
@@ -313,5 +320,84 @@ select.cursor-pointer:hover {
 select.cursor-pointer:focus {
   border-color: rgb(99, 102, 241);
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+/* ===== Dark Mode — contrapartes dos componentes com cor fixa acima =====
+   As classes utilitárias do Tailwind (bg-white, text-slate-800 etc.) já
+   ganham variante dark: via app.js/empresas.js (script de codemod) — este
+   bloco cobre só os componentes com CSS próprio, que usam cor fixa em vez
+   de classe utilitária. Scrollbars (linhas 95-106) já usam tons escuros/
+   indigo e funcionam nos dois temas, não precisam de override aqui. */
+
+:where(.dark, .dark *) .glass-panel {
+  background: rgba(15, 23, 42, 0.85); /* slate-900 */
+  border-color: rgba(51, 65, 85, 0.8); /* slate-700 */
+}
+
+:where(.dark, .dark *) .glass-card {
+  background: rgba(30, 41, 59, 0.8); /* slate-800 */
+  border-color: rgba(51, 65, 85, 0.6); /* slate-700 */
+}
+
+:where(.dark, .dark *) .glass-card:hover {
+  /* Em vez de "escurecer no hover" (o efeito do modo claro, que já parte
+     de um fundo quase branco), no escuro a base já é slate-800 — aqui o
+     hover clareia um passo pra ainda se ler como "levantado". */
+  background: rgba(51, 65, 85, 0.6); /* slate-700 */
+  border-color: rgba(129, 140, 248, 0.3);
+}
+
+:where(.dark, .dark *) .glass-input {
+  background: rgba(30, 41, 59, 0.9); /* slate-800 */
+  border-color: rgba(71, 85, 105, 0.4); /* slate-600 — precisa de contorno
+    visível aqui; no claro a borda quase invisível (branco/10%) funcionava
+    só por contraste com o fundo branco ao redor */
+  color: #f1f5f9; /* slate-100 */
+}
+
+:where(.dark, .dark *) .glass-input:focus {
+  background: rgba(15, 23, 42, 0.9); /* slate-900 — mantém o mesmo efeito
+    de "escurecer ao focar" do modo claro, só que partindo de um ponto
+    já mais escuro */
+}
+
+:where(.dark, .dark *) .timeline-line {
+  background: linear-gradient(180deg, rgba(129, 140, 248, 0.5) 0%, rgba(148, 163, 184, 0.15) 100%);
+}
+
+:where(.dark, .dark *) .kanban-column {
+  background: #1e293b; /* slate-800, era #f8fafc */
+  border-color: #334155; /* slate-700, era #e2e8f0 */
+}
+
+:where(.dark, .dark *) .kanban-column-header {
+  border-bottom-color: #334155;
+}
+
+:where(.dark, .dark *) .kanban-card {
+  background: #0f172a; /* slate-900, um tom mais escuro que a coluna pra se distinguir */
+  border-color: #334155;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+}
+
+:where(.dark, .dark *) .kanban-card:hover {
+  background: #1e293b; /* slate-800 */
+  border-color: #6366f1; /* indigo-500, mantém a intenção de "destacar" do claro */
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+}
+
+:where(.dark, .dark *) .drawer-split-sidebar {
+  background: #1e293b; /* slate-800, era #f8fafc */
+  border-right-color: #334155;
+}
+
+:where(.dark, .dark *) .drawer-split-main {
+  background: #0f172a; /* slate-900, era #ffffff */
+}
+
+:where(.dark, .dark *) .drawer-content {
+  background: #0f172a; /* slate-900, era #ffffff */
+  border-left-color: #334155;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
 }
 

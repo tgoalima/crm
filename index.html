@@ -4,9 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gerador de Propostas Comerciais - Suprimática</title>
-  
+
+  <!-- Aplica o tema salvo (ou a preferência do sistema, na 1ª visita) antes
+       do primeiro paint, pra não piscar o tema errado (FOUC). Síncrono e
+       bloqueante de propósito — precisa terminar antes do <body> pintar.
+       Mesma chave (crm_theme) que o toggle no cabeçalho do app.js usa. -->
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('crm_theme');
+        var isDark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (isDark) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    })();
+  </script>
+
   <!-- Estilos de Produção (Tailwind v4 + Custom CSS compilados) -->
-  <link rel="stylesheet" href="/dist/styles.css?v=28.0">
+  <link rel="stylesheet" href="/dist/styles.css?v=29.0">
 
   <!-- Supabase JS Client CDN (versão pinada — a mesma que já estava sendo
        servida via @2 antes, só travada pra não quebrar numa atualização
@@ -20,13 +34,13 @@
   <!-- Chart.js CDN (versão pinada, mesmo motivo do Supabase acima) -->
   <script defer crossorigin src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 </head>
-<body class="h-screen overflow-hidden bg-slate-50 text-slate-800 flex flex-col antialiased">
+<body class="h-screen overflow-hidden bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 flex flex-col antialiased">
   <!-- Root do App React -->
   <div id="root" class="h-full flex flex-col overflow-hidden">
     <!-- Loader inicial -->
     <div class="flex-1 flex flex-col items-center justify-center space-y-4">
-      <div class="w-12 h-12 border-4 border-slate-200 border-t-indigo-500 rounded-full animate-spin"></div>
-      <p class="text-slate-500 font-medium animate-pulse">Carregando interface do Gerador...</p>
+      <div class="w-12 h-12 border-4 border-slate-200 dark:border-slate-700 border-t-indigo-500 dark:border-t-indigo-400 rounded-full animate-spin"></div>
+      <p class="text-slate-500 dark:text-slate-400 font-medium animate-pulse">Carregando interface do Gerador...</p>
     </div>
   </div>
 
@@ -35,7 +49,7 @@
        eliminava ~2-3MB de download + parse/transpile de ~12 mil linhas de
        JSX a cada carregamento, pra todo usuário). `defer` preserva a ordem
        de execução dos scripts abaixo, incluindo os CDN acima. -->
-  <script defer src="/dist/empresas.js?v=5.3"></script>
-  <script defer src="/dist/app.js?v=60.0"></script>
+  <script defer src="/dist/empresas.js?v=5.4"></script>
+  <script defer src="/dist/app.js?v=61.0"></script>
 </body>
 </html>
