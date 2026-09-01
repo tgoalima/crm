@@ -8,6 +8,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { resolveClickUpToken } from "../_shared/resolve-token.ts";
 import { clickupFetch } from "../_shared/clickup-fetch.ts";
+import { formatPhoneForClickUp } from "../_shared/format-phone.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -84,7 +85,7 @@ Deno.serve(async (req) => {
     addField(CF_RAZAO_SOCIAL, record.razao_social);
     addField(CF_CNPJ, record.cnpj);
     addField(CF_EMAIL, record.email);
-    addField(CF_TELEFONE, record.telefone);
+    addField(CF_TELEFONE, formatPhoneForClickUp(record.telefone));
     addField(CF_CIDADE, record.cidade);
     addField(CF_ESTADO, record.estado);
     addField(CF_RUA, record.rua);
