@@ -289,11 +289,11 @@ const IconRefresh = ({ size = 13, className = '' }) => (
 // ─────────────────────────────────────────────
 const CRMInput = ({ label, name, value, onChange, type = 'text', placeholder, mono, required, className = '', mask }) => (
   <div className={className}>
-    <label className="block text-xs font-bold text-slate-600 mb-1">{label}{required && ' *'}</label>
+    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">{label}{required && ' *'}</label>
     <input
       type={type} required={required} placeholder={placeholder} value={value}
       onChange={e => onChange(name, mask ? mask(e.target.value) : e.target.value)}
-      className={`w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
+      className={`w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-sm shadow-xs ${mono ? 'font-mono' : 'font-medium'} text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all`}
     />
   </div>
 );
@@ -321,11 +321,11 @@ const CRMCurrencyInput = ({ label, name, value, onChange, placeholder = '0,00', 
   };
   return (
     <div className={className}>
-      <label className="block text-xs font-bold text-slate-600 mb-1">{label}{required && ' *'}</label>
+      <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">{label}{required && ' *'}</label>
       <div className="relative">
         <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm font-bold pointer-events-none">R$</span>
         <input type="text" inputMode="decimal" required={required} placeholder={placeholder} value={display} onChange={handleInput}
-          className="w-full pl-9 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+          className="w-full pl-9 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
       </div>
     </div>
   );
@@ -333,8 +333,8 @@ const CRMCurrencyInput = ({ label, name, value, onChange, placeholder = '0,00', 
 
 const CRMSelect = ({ label, name, value, onChange, children, className = '' }) => (
   <div className={className}>
-    <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>
-    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 dark:text-slate-100 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
+    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">{label}</label>
+    <select value={value} onChange={e => onChange(name, e.target.value)} className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-sm font-semibold text-slate-900 dark:text-slate-100 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer">{children}</select>
   </div>
 );
 
@@ -402,9 +402,9 @@ const SegmentoCombobox = ({ value, onChange }) => {
 
   return (
     <div className="relative">
-      <label className="block text-xs font-bold text-slate-600 mb-1">Segmento de Atuação</label>
+      <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">Segmento de Atuação</label>
       <input type="text" placeholder="Digite ou selecione..." value={value || busca} onChange={handleInputChange} onKeyDown={handleKeyDown} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
-        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
       {open && filtered.length > 0 && (
         <div className="absolute z-[110] top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
           <div ref={listRef} className="max-h-44 overflow-y-auto divide-y divide-slate-50">
@@ -527,14 +527,14 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <AvatarInicial nome={form.nome || 'N'} size="lg" />
           <div className="flex-1">
             <h3 className="font-black text-base text-slate-900 dark:text-slate-100">{isEdit ? 'Editar Empresa' : 'Nova Empresa'}</h3>
             <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">{isEdit ? conta.nome : 'Cadastre uma nova empresa'}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
         <form onSubmit={salvar} className="p-5 overflow-y-auto flex-1 space-y-4 bg-slate-100/70 dark:bg-slate-700/70">
           {erro && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">{erro}</div>}
@@ -585,7 +585,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
             </div>
           </div>
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : (isEdit ? '✓ Atualizar Empresa' : '+ Cadastrar Empresa')}
             </button>
@@ -754,7 +754,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
               {empresasVinculadas.length === 1 ? empresasVinculadas[0].nome : `${empresasVinculadas.length} empresas vinculadas`}
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
 
         <form onSubmit={salvar} className="p-6 space-y-4 overflow-y-auto flex-1">
@@ -833,7 +833,7 @@ const ContatoFormModal = ({ supabaseClient, conta, contas = [], todosContatos = 
           </label>
 
           <div className="flex gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : (isEdit ? '✓ Atualizar Contato' : '+ Adicionar Contato')}
             </button>
@@ -969,7 +969,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <div className="flex items-center gap-3">
@@ -981,7 +981,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
               <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">Cadastre um negócio comercial estruturado</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
 
         {/* FORM */}
@@ -996,9 +996,9 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
 
               {/* EMPRESA VINCULADA */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Empresa / Conta *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Empresa / Conta *</label>
                 {contaFixa ? (
-                  <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 border border-slate-300 shadow-xs rounded-xl">
+                  <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 shadow-xs rounded-xl">
                     <AvatarInicial nome={contaFixa.nome} size="sm" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-black text-slate-900 dark:text-slate-100 truncate">{contaFixa.nome}</p>
@@ -1008,7 +1008,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
                 ) : (
                   <div className="relative">
                     <input placeholder="Digite o nome da empresa..." value={contaEscolhida ? contaEscolhida.nome : buscaConta} onChange={e => { setContaEscolhida(null); setBuscaConta(e.target.value); }}
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     {contasFiltradas.length > 0 && (
                       <div className="absolute z-20 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl mt-1 w-full max-h-48 overflow-y-auto shadow-2xl divide-y divide-slate-50">
                         {contasFiltradas.map(c => (
@@ -1106,14 +1106,14 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
                 value={form.descricao}
                 onChange={e => handleChange('descricao', e.target.value)}
                 rows={3}
-                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
             </div>
           </div>
 
           {/* FOOTER */}
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Criando...' : '+ Criar Oportunidade'}
             </button>
@@ -1258,7 +1258,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white shrink-0">
           <div className="flex items-center gap-3">
@@ -1274,7 +1274,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
               )}
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar"><IconClose /></button>
         </div>
 
         {/* FORM */}
@@ -1358,14 +1358,14 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
                 value={form.descricao}
                 onChange={e => handleChange('descricao', e.target.value)}
                 rows={3}
-                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
             </div>
           </div>
 
           {/* FOOTER */}
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
             <button type="submit" disabled={salvando} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
               {salvando ? 'Salvando...' : '✓ Salvar Alterações'}
             </button>
@@ -1458,7 +1458,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => onEditarEmpresa(conta)} title="Editar dados da empresa" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 text-xs font-bold transition-all shadow-xs cursor-pointer hover:border-indigo-300 hover:text-indigo-600">
+                <button onClick={() => onEditarEmpresa(conta)} title="Editar dados da empresa" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 text-xs font-bold transition-all shadow-xs cursor-pointer hover:border-indigo-300 hover:text-indigo-600">
                   <IconEdit size={13} /> Editar
                 </button>
                 <button onClick={() => onExcluirEmpresa(conta)} title="Excluir esta empresa" className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-rose-50 text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:border-rose-300 transition-all shadow-xs cursor-pointer">
@@ -1548,10 +1548,10 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
             <div className="p-5 space-y-4">
               <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
-                  <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconBuilding size={12} className="text-indigo-500" /> Dados Corporativos</h4>
+                  <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 flex items-center gap-1.5"><IconBuilding size={12} className="text-indigo-500" /> Dados Corporativos</h4>
                   <button onClick={() => onEditarEmpresa(conta)} className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"><IconEdit size={11} /> Editar</button>
                 </div>
-                <dl className="grid grid-cols-2 divide-x divide-y divide-slate-200">
+                <dl className="grid grid-cols-2 divide-x divide-y divide-slate-200 dark:divide-slate-700">
                   <div className="px-5 py-3.5"><DadoCampo label="Razão Social" value={conta.razao_social} /></div>
                   <div className="px-5 py-3.5"><DadoCampo label="CNPJ" value={formatCNPJ(conta.cnpj)} mono /></div>
                   <div className="px-5 py-3.5"><DadoCampo label="Insc. Estadual" value={conta.inscricao_estadual} mono /></div>
@@ -1564,7 +1564,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
                   <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
-                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconPhone size={12} className="text-indigo-500" /> Contato Corporativo</h4>
+                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 flex items-center gap-1.5"><IconPhone size={12} className="text-indigo-500" /> Contato Corporativo</h4>
                   </div>
                   <dl className="px-5 py-4 space-y-3">
                     <DadoCampo label="E-mail" value={conta.email} href={conta.email ? `mailto:${conta.email}` : null} />
@@ -1573,7 +1573,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                 </div>
                 <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
                   <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
-                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5"><IconMapPin size={12} className="text-indigo-500" /> Localização</h4>
+                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 flex items-center gap-1.5"><IconMapPin size={12} className="text-indigo-500" /> Localização</h4>
                   </div>
                   <div className="px-5 py-4 space-y-1.5">
                     <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{conta.rua || '—'}</p>
@@ -1897,17 +1897,17 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
       <div className="shrink-0 px-6 py-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/40 flex flex-wrap items-center gap-2.5 relative z-10">
         <div className="flex-1 min-w-[220px] relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"><IconSearch size={13} /></span>
-          <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500" />
-          {busca && <button onClick={() => setBusca('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 cursor-pointer"><IconX size={11} /></button>}
+          <input type="text" placeholder="Pesquisar por Nome, CNPJ, Cidade..." value={busca} onChange={e => setBusca(e.target.value)} className="w-full pl-8 pr-7 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500" />
+          {busca && <button onClick={() => setBusca('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"><IconX size={11} /></button>}
         </div>
-        <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
+        <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Todos os status</option>
           <option value="customer base">Customer Base</option>
           <option value="active">Active</option>
           <option value="prospect">Prospect</option>
           <option value="at risk">At Risk</option>
         </select>
-        <select value={filtroTier} onChange={e => setFiltroTier(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
+        <select value={filtroTier} onChange={e => setFiltroTier(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Todos os Tiers</option>
           <option value="Tier 1">💎 Tier 1</option>
           <option value="Tier 2">⭐ Tier 2</option>
@@ -1976,11 +1976,11 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                     <div className="flex items-center gap-3">
                       <span className="flex items-center gap-1 text-[11px]" title={`${numC} contato${numC !== 1 ? 's' : ''}`}>
                         <IconUsers size={12} className="text-slate-400 dark:text-slate-500" />
-                        <span className="font-bold text-slate-700">{numC}</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-300">{numC}</span>
                       </span>
                       <span className="flex items-center gap-1 text-[11px]" title={`${numN} negócio${numN !== 1 ? 's' : ''}`}>
                         <IconBriefcase size={12} className="text-slate-400 dark:text-slate-500" />
-                        <span className="font-bold text-slate-700">{numN}</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-300">{numN}</span>
                       </span>
                       {taxa !== null && (
                         <span className="flex items-center gap-1 text-[11px]" title={`Taxa de conversão: ${taxa}%`}>
@@ -1999,7 +1999,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
         {contasFiltradas.length === 0 && (
           <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 mt-4">
             <div className="flex justify-center mb-3 text-slate-300"><IconSearch size={40} /></div>
-            <p className="text-base font-bold text-slate-700">Nenhuma empresa encontrada</p>
+            <p className="text-base font-bold text-slate-700 dark:text-slate-300">Nenhuma empresa encontrada</p>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Ajuste os termos da busca ou os filtros.</p>
           </div>
         )}

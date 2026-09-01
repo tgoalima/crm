@@ -375,7 +375,7 @@ const MentionTextarea = ({ value, onChange, membros = [], placeholder = '', rows
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={placeholder}
         rows={rows}
-        className="w-full p-3 border border-slate-300 rounded-xl text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 resize-none transition-all"
+        className="w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 resize-none transition-all"
       />
       {open && filtered.length > 0 && (
         <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
@@ -385,7 +385,7 @@ const MentionTextarea = ({ value, onChange, membros = [], placeholder = '', rows
               type="button"
               onMouseDown={(e) => { e.preventDefault(); handleSelect(m); }}
               onMouseEnter={() => setHighlight(i)}
-              className={`w-full text-left px-3.5 py-2 text-xs font-semibold flex items-center gap-2 transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900'}`}
+              className={`w-full text-left px-3.5 py-2 text-xs font-semibold flex items-center gap-2 transition-colors ${i === highlight ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'}`}
             >
               <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-black flex items-center justify-center shrink-0">{(m.nome || '?').slice(0, 1).toUpperCase()}</span>
               <span>{m.nome}</span>
@@ -537,7 +537,7 @@ const ForecastFunnelPanel = ({
             <select
               value={filterFabricante || ''}
               onChange={(e) => setFilterFabricante(e.target.value || null)}
-              className="text-xs font-semibold text-slate-700 bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 cursor-pointer hover:bg-slate-200/70 dark:hover:bg-slate-600/70 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 cursor-pointer hover:bg-slate-200/70 dark:hover:bg-slate-600/70 focus:outline-none focus:ring-2 focus:ring-indigo-300"
             >
               <option value="">Todos</option>
               {fabricantesDisponiveis.map(fab => (
@@ -576,7 +576,7 @@ const ForecastFunnelPanel = ({
                     className={`flex justify-between items-center py-2.5 px-4 rounded-lg transition-all duration-200 border cursor-pointer relative overflow-hidden ${
                       isSelected
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-200/50'
-                        : 'border-slate-200/80 dark:border-slate-700/80 hover:brightness-95 text-slate-950'
+                        : 'border-slate-200/80 dark:border-slate-700/80 hover:brightness-95 text-slate-950 dark:text-slate-100'
                     }`}
                   >
                     <div className="z-10 flex items-center gap-2 pr-2">
@@ -584,13 +584,13 @@ const ForecastFunnelPanel = ({
                         className="w-1.5 h-1.5 rounded-full flex-shrink-0" 
                         style={{ backgroundColor: stage.color }}
                       />
-                      <span className={`text-[10px] md:text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${isSelected ? 'text-white font-bold' : 'text-slate-950'}`}>
+                      <span className={`text-[10px] md:text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${isSelected ? 'text-white font-bold' : 'text-slate-950 dark:text-slate-100'}`}>
                         {stage.name}
                       </span>
                     </div>
                     
                     <div className="z-10 flex items-center gap-3.5 flex-shrink-0 ml-auto justify-end text-right">
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ${isSelected ? 'bg-indigo-700/60 text-indigo-100' : 'bg-slate-200 dark:bg-slate-600 text-slate-700'}`}>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ${isSelected ? 'bg-indigo-700/60 text-indigo-100' : 'bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-300'}`}>
                         {stage.count}
                       </span>
                     </div>
@@ -988,7 +988,7 @@ const DealsListView = ({
             </button>
             <button
               onClick={onClose}
-              className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 font-semibold cursor-pointer"
+              className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 font-semibold cursor-pointer"
             >
               ✕ Fechar Lista
             </button>
@@ -1001,13 +1001,13 @@ const DealsListView = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar por cliente / negócio..."
-            className="flex-1 min-w-[200px] rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800"
+            className="flex-1 min-w-[200px] rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800"
           />
 
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-500"
+            className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none focus:border-indigo-500"
           >
             <option value="Todos">Status: Todos</option>
             <option value="Em andamento">Em andamento</option>
@@ -1019,7 +1019,7 @@ const DealsListView = ({
           <select
             value={etapaFilter}
             onChange={(e) => setEtapaFilter(e.target.value)}
-            className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-500"
+            className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none focus:border-indigo-500"
           >
             <option value="">Etapa: Todas</option>
             {etapasDisponiveis.map(name => (
@@ -1030,7 +1030,7 @@ const DealsListView = ({
           <select
             value={responsavelFilter}
             onChange={(e) => setResponsavelFilter(e.target.value)}
-            className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-500"
+            className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none focus:border-indigo-500"
           >
             <option value="">Responsável: Todos</option>
             {responsaveisDisponiveis.map(nome => (
@@ -1049,7 +1049,7 @@ const DealsListView = ({
                 key={opt.key}
                 onClick={() => setPeriodPreset(opt.key)}
                 className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-                  periodPreset === opt.key ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200/70 dark:hover:bg-slate-600/70'
+                  periodPreset === opt.key ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-600/70'
                 }`}
               >
                 {opt.label}
@@ -1063,14 +1063,14 @@ const DealsListView = ({
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+                className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500"
               />
               <span className="text-slate-400 dark:text-slate-500 text-xs">até</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+                className="rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500"
               />
             </div>
           )}
@@ -1119,12 +1119,12 @@ const DealsListView = ({
                   className="border-b border-slate-100 dark:border-slate-800 hover:bg-indigo-50/50 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-2.5 text-sm font-semibold text-slate-800 dark:text-slate-200 max-w-xs truncate">{task.name}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">{task.responsavel_negocio || 'Sem responsável'}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300">{task.responsavel_negocio || 'Sem responsável'}</td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusBadgeClass(status)}`}>{status}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">{getEtapaName(task)}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">{formatDateDisplay(task.data_fechamento)}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300">{getEtapaName(task)}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300">{formatDateDisplay(task.data_fechamento)}</td>
                   <td className="px-4 py-2.5 text-sm font-bold text-right text-emerald-600">
                     {dealValue ? `R$ ${Number(dealValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '—'}
                   </td>
@@ -1199,7 +1199,7 @@ const LoginScreen = ({ onLogin, error }) => {
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">E-mail Corporativo</label>
+            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">E-mail Corporativo</label>
             <input 
               type="email" 
               required
@@ -1210,7 +1210,7 @@ const LoginScreen = ({ onLogin, error }) => {
             />
           </div>
           <div>
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Senha de Acesso</label>
+            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">Senha de Acesso</label>
             <div className="relative">
               <input 
                 type={showPassword ? "text" : "password"} 
@@ -1223,7 +1223,7 @@ const LoginScreen = ({ onLogin, error }) => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-3 flex items-center text-slate-400 dark:text-slate-500 hover:text-slate-600 transition-colors"
+                className="absolute inset-y-0 right-3 flex items-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
               >
                 {showPassword ? (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1240,7 +1240,7 @@ const LoginScreen = ({ onLogin, error }) => {
           </div>
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">Personal API Token (ClickUp)</label>
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Personal API Token (ClickUp)</label>
               <button 
                 type="button"
                 onClick={() => setShowTokenHelp(!showTokenHelp)}
@@ -1411,7 +1411,7 @@ const SegmentosSettings = ({ client }) => {
 
       {/* Adicionar novo */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-5 shadow-xs space-y-3">
-        <h3 className="text-xs font-bold text-slate-700">Adicionar Novo Segmento</h3>
+        <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">Adicionar Novo Segmento</h3>
         <div className="flex gap-2">
           <input
             type="text"
@@ -6040,7 +6040,7 @@ function App() {
               </svg>
             </div>
             <div>
-              <p className="text-sm text-slate-700 font-semibold">Nenhuma proposta criada</p>
+              <p className="text-sm text-slate-700 dark:text-slate-300 font-semibold">Nenhuma proposta criada</p>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Crie a primeira versão para este negócio.</p>
             </div>
             <button 
@@ -6060,11 +6060,11 @@ function App() {
                  'Ganho': { bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-300', dot: 'bg-amber-400' },
                  'Desconsiderada': { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-400' },
                  'Descartada': { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-400' },
-                 'Não selecionada': { bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-400' },
+                 'Não selecionada': { bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-400' },
                  'Substituída': { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', dot: 'bg-amber-400' },
                  'Perdido': { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', dot: 'bg-red-400' }
                };
-              const sc = statusConfig[prop.situacao] || { bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-400' };
+              const sc = statusConfig[prop.situacao] || { bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-400' };
               
               return (
                 <div 
@@ -6137,7 +6137,7 @@ function App() {
                               }
                             }
                           }}
-                          className="btn-three-dots p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 transition-colors cursor-pointer"
+                          className="btn-three-dots p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
                           title="Opções da Versão"
                         >
                           <svg className="w-3.5 h-3.5 pointer-events-none" fill="currentColor" viewBox="0 0 24 24">
@@ -6159,7 +6159,7 @@ function App() {
                                   await loadProposalDetails(prop.id);
                                   setDrawerTab('budget');
                                 }}
-                                className="w-full text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 rounded-lg p-2 flex items-center gap-2 transition-colors cursor-pointer"
+                                className="w-full text-left text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 rounded-lg p-2 flex items-center gap-2 transition-colors cursor-pointer"
                               >
                                 <span>✏️ Editar Versão</span>
                               </button>
@@ -6290,7 +6290,7 @@ function App() {
         <div className="px-6 py-3 bg-white dark:bg-slate-800 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 flex items-center justify-between z-10 shadow-sm shadow-slate-200/40">
           <button 
             onClick={() => setDrawerTab('details')}
-            className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-indigo-600 px-3 py-1.5 rounded-xl hover:bg-indigo-50/50 transition-all cursor-pointer group"
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 px-3 py-1.5 rounded-xl hover:bg-indigo-50/50 transition-all cursor-pointer group"
           >
             <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -6315,13 +6315,13 @@ function App() {
                   </h1>
                 )}
                 
-                <div className="flex items-center gap-2.5 flex-wrap text-xs font-medium text-slate-600">
-                  <span className="font-bold text-slate-700">Versão</span>
+                <div className="flex items-center gap-2.5 flex-wrap text-xs font-medium text-slate-600 dark:text-slate-300">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">Versão</span>
                   <span className="inline-flex items-center justify-center bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-black px-2.5 py-0.5 rounded-lg text-xs shadow-xs tracking-wide">
                     {formatVersionDisplay(currentProposta.versao)}
                   </span>
                   {currentProposta.cenario && (
-                    <span className="bg-slate-100 dark:bg-slate-700 border border-slate-200/80 dark:border-slate-700/80 text-slate-700 text-[11px] px-2.5 py-0.5 rounded-full uppercase font-extrabold tracking-wider">
+                    <span className="bg-slate-100 dark:bg-slate-700 border border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 text-[11px] px-2.5 py-0.5 rounded-full uppercase font-extrabold tracking-wider">
                       {currentProposta.cenario}
                     </span>
                   )}
@@ -6466,7 +6466,7 @@ function App() {
                         await handleUpdateVersionStatus(clickupTaskId || currentProposta.clickup_negocio_id, currentProposta.id, 'Desconsiderada');
                       }
                     }}
-                    className="text-xs font-black text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer pr-1 disabled:cursor-not-allowed"
+                    className="text-xs font-black text-slate-700 dark:text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer pr-1 disabled:cursor-not-allowed"
                   >
                     <option value="Em Andamento">Em Andamento</option>
                     <option value="Ganho">🏆 Ganho</option>
@@ -6488,7 +6488,7 @@ function App() {
                       className={`font-extrabold text-xs px-3.5 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer hover:scale-[1.02] ${
                         currentProposta.situacao === 'Ganho'
                           ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                          : 'bg-slate-100/80 dark:bg-slate-700/80 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200/80 dark:border-slate-700/80'
+                          : 'bg-slate-100/80 dark:bg-slate-700/80 hover:bg-emerald-50 text-slate-600 dark:text-slate-300 hover:text-emerald-700 border border-slate-200/80 dark:border-slate-700/80'
                       }`}
                       title="Marcar oportunidade como Ganha 🏆"
                     >
@@ -6503,7 +6503,7 @@ function App() {
                       className={`font-extrabold text-xs px-3.5 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer hover:scale-[1.02] ${
                         currentProposta.situacao === 'Perdido'
                           ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs'
-                          : 'bg-slate-100/80 dark:bg-slate-700/80 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200/80 dark:border-slate-700/80'
+                          : 'bg-slate-100/80 dark:bg-slate-700/80 hover:bg-rose-50 text-slate-600 dark:text-slate-300 hover:text-rose-700 border border-slate-200/80 dark:border-slate-700/80'
                       }`}
                       title="Marcar oportunidade como Perdida 😞"
                     >
@@ -6518,7 +6518,7 @@ function App() {
                   className={`text-xs px-3.5 py-2 rounded-xl cursor-pointer flex items-center gap-1.5 transition-all ${
                     isEditingProposal 
                       ? 'bg-amber-50 border border-amber-300 text-amber-800 font-extrabold shadow-2xs' 
-                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900 font-bold shadow-2xs'
+                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 font-bold shadow-2xs'
                   }`}
                   title={isEditingProposal ? "Bloquear Campos para Leitura" : "Desbloquear Campos para Edição (✏️)"}
                 >
@@ -6562,7 +6562,7 @@ function App() {
                   Tipo Oportunidade
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={getTipoOportunidade()}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -6593,7 +6593,7 @@ function App() {
                   Tipo de Projeto
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.cenario || ""}
                   onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, cenario: e.target.value }); }}
                   disabled={isReadOnly || !isProjeto}
@@ -6612,7 +6612,7 @@ function App() {
                   Vendedor / Responsável
                 </label>
                 <select
-                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta.criado_por || ""}
                   onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, criado_por: e.target.value }); }}
                   disabled={isReadOnly}
@@ -6634,7 +6634,7 @@ function App() {
                 </label>
                 <input
                   type="date"
-                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_inicio ? currentProposta.data_inicio.substring(0, 10) : (clickupTaskDates?.start_date || '')}
                   onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, data_inicio: e.target.value }); }}
                   disabled={isReadOnly}
@@ -6651,7 +6651,7 @@ function App() {
                 </label>
                 <input
                   type="date"
-                  className="h-10 rounded-xl border border-slate-300 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
+                  className="h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-2.5 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
                   value={currentProposta?.data_fechamento ? currentProposta.data_fechamento.substring(0, 10) : ''}
                   onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, data_fechamento: e.target.value }); }}
                   disabled={isReadOnly}
@@ -6663,7 +6663,7 @@ function App() {
           {/* Tabela de Produtos & Catálogo */}
           <div className="flex-1 overflow-y-auto px-7 pb-6 space-y-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <h3 className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
                 <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -6683,7 +6683,7 @@ function App() {
             </div>
 
             {itens.length === 0 ? (
-              <div className="bg-gradient-to-b from-white to-slate-50/80 border border-dashed border-slate-300/90 rounded-3xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-2xs">
+              <div className="bg-gradient-to-b from-white to-slate-50/80 border border-dashed border-slate-300/90 dark:border-slate-600/90 rounded-3xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-2xs">
                 <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-center text-indigo-500">
                   <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -6818,7 +6818,7 @@ function App() {
                                             });
                                           }}
                                           className={`p-2.5 text-xs cursor-pointer flex justify-between items-center transition-colors ${
-                                            (item.highlightedIndex || 0) === idx ? 'bg-indigo-50/80 text-indigo-900 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 font-medium'
+                                            (item.highlightedIndex || 0) === idx ? 'bg-indigo-50/80 text-indigo-900 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300 font-medium'
                                           }`}
                                         >
                                           <div>
@@ -6839,7 +6839,7 @@ function App() {
 
                           <td className="py-3.5 px-4">
                             {isReadOnly ? (
-                              <span className="text-xs font-bold text-slate-700">
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                                 {distribuidores.find(d => d.id === item.distribuidor_id)?.nome || '-'}
                               </span>
                             ) : (
@@ -6875,7 +6875,7 @@ function App() {
 
                           <td className="py-3.5 px-4 text-right whitespace-nowrap">
                             {isReadOnly ? (
-                              <span className="text-xs text-slate-700 font-bold">
+                              <span className="text-xs text-slate-700 dark:text-slate-300 font-bold">
                                 R$ {Number(item.preco_unitario).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                               </span>
                             ) : (
@@ -6919,7 +6919,7 @@ function App() {
             {!isReadOnly && (
               <button
                 onClick={handleAddItem}
-                className="w-full py-3 border border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl text-xs font-bold text-slate-600 hover:text-indigo-600 bg-white dark:bg-slate-800 hover:bg-indigo-50/40 transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
+                className="w-full py-3 border border-dashed border-slate-300 dark:border-slate-600 hover:border-indigo-500 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 bg-white dark:bg-slate-800 hover:bg-indigo-50/40 transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
               >
                 <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
@@ -6939,7 +6939,7 @@ function App() {
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-widest block">RESUMO COMERCIAL</span>
-                <p className="text-xs text-slate-600 font-bold mt-0.5">Cálculo ativo com base em {itens.length} {itens.length === 1 ? 'item' : 'itens'}.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-300 font-bold mt-0.5">Cálculo ativo com base em {itens.length} {itens.length === 1 ? 'item' : 'itens'}.</p>
               </div>
             </div>
 
@@ -7049,7 +7049,7 @@ function App() {
                     {(userProfile.username || userProfile.email || 'U').substring(0, 2).toUpperCase()}
                   </div>
                 )}
-                <span className="text-xs font-semibold text-slate-700 truncate max-w-[120px]">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[120px]">
                   {userProfile.username || userProfile.email}
                 </span>
               </div>
@@ -7113,7 +7113,7 @@ function App() {
             className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
               activeTab === 'relatorios' 
                 ? 'bg-slate-900 text-white shadow-sm font-semibold' 
-                : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
             }`}
           >
             Relatórios
@@ -7123,7 +7123,7 @@ function App() {
             className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
               activeTab === 'kanban' 
                 ? 'bg-slate-900 text-white shadow-sm font-semibold' 
-                : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
             }`}
           >
             Pipeline de Vendas
@@ -7133,7 +7133,7 @@ function App() {
             className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
               activeTab === 'empresas' 
                 ? 'bg-slate-900 text-white shadow-sm font-semibold' 
-                : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
             }`}
           >
             Empresas
@@ -7143,7 +7143,7 @@ function App() {
             className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
               activeTab === 'tasks' 
                 ? 'bg-slate-900 text-white shadow-sm font-semibold' 
-                : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
             }`}
           >
             Tarefas Comerciais
@@ -7198,21 +7198,21 @@ function App() {
                         <button
                           type="button"
                           onClick={() => applyFilterRange(yearStart, yearEnd, `${nowYear - 1}-01-01`, `${nowYear - 1}-12-31`)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === yearStart && endDate === yearEnd ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white dark:hover:bg-slate-800'}`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === yearStart && endDate === yearEnd ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'}`}
                         >
                           Ano Atual
                         </button>
                         <button
                           type="button"
                           onClick={() => applyFilterRange(q.start, q.end, q.compStart, q.compEnd)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === q.start && endDate === q.end ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white dark:hover:bg-slate-800'}`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === q.start && endDate === q.end ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'}`}
                         >
                           Trimestre Atual
                         </button>
                         <button
                           type="button"
                           onClick={() => applyFilterRange('2023-01-01', new Date().toISOString().split('T')[0], '', '')}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2023-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white dark:hover:bg-slate-800'}`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${startDate === '2023-01-01' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'}`}
                         >
                           Todo o Histórico
                         </button>
@@ -7341,7 +7341,7 @@ function App() {
               {/* Grid de 6 KPIs no Topo (Resumo Sazonal) */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
                 {/* 1. Negócios Ganhos */}
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mb-1 block truncate">Negócios Ganhos</span>
                     <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">{biMetrics?.wonCount || 0}</span>
@@ -7359,7 +7359,7 @@ function App() {
                 </div>
 
                 {/* 2. Valor em Vendas */}
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mb-1 block truncate">Valor em Vendas</span>
                     <span className="text-base font-extrabold text-slate-900 dark:text-slate-100 truncate block">
@@ -7379,7 +7379,7 @@ function App() {
                 </div>
 
                 {/* 3. Ciclo Médio */}
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mb-1 block truncate">Ciclo Médio</span>
                     <span className="text-xl font-extrabold text-slate-900 dark:text-slate-100">{biMetrics?.avgCycleDays || 58} dias</span>
@@ -7397,7 +7397,7 @@ function App() {
                 </div>
 
                 {/* 4. Ticket Médio */}
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mb-1 block truncate">Ticket Médio</span>
                     <span className="text-base font-extrabold text-slate-900 dark:text-slate-100 truncate block">
@@ -7417,20 +7417,20 @@ function App() {
                 </div>
 
                 {/* 5. Negócios Perdidos */}
-                <div className="bg-rose-50/50 border border-rose-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 transition-colors">
+                <div className="bg-rose-50/50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-colors">
                   <div>
-                    <span className="text-[11px] text-rose-700 font-semibold mb-1 block truncate">Negócios Perdidos</span>
+                    <span className="text-[11px] text-rose-700 dark:text-rose-400 font-semibold mb-1 block truncate">Negócios Perdidos</span>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-extrabold text-rose-950">{biMetrics?.lostCount || 0}</span>
-                      <span className="text-[10px] font-medium text-rose-700/80">
+                      <span className="text-xl font-extrabold text-rose-950 dark:text-rose-300">{biMetrics?.lostCount || 0}</span>
+                      <span className="text-[10px] font-medium text-rose-700/80 dark:text-rose-400/80">
                         (R$ {(biMetrics?.lostValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                       </span>
                     </div>
                   </div>
                   {compareStartDate && compareEndDate && (
-                    <div className="mt-2 pt-2 border-t border-rose-200/60 flex items-center justify-between text-[10px]">
-                      <span className="text-rose-700/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.lostCountComp || 0}</strong></span>
-                      <span className="font-bold text-rose-800">
+                    <div className="mt-2 pt-2 border-t border-rose-200/60 dark:border-rose-800/50 flex items-center justify-between text-[10px]">
+                      <span className="text-rose-700/80 dark:text-rose-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.lostCountComp || 0}</strong></span>
+                      <span className="font-bold text-rose-800 dark:text-rose-300">
                         {biMetrics.lostQtyDiff <= 0 ? '0' : `+${biMetrics.lostQtyDiff}`}
                       </span>
                     </div>
@@ -7438,14 +7438,14 @@ function App() {
                 </div>
 
                 {/* 6. Taxa de Conversão */}
-                <div className="bg-indigo-50/50 border border-indigo-200/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-300 transition-colors">
+                <div className="bg-indigo-50/50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
                   <div>
-                    <span className="text-[11px] text-indigo-700 font-semibold mb-1 block truncate">Taxa Conversão</span>
-                    <span className="text-xl font-extrabold text-indigo-950">{(biMetrics?.convRate || 0).toFixed(1)}%</span>
+                    <span className="text-[11px] text-indigo-700 dark:text-indigo-400 font-semibold mb-1 block truncate">Taxa Conversão</span>
+                    <span className="text-xl font-extrabold text-indigo-950 dark:text-indigo-300">{(biMetrics?.convRate || 0).toFixed(1)}%</span>
                   </div>
                   {compareStartDate && compareEndDate && biMetrics?.convRateDiff !== null && (
-                    <div className="mt-2 pt-2 border-t border-indigo-200/60 flex items-center justify-between text-[10px]">
-                      <span className="text-indigo-700/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{(biMetrics.convRateComp || 0).toFixed(1)}%</strong></span>
+                    <div className="mt-2 pt-2 border-t border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-between text-[10px]">
+                      <span className="text-indigo-700/80 dark:text-indigo-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{(biMetrics.convRateComp || 0).toFixed(1)}%</strong></span>
                       <span className={`font-bold px-1.5 py-0.5 rounded ${
                         biMetrics.convRateDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                       }`}>
@@ -7493,7 +7493,7 @@ function App() {
                   <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-6 flex flex-col transition-all duration-300 hover:border-slate-200 dark:hover:border-slate-700">
                     <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                       <div>
-                        <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Distribuição por Distribuidor</h3>
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Distribuição por Distribuidor</h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">Faturamento total acumulado agrupado por Distribuidor</p>
                       </div>
                       <div className="relative">
@@ -7540,7 +7540,7 @@ function App() {
                               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                               <span className="text-slate-800 dark:text-slate-200 truncate">{label}</span>
                             </div>
-                            <span className="font-bold text-slate-700">{percent}%</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-300">{percent}%</span>
                           </div>
                         );
                       })}
@@ -7551,7 +7551,7 @@ function App() {
                   <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-6 flex flex-col transition-all duration-300 hover:border-slate-200 dark:hover:border-slate-700">
                     <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                       <div>
-                        <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Distribuição por Fabricante</h3>
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Distribuição por Fabricante</h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">Faturamento total acumulado agrupado por Fabricante</p>
                       </div>
                       <div className="relative">
@@ -7598,7 +7598,7 @@ function App() {
                               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                               <span className="text-slate-800 dark:text-slate-200 truncate">{label}</span>
                             </div>
-                            <span className="font-bold text-slate-700">{percent}%</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-300">{percent}%</span>
                           </div>
                         );
                       })}
@@ -7610,7 +7610,7 @@ function App() {
                 <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-6 flex flex-col transition-all duration-300 hover:border-slate-200 dark:hover:border-slate-700 shadow-sm shadow-slate-100/50">
                   <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Produtos Mais Vendidos</h3>
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Produtos Mais Vendidos</h3>
                       <p className="text-xs text-slate-500 dark:text-slate-400">Participação por categoria de solução comercial</p>
                     </div>
                     <div className="relative">
@@ -7721,7 +7721,7 @@ function App() {
                       {!isSearchOpen ? (
                         <button
                           onClick={() => setIsSearchOpen(true)}
-                          className="p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-600 hover:text-indigo-600 rounded-full transition-all shadow-sm flex items-center justify-center cursor-pointer"
+                          className="p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-600 dark:text-slate-300 hover:text-indigo-600 rounded-full transition-all shadow-sm flex items-center justify-center cursor-pointer"
                           title="Buscar negócio por nome..."
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -7746,7 +7746,7 @@ function App() {
                               setKanbanSearchTerm('');
                               setIsSearchOpen(false);
                             }}
-                            className="text-slate-400 dark:text-slate-500 hover:text-slate-600 text-xs font-bold ml-1 cursor-pointer"
+                            className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xs font-bold ml-1 cursor-pointer"
                           >
                             ✕
                           </button>
@@ -7765,7 +7765,7 @@ function App() {
                           safeStorage.setItem('crm_sort_order', newValue);
                           setSortBy(newValue);
                         }}
-                        className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
                       >
                         <option value="default">Padrão</option>
                         <option value="name">Nome (A - Z)</option>
@@ -7786,7 +7786,7 @@ function App() {
                           setFilterFabricante(null);
                         }
                       }}
-                      className={`mr-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showForecast ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
+                      className={`mr-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showForecast ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
                     >
                       📈 Forecast
                     </button>
@@ -8027,7 +8027,7 @@ function App() {
 
           const TaskCard = ({ task }) => {
             const isDone = task.status === 'concluida';
-            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600', border: 'border-slate-200 dark:border-slate-700', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
+            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
             const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
             const assigneeName = matchedUser ? matchedUser.nome : '—';
             const negocio = getTaskNegocio(task);
@@ -8037,7 +8037,7 @@ function App() {
               overdue: { bg: 'bg-rose-100',   text: 'text-rose-700',   ring: 'ring-rose-200' },
               today:   { bg: 'bg-amber-100',  text: 'text-amber-700',  ring: 'ring-amber-200' },
               soon:    { bg: 'bg-sky-50',     text: 'text-sky-700',    ring: 'ring-sky-200' },
-              normal:  { bg: 'bg-slate-100 dark:bg-slate-700',  text: 'text-slate-500 dark:text-slate-400',  ring: 'ring-slate-200' },
+              normal:  { bg: 'bg-slate-100 dark:bg-slate-700',  text: 'text-slate-500 dark:text-slate-400',  ring: 'ring-slate-200 dark:ring-slate-700' },
             };
             const uc = urgencyConfig[urgent] || urgencyConfig.normal;
 
@@ -8057,7 +8057,7 @@ function App() {
                       type="checkbox"
                       checked={isDone}
                       onChange={() => toggleTaskStatus(task)}
-                      className="w-4.5 h-4.5 rounded-full border-2 border-slate-300 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                      className="w-4.5 h-4.5 rounded-full border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
                     />
                   </div>
 
@@ -8161,7 +8161,7 @@ function App() {
                       <select
                         value={tasksPeriodFilter}
                         onChange={(e) => setTasksPeriodFilter(e.target.value)}
-                        className="bg-transparent border-none text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
+                        className="bg-transparent border-none text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
                       >
                         <option value="all">Todas as Datas</option>
                         <option value="today">Hoje</option>
@@ -8180,14 +8180,14 @@ function App() {
                           type="date"
                           value={tasksCustomStartDate}
                           onChange={(e) => setTasksCustomStartDate(e.target.value)}
-                          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 focus:outline-none"
+                          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 dark:text-slate-300 focus:outline-none"
                         />
                         <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">Até:</span>
                         <input
                           type="date"
                           value={tasksCustomEndDate}
                           onChange={(e) => setTasksCustomEndDate(e.target.value)}
-                          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 focus:outline-none"
+                          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-700 dark:text-slate-300 focus:outline-none"
                         />
                       </div>
                     )}
@@ -8200,7 +8200,7 @@ function App() {
                       <select
                         value={tasksFilterAssignee}
                         onChange={(e) => setTasksFilterAssignee(e.target.value)}
-                        className="bg-transparent border-none text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
+                        className="bg-transparent border-none text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
                       >
                         <option value="all">Todos Responsáveis</option>
                         {vendedoresVisiveis.map(v => (
@@ -8215,7 +8215,7 @@ function App() {
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
                         tasksShowCompleted
                           ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
                       }`}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -8278,7 +8278,7 @@ function App() {
                       </svg>
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-slate-700">Nenhuma tarefa encontrada</h3>
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Nenhuma tarefa encontrada</h3>
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Crie uma nova tarefa para começar a registrar atividades comerciais.</p>
                     </div>
                     <button
@@ -8376,7 +8376,7 @@ function App() {
             <button 
               type="button"
               onClick={() => setShowSettingsModal(false)}
-              className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors z-10 cursor-pointer"
+              className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors z-10 cursor-pointer"
               title="Fechar (ESC)"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -8405,7 +8405,7 @@ function App() {
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'products'
                       ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
                   }`}
                 >
                   Catálogo de Produtos
@@ -8415,7 +8415,7 @@ function App() {
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'distributors'
                       ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
                   }`}
                 >
                   Distribuidores
@@ -8425,7 +8425,7 @@ function App() {
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'venders'
                       ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
                   }`}
                 >
                   Vendedores
@@ -8435,7 +8435,7 @@ function App() {
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'taskTypes'
                       ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
                   }`}
                 >
                   Tipos de Tarefas
@@ -8445,7 +8445,7 @@ function App() {
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'numeracao'
                       ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
                   }`}
                 >
                   Numeração de Propostas
@@ -8455,7 +8455,7 @@ function App() {
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'segmentos'
                       ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-600/60'
                   }`}
                 >
                   Segmentos de Atuação
@@ -8564,7 +8564,7 @@ function App() {
                             <button 
                               type="button"
                               onClick={() => setEditingProduct(null)}
-                              className="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 rounded-lg text-xs font-bold transition-all self-end h-[34px] cursor-pointer"
+                              className="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition-all self-end h-[34px] cursor-pointer"
                             >
                               Cancelar
                             </button>
@@ -8592,7 +8592,7 @@ function App() {
                           ) : (
                             produtos.map(p => (
                               <tr key={p.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/80 transition-colors">
-                                <td className="p-3 font-semibold text-slate-700">{p.fabricante}</td>
+                                <td className="p-3 font-semibold text-slate-700 dark:text-slate-300">{p.fabricante}</td>
                                 <td className="p-3 text-slate-900 dark:text-slate-100 font-medium">{p.nome}</td>
                                 <td className="p-3 text-right font-mono text-slate-800 dark:text-slate-200 font-semibold">
                                   R$ {Number(p.custo_referencia).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
@@ -8630,7 +8630,7 @@ function App() {
                           <select 
                             value={importFormat} 
                             onChange={(e) => setImportFormat(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] text-slate-700 rounded-lg p-1 focus:outline-none cursor-pointer"
+                            className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] text-slate-700 dark:text-slate-300 rounded-lg p-1 focus:outline-none cursor-pointer"
                           >
                             <option value="csv">CSV (Fabricante;Nome;Preço)</option>
                             <option value="xml">XML (&lt;produto&gt;)</option>
@@ -8707,7 +8707,7 @@ function App() {
                           <button 
                             type="button"
                             onClick={() => setEditingDistributor(null)}
-                            className="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                            className="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition-all cursor-pointer"
                           >
                             Cancelar
                           </button>
@@ -8950,12 +8950,12 @@ function App() {
                             }}
                             className="sr-only peer"
                           />
-                          <div className="w-11 h-6 bg-slate-200 dark:bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-slate-800 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                          <div className="w-11 h-6 bg-slate-200 dark:bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-slate-800 after:border-slate-300 dark:after:border-slate-600 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                         </label>
                       </div>
 
                       <div className="pt-2">
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5">Último Número Emitido</label>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">Último Número Emitido</label>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -9002,7 +9002,7 @@ function App() {
             <button 
               type="button"
               onClick={() => setShowProductModal(false)}
-              className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
               title="Fechar (ESC)"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -9157,7 +9157,7 @@ function App() {
                   setSearchProposalQuery('');
                   setProposalSearchResults([]);
                 }}
-                className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-600/60 transition-colors cursor-pointer"
+                className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-600/60 transition-colors cursor-pointer"
                 title="Fechar (ESC)"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -9251,7 +9251,7 @@ function App() {
                             setProposalSearchResults([]);
                             setShowProposalDropdown(false);
                           }}
-                          className="pr-3 text-slate-400 dark:text-slate-500 hover:text-slate-600 transition-colors cursor-pointer"
+                          className="pr-3 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -9276,7 +9276,7 @@ function App() {
                               setSearchProposalQuery(clean);
                               setShowProposalDropdown(false);
                             }}
-                            className="flex items-center justify-between gap-2 cursor-pointer px-4 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-900 transition-colors"
+                            className="flex items-center justify-between gap-2 cursor-pointer px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-900 transition-colors"
                           >
                             <span className="font-semibold text-slate-900 dark:text-slate-100 leading-snug truncate">
                               {p.name || 'Projeto'}
@@ -9365,7 +9365,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => setHasTime(true)}
-                      className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 border border-slate-200 dark:border-slate-700 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                      className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
                     >
                       <span>+ Adicionar hora</span>
                     </button>
@@ -9409,7 +9409,7 @@ function App() {
                     setSearchProposalQuery('');
                     setProposalSearchResults([]);
                   }}
-                  className="px-4.5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  className="px-4.5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -9429,7 +9429,7 @@ function App() {
       {/* Modal de Edição de Oportunidade / Negócio */}
       {showEditNegocioDrawerModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={() => setShowEditNegocioDrawerModal(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
@@ -9446,7 +9446,7 @@ function App() {
                   )}
                 </div>
               </div>
-              <button onClick={() => setShowEditNegocioDrawerModal(false)} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar">
+              <button onClick={() => setShowEditNegocioDrawerModal(false)} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -9455,14 +9455,14 @@ function App() {
 
             <form onSubmit={handleSalvarEditarNegocioDrawer} className="p-6 overflow-y-auto flex-1 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Título da Oportunidade *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Título da Oportunidade *</label>
                 <input required value={editNegocioDrawerForm.nome} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, nome: e.target.value }))}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Estágio do Funil</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Estágio do Funil</label>
                   <select value={editNegocioDrawerForm.estagio} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, estagio: e.target.value }))}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer">
                     {['Registro','Qualificação','Proposta','Desenvolvimento','Negociação','Termo de aceite','Ganho','Perdido','Congelado'].map(est => (
@@ -9472,7 +9472,7 @@ function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tipo de Oportunidade</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Tipo de Oportunidade</label>
                   <select value={editNegocioDrawerForm.tipo} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, tipo: e.target.value }))}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer">
                     <option value="Projeto">Projeto</option>
@@ -9485,7 +9485,7 @@ function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Probabilidade</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Probabilidade</label>
                   <select value={editNegocioDrawerForm.probabilidade} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, probabilidade: e.target.value }))}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all cursor-pointer">
                     <option value="10">10%</option>
@@ -9500,12 +9500,12 @@ function App() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Valor Estimado (R$)</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Valor Estimado (R$)</label>
                   <input type="number" step="0.01" placeholder="0,00" value={editNegocioDrawerForm.valor} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, valor: e.target.value }))}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Previsão de Fechamento do Negócio</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Previsão de Fechamento do Negócio</label>
                   <input type="date" value={editNegocioDrawerForm.dataPrevisao} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, dataPrevisao: e.target.value }))}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                 </div>
@@ -9519,28 +9519,28 @@ function App() {
                 </div>
                 <div className="space-y-2.5">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Infraestrutura</label>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">R.O: Infraestrutura</label>
                     <input placeholder="Ex: Dell RO #123456" value={editNegocioDrawerForm.roInfra} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roInfra: e.target.value }))}
                       className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 1</label>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">R.O: Software 1</label>
                       <input placeholder="Ex: Veeam RO #98765" value={editNegocioDrawerForm.roSw1} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw1: e.target.value }))}
                         className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 2</label>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">R.O: Software 2</label>
                       <input placeholder="Ex: Fortinet RO #54321" value={editNegocioDrawerForm.roSw2} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw2: e.target.value }))}
                         className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 3</label>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">R.O: Software 3</label>
                       <input placeholder="Ex: VMware RO #11223" value={editNegocioDrawerForm.roSw3} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw3: e.target.value }))}
                         className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">R.O: Software 4</label>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">R.O: Software 4</label>
                       <input placeholder="Ex: Red Hat RO #44556" value={editNegocioDrawerForm.roSw4} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, roSw4: e.target.value }))}
                         className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
                     </div>
@@ -9549,13 +9549,13 @@ function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Escopo & Solução Técnica</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Escopo & Solução Técnica</label>
                 <textarea rows={3} placeholder="Descreva o escopo, fabricantes (Dell, Veeam, etc.)..." value={editNegocioDrawerForm.descricao} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, descricao: e.target.value }))}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all resize-none" />
               </div>
 
               <div className="flex gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
-                <button type="button" onClick={() => setShowEditNegocioDrawerModal(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer">Cancelar</button>
+                <button type="button" onClick={() => setShowEditNegocioDrawerModal(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer">Cancelar</button>
                 <button type="submit" disabled={savingEditNegocioDrawer} className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-indigo-200 cursor-pointer">
                   {savingEditNegocioDrawer ? 'Salvando...' : '✓ Salvar Alterações'}
                 </button>
@@ -9589,7 +9589,7 @@ function App() {
                         setShowDrawer(false);
                         setClickupTaskId('');
                       }}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 hover:text-slate-900 dark:hover:text-slate-100 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 shadow-2xs"
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 shadow-2xs"
                       title="Voltar / Fechar (ESC)"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -9643,7 +9643,7 @@ function App() {
                         setShowDrawer(false);
                         setClickupTaskId('');
                       }}
-                      className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                       title="Fechar (ESC)"
                     >
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
@@ -9746,7 +9746,7 @@ function App() {
                                   showToast('Estágio Congelado não configurado.', 'warning');
                                 }
                               }}
-                              className="bg-slate-100 dark:bg-slate-700 hover:bg-sky-50 text-slate-600 hover:text-sky-700 border border-slate-200 dark:border-slate-700 hover:border-sky-300 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                              className="bg-slate-100 dark:bg-slate-700 hover:bg-sky-50 text-slate-600 dark:text-slate-300 hover:text-sky-700 border border-slate-200 dark:border-slate-700 hover:border-sky-300 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                               title="Clique para Congelar este negócio"
                             >
                               <span>❄️ Congelar</span>
@@ -9821,7 +9821,7 @@ function App() {
                                       ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03] ring-2 ring-indigo-400/30 ring-offset-1'
                                       : isPassed
                                       ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 hover:from-indigo-100 hover:to-indigo-200'
-                                      : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-600/80 hover:text-slate-700'
+                                      : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-600/80 hover:text-slate-700 dark:hover:text-slate-300'
                                   }`}
                                 >
                                   <div className={`w-5 h-5 rounded-full flex items-center justify-center mb-1 ${
@@ -9842,7 +9842,7 @@ function App() {
                                     )}
                                   </div>
                                   <span className={`text-[10px] font-bold text-center leading-tight ${
-                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700'
+                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                                   }`}>
                                     {col.name}
                                   </span>
@@ -9941,7 +9941,7 @@ function App() {
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'propostas'
                           ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                       }`}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
@@ -9960,7 +9960,7 @@ function App() {
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'tarefas'
                           ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                       }`}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
@@ -9991,7 +9991,7 @@ function App() {
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'status'
                           ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                       }`}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
@@ -10010,7 +10010,7 @@ function App() {
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
                         drawerSection === 'empresa'
                           ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                       }`}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
@@ -10038,7 +10038,7 @@ function App() {
                       <div className="px-1 space-y-3">
                         {/* Botão + Nova Tarefa Comercial dentro da aba Tarefas */}
                         <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 mb-3">
-                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                          <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                             Tarefas Associadas
                           </span>
@@ -10060,7 +10060,7 @@ function App() {
                           
                           if (dealTasks.length === 0) {
                             return (
-                              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 rounded-2xl">
+                              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-600 rounded-2xl">
                                 <div className="w-14 h-14 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-center">
                                   <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -10116,7 +10116,7 @@ function App() {
                       <div className="px-1 space-y-5">
                         {/* Formulário de Nova Atividade */}
                         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm shadow-slate-200/50">
-                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
+                          <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                             Registrar Atividade
                           </span>
@@ -10142,7 +10142,7 @@ function App() {
 
                         {/* Lista de Atividades Registradas */}
                         <div>
-                          <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-3">
+                          <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-3">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                             Histórico de Atividades
                           </span>
@@ -10152,7 +10152,7 @@ function App() {
                               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                             </div>
                           ) : atividades.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-10 text-center space-y-2 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 rounded-2xl">
+                            <div className="flex flex-col items-center justify-center py-10 text-center space-y-2 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-600 rounded-2xl">
                               <div className="w-12 h-12 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-center">
                                 <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -10183,7 +10183,7 @@ function App() {
                                         </button>
                                         <button
                                           onClick={() => { setEditingAtividade(null); setEditingAtividadeTexto(''); }}
-                                          className="px-3 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
+                                          className="px-3 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
                                         >
                                           Cancelar
                                         </button>
@@ -10235,7 +10235,7 @@ function App() {
                     {drawerSection === 'empresa' && (
                       <div className="px-1 space-y-4 pb-4">
                         {!selectedTask?.conta_id ? (
-                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 rounded-2xl">
+                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-600 rounded-2xl">
                             <div className="w-14 h-14 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-center">
                               <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M5 21V7l8-4v18M13 21V11l6 3v7" />
@@ -10248,7 +10248,7 @@ function App() {
                             <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                           </div>
                         ) : !empresaDoNegocio ? (
-                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-2 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 rounded-2xl">
+                          <div className="flex flex-col items-center justify-center py-12 text-center space-y-2 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-600 rounded-2xl">
                             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Não foi possível carregar os dados da empresa.</p>
                           </div>
                         ) : (() => {
@@ -10284,7 +10284,7 @@ function App() {
                               {/* Dados Corporativos */}
                               <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
                                 <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
-                                  <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Dados Corporativos</h5>
+                                  <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Dados Corporativos</h5>
                                 </div>
                                 <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3.5">
                                   <DadoCampo label="CNPJ" value={formatCNPJ(empresaDoNegocio.cnpj)} mono />
@@ -10298,7 +10298,7 @@ function App() {
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
                                   <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
-                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Contato Corporativo</h5>
+                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Contato Corporativo</h5>
                                   </div>
                                   <dl className="px-4 py-3.5 space-y-2.5">
                                     <DadoCampo label="E-mail" value={empresaDoNegocio.email} href={empresaDoNegocio.email ? `mailto:${empresaDoNegocio.email}` : null} />
@@ -10307,7 +10307,7 @@ function App() {
                                 </div>
                                 <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50 overflow-hidden">
                                   <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-700/80">
-                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Localização</h5>
+                                    <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Localização</h5>
                                   </div>
                                   <div className="px-4 py-3.5 space-y-1">
                                     <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{empresaDoNegocio.rua || '—'}</p>
@@ -10321,12 +10321,12 @@ function App() {
 
                               {/* Contatos */}
                               <div>
-                                <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
+                                <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
                                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                                   Contatos ({contatosDoNegocio.length})
                                 </span>
                                 {contatosDoNegocio.length === 0 ? (
-                                  <div className="text-center py-8 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 rounded-2xl">
+                                  <div className="text-center py-8 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-600 rounded-2xl">
                                     <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Nenhum contato cadastrado para esta empresa.</p>
                                   </div>
                                 ) : (
