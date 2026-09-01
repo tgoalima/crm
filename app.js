@@ -1259,7 +1259,7 @@ const LoginScreen = ({ onLogin, error }) => {
             />
             
             {showTokenHelp && (
-              <div className="mt-2 bg-indigo-50/70 border border-indigo-100 rounded-xl p-3 text-[11px] text-indigo-900 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="mt-2 bg-indigo-50/70 dark:bg-indigo-950/80 border border-indigo-100 dark:border-indigo-800/60 rounded-xl p-3 text-[11px] text-indigo-900 dark:text-indigo-200 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                 <p className="font-bold">💡 Como obter seu token no ClickUp:</p>
                 <ol className="list-decimal list-inside space-y-1 leading-relaxed text-[11px]">
                   <li>Clique no seu <b>perfil / foto</b> no canto superior direito do ClickUp.</li>
@@ -6932,7 +6932,7 @@ function App() {
           {/* Rodapé Resumo Comercial Ultra-Premium */}
           <div className="border-t border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-800 px-7 py-4.5 flex flex-col md:flex-row justify-between items-center gap-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-50/80 rounded-2xl flex items-center justify-center border border-indigo-100 text-indigo-600 shadow-2xs">
+              <div className="w-10 h-10 bg-indigo-50/80 dark:bg-indigo-950/80 rounded-2xl flex items-center justify-center border border-indigo-100 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-300 shadow-2xs">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
@@ -7417,7 +7417,7 @@ function App() {
                 </div>
 
                 {/* 5. Negócios Perdidos */}
-                <div className="bg-rose-50/50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-colors">
+                <div className="bg-rose-50/50 dark:bg-rose-950/80 border border-rose-200/80 dark:border-rose-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-colors">
                   <div>
                     <span className="text-[11px] text-rose-700 dark:text-rose-400 font-semibold mb-1 block truncate">Negócios Perdidos</span>
                     <div className="flex items-baseline gap-1">
@@ -9177,7 +9177,7 @@ function App() {
                 </label>
                 <div className="relative">
                   {selectedProposalForTask ? (
-                    <div className="px-3.5 py-2.5 bg-indigo-50/90 border border-indigo-200 rounded-xl flex items-center justify-between shadow-xs">
+                    <div className="px-3.5 py-2.5 bg-indigo-50/90 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-800/60 rounded-xl flex items-center justify-between shadow-xs">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <span className="w-2 h-2 rounded-full bg-indigo-600 flex-shrink-0 animate-pulse" />
                         <span className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">

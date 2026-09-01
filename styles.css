@@ -11,6 +11,20 @@
 @source "./empresas.js";
 @source "./index.html";
 
+/* Sem isso, controles NATIVOS do navegador (setinha/fundo do <select>,
+   popup do calendário do <input type="date">, checkbox nativo, scrollbar
+   default) continuam usando a paleta clara do SO mesmo com a classe .dark
+   ativa — as classes Tailwind só estilizam o que o navegador deixa
+   customizar, o resto (chrome nativo) segue esse color-scheme. Foi a causa
+   de vários "campos em branco"/date pickers ilegíveis reportados no dark
+   mode (ex.: filtro de Fabricante do Forecast, calendário de Tarefas). */
+:root {
+  color-scheme: light;
+}
+:where(.dark) {
+  color-scheme: dark;
+}
+
 /* Custom Styles for Commercial Proposal Generator */
 
 body {

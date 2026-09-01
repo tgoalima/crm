@@ -1642,7 +1642,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                       <button onClick={() => onExcluirContato(c)} title="Excluir contato" className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><IconTrash size={13} /></button>
                     </div>
                   </div>
-                  {c.champion && (<div className="px-4 py-2 border-t border-amber-100 bg-amber-50/60 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800 flex items-center gap-1.5"><IconStar size={11} /> Champion — Principal decisor desta conta</p></div>)}
+                  {c.champion && (<div className="px-4 py-2 border-t border-amber-100 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/80 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5"><IconStar size={11} /> Champion — Principal decisor desta conta</p></div>)}
                 </div>
               ))}
             </div>
@@ -1955,12 +1955,12 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
 
                   {/* Linha 3: Pipeline (se houver) — número em destaque, é a informação mais importante do card */}
                   {pipelineValor > 0 && (
-                    <div className="bg-indigo-50/60 border border-indigo-100 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
+                    <div className="bg-indigo-50/60 dark:bg-indigo-950/80 border border-indigo-100 dark:border-indigo-800/60 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Pipeline em Aberto</span>
-                        <span className="text-base font-black text-indigo-700 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
+                        <span className="text-[10px] font-extrabold text-slate-500 dark:text-indigo-400 uppercase tracking-wider block">Pipeline em Aberto</span>
+                        <span className="text-base font-black text-indigo-700 dark:text-indigo-300 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
                       </div>
-                      <div className="px-2 py-1 bg-indigo-50 border border-indigo-200/80 rounded-lg text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
+                      <div className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900 border border-indigo-200/80 dark:border-indigo-700 rounded-lg text-indigo-700 dark:text-indigo-200 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
                         <span>Em Aberto</span>
                       </div>
