@@ -491,6 +491,7 @@ const ForecastFunnelPanel = ({
   filterFabricante,
   setFilterFabricante,
   kanbanSearchTerm,
+  kanbanFilterResponsavelId,
   getTaskOptionId,
   getOpportunityValue,
   onCardClick
@@ -515,6 +516,7 @@ const ForecastFunnelPanel = ({
 
   const safeTasks = allTasks
     .filter(t => !filterFabricante || (Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante)))
+    .filter(t => !kanbanFilterResponsavelId || String(t.responsavel_clickup_id) === kanbanFilterResponsavelId)
     .filter(t => taskMatchesSearchTerm(t, searchTermNormalized));
 
   const activeCols = safeColumns.filter(col => {
@@ -751,6 +753,7 @@ const DealsListView = ({
   setStatusFilter,
   onClose,
   supabaseClient,
+  kanbanFilterResponsavelId,
 }) => {
   const [exportingCompleto, setExportingCompleto] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -762,7 +765,8 @@ const DealsListView = ({
   const [sortKey, setSortKey] = useState('data_fechamento');
   const [sortDir, setSortDir] = useState('desc');
 
-  const safeTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];
+  const safeTasks = (Array.isArray(kanbanTasks) ? kanbanTasks : [])
+    .filter(t => !kanbanFilterResponsavelId || String(t.responsavel_clickup_id) === kanbanFilterResponsavelId);
   const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];
 
   const getStatus = (task) => {
@@ -2006,6 +2010,24 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [kanbanSearchTerm, setKanbanSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  // Filtro por responsável embutido na própria busca do Kanban — em vez
+  // de um controle novo na tela, a mesma caixa "Buscar negócio por
+  // nome..." sugere um responsável quando o texto digitado bate com um
+  // vendedor, e vira um "chip" de filtro ativo ao selecionar (ver o JSX
+  // da lupa expansível do Kanban). Mutuamente exclusivo com busca por texto.
+  const [kanbanFilterResponsavelId, setKanbanFilterResponsavelId] = useState(null);
+  const [kanbanFilterResponsavelNome, setKanbanFilterResponsavelNome] = useState('');
+
+  // Busca global do cabeçalho — pesquisa Empresas/Contatos/Negócios
+  // direto no Supabase (não filtra dado já carregado como as outras
+  // buscas do app, por isso o debounce) e, ao selecionar um resultado,
+  // navega até ele (ver handleGlobalSearchSelect mais abaixo).
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const [globalSearchResults, setGlobalSearchResults] = useState({ contas: [], contatos: [], negocios: [] });
+  const [contaParaAbrir, setContaParaAbrir] = useState(null);
+  const [abaContaParaAbrir, setAbaContaParaAbrir] = useState('visao_geral');
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState('');
   
@@ -2761,6 +2783,88 @@ function App() {
     setContatosDoNegocio([]);
     setShowDrawer(true);
   }, []);
+
+  // Busca global do cabeçalho: 3 queries em paralelo, uma por tabela —
+  // cada .or() só referencia colunas da própria tabela, então não esbarra
+  // na limitação do PostgREST de .or() com coluna de tabela embutida.
+  // Diferente das outras buscas do app (todas filtram array já carregado
+  // em memória), essa bate direto no Supabase — por isso o debounce no
+  // useEffect logo abaixo, em vez de rodar a cada tecla.
+  const buscarGlobal = async (termo) => {
+    if (!supabaseClient || !termo || termo.trim().length < 2) {
+      setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+      return;
+    }
+    setGlobalSearchLoading(true);
+    try {
+      const t = `%${termo.trim()}%`;
+      const [contasRes, contatosRes, negociosRes] = await Promise.all([
+        supabaseClient.from('contas').select('id,nome,cnpj,razao_social,cidade')
+          .or(`nome.ilike.${t},cnpj.ilike.${t},razao_social.ilike.${t}`).limit(5),
+        supabaseClient.from('contatos').select('id,nome,email,cargo,conta_id')
+          .or(`nome.ilike.${t},email.ilike.${t}`).limit(5),
+        supabaseClient.from('negocios').select('id,nome,numero_proposta_oficial,estagio,conta_id,clickup_negocio_id')
+          .or(`nome.ilike.${t},numero_proposta_oficial.ilike.${t}`).limit(5),
+      ]);
+      setGlobalSearchResults({
+        contas: contasRes.data || [],
+        contatos: contatosRes.data || [],
+        negocios: negociosRes.data || [],
+      });
+    } catch (err) {
+      console.error('[Busca Global] Erro:', err);
+      setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+    } finally {
+      setGlobalSearchLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isGlobalSearchOpen) return;
+    const termo = globalSearchTerm.trim();
+    if (termo.length < 2) {
+      setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+      return;
+    }
+    const timeoutId = setTimeout(() => buscarGlobal(termo), 300);
+    return () => clearTimeout(timeoutId);
+  }, [globalSearchTerm, isGlobalSearchOpen, supabaseClient]);
+
+  // Navegação ao selecionar um resultado da busca global. Negócio e
+  // Proposta reaproveitam handleCardClick (o mesmo caminho que já abre o
+  // drawer ao clicar num card do Kanban) — o drawer é um overlay fixo,
+  // funciona vindo de qualquer aba. Empresa/Contato usam a ponte nova
+  // (contaParaAbrir/abaContaParaAbrir) consumida dentro de EmpresasTab.
+  const handleGlobalSearchSelect = async (tipo, item) => {
+    setGlobalSearchTerm('');
+    setIsGlobalSearchOpen(false);
+    setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+
+    if (tipo === 'negocio') {
+      handleCardClick({
+        id: String(item.clickup_negocio_id || '').replace('#', '').trim(),
+        name: item.nome,
+        estagio: item.estagio,
+        clickup_negocio_id: item.clickup_negocio_id,
+        numero_proposta_oficial: item.numero_proposta_oficial,
+        conta_id: item.conta_id,
+      });
+    } else if (tipo === 'conta') {
+      setActiveTab('empresas');
+      setAbaContaParaAbrir('visao_geral');
+      setContaParaAbrir(item);
+    } else if (tipo === 'contato') {
+      // A busca só traz o conta_id do contato, não a conta inteira — busca
+      // a conta-mãe completa antes de abrir (FichaEmpresaDrawer precisa de
+      // nome/cnpj/etc., não só do id).
+      setActiveTab('empresas');
+      setAbaContaParaAbrir('contatos');
+      if (supabaseClient && item.conta_id) {
+        const { data } = await supabaseClient.from('contas').select('*').eq('id', item.conta_id).single();
+        if (data) setContaParaAbrir(data);
+      }
+    }
+  };
 
   const resolveTaskIdFormat = async (rawId) => {
     if (!supabaseClient || !rawId) return rawId;
@@ -7035,6 +7139,100 @@ function App() {
         </div>
 
         <div className="flex items-center space-x-4">
+          {/* Busca Global — pesquisa Empresas/Contatos/Negócios & Propostas
+              em qualquer aba (ver buscarGlobal/handleGlobalSearchSelect) e
+              leva direto ao registro selecionado. Mesmo mecanismo de lupa
+              expansível já usado no Kanban, dado diferente. */}
+          <div className="relative flex items-center">
+            {!isGlobalSearchOpen ? (
+              <button
+                onClick={() => setIsGlobalSearchOpen(true)}
+                className="p-2 text-slate-500 dark:text-slate-400 hover:text-white bg-slate-100 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 rounded-lg transition-colors"
+                title="Buscar em todo o CRM..."
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </button>
+            ) : (
+              <div className="flex items-center bg-slate-100/50 dark:bg-slate-700/50 border border-indigo-400 dark:border-indigo-500 rounded-lg px-3 py-1 h-9 w-72">
+                <svg className="w-4 h-4 text-indigo-500 mr-2 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  autoFocus
+                  value={globalSearchTerm}
+                  onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                  placeholder="Buscar empresa, contato, negócio..."
+                  className="bg-transparent border-0 p-0 text-sm text-slate-800 dark:text-slate-200 focus:ring-0 focus:outline-none w-full font-medium"
+                />
+                <button
+                  onClick={() => {
+                    setIsGlobalSearchOpen(false);
+                    setGlobalSearchTerm('');
+                    setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+                  }}
+                  className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xs font-bold ml-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {isGlobalSearchOpen && globalSearchTerm.trim().length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-30 max-h-96 overflow-y-auto">
+                {globalSearchLoading ? (
+                  <p className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-medium">Buscando...</p>
+                ) : globalSearchTerm.trim().length < 2 ? (
+                  <p className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-medium">Digite ao menos 2 letras...</p>
+                ) : (() => {
+                  const { contas, contatos, negocios } = globalSearchResults;
+                  if (contas.length === 0 && contatos.length === 0 && negocios.length === 0) {
+                    return <p className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-medium">Nenhum resultado encontrado.</p>;
+                  }
+                  return (
+                    <React.Fragment>
+                      {contas.length > 0 && (
+                        <div className="py-1">
+                          <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Empresas</p>
+                          {contas.map(c => (
+                            <button key={c.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('conta', c); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
+                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{c.nome}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{c.cnpj || c.cidade || ''}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {contatos.length > 0 && (
+                        <div className="py-1 border-t border-slate-100 dark:border-slate-700">
+                          <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Contatos</p>
+                          {contatos.map(ct => (
+                            <button key={ct.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('contato', ct); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
+                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{ct.nome}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{ct.cargo || ct.email || ''}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {negocios.length > 0 && (
+                        <div className="py-1 border-t border-slate-100 dark:border-slate-700">
+                          <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Negócios &amp; Propostas</p>
+                          {negocios.map(n => (
+                            <button key={n.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('negocio', n); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
+                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{n.nome}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{n.estagio || ''}{n.numero_proposta_oficial ? ` · Nº ${n.numero_proposta_oficial}` : ''}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
           {/* Busca Proativa do ClickUp baseada no número comercial */}
           {activeTab === 'propostas' && (
             <div className="flex flex-col items-end space-y-1">
@@ -7778,40 +7976,83 @@ function App() {
                       <span>+ Nova Oportunidade</span>
                     </button>
 
-                    {/* Lupa de Busca Expansível no Kanban */}
+                    {/* Lupa de Busca Expansível no Kanban — também funciona como
+                        filtro por responsável embutido: digitar um nome que
+                        bata com um vendedor sugere "Filtrar por responsável"
+                        logo abaixo; selecionar troca a caixa por um chip que
+                        filtra o board por ele (ver kanbanFilterResponsavelId).
+                        Evita adicionar um controle novo na tela — mesmo
+                        mecanismo de sempre, só mais esperto. */}
                     <div className="relative flex items-center ml-1">
-                      {!isSearchOpen ? (
+                      {!isSearchOpen && !kanbanFilterResponsavelId ? (
                         <button
                           onClick={() => setIsSearchOpen(true)}
                           className="p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-600 dark:text-slate-300 hover:text-indigo-600 rounded-full transition-all shadow-sm flex items-center justify-center cursor-pointer"
-                          title="Buscar negócio por nome..."
+                          title="Buscar negócio por nome ou filtrar por responsável..."
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                           </svg>
                         </button>
-                      ) : (
-                        <div className="flex items-center bg-white dark:bg-slate-800 border border-indigo-500 rounded-full px-3 py-1 shadow-sm transition-all duration-300 w-64">
-                          <svg className="w-3.5 h-3.5 text-indigo-500 mr-2 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                          </svg>
-                          <input
-                            type="text"
-                            autoFocus
-                            value={kanbanSearchTerm}
-                            onChange={(e) => setKanbanSearchTerm(e.target.value)}
-                            placeholder="Buscar negócio por nome..."
-                            className="bg-transparent border-none text-xs text-slate-800 dark:text-slate-200 focus:outline-none w-full font-medium"
-                          />
+                      ) : kanbanFilterResponsavelId ? (
+                        <div className="flex items-center bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-300 dark:border-indigo-700 rounded-full pl-3 pr-2 py-1 shadow-sm gap-1.5">
+                          <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 whitespace-nowrap">👤 {kanbanFilterResponsavelNome}</span>
                           <button
-                            onClick={() => {
-                              setKanbanSearchTerm('');
-                              setIsSearchOpen(false);
-                            }}
-                            className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xs font-bold ml-1 cursor-pointer"
+                            onClick={() => { setKanbanFilterResponsavelId(null); setKanbanFilterResponsavelNome(''); }}
+                            className="text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 text-xs font-bold cursor-pointer"
+                            title="Remover filtro de responsável"
                           >
                             ✕
                           </button>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <div className="flex items-center bg-white dark:bg-slate-800 border border-indigo-500 rounded-full px-3 py-1 shadow-sm transition-all duration-300 w-64">
+                            <svg className="w-3.5 h-3.5 text-indigo-500 mr-2 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <input
+                              type="text"
+                              autoFocus
+                              value={kanbanSearchTerm}
+                              onChange={(e) => setKanbanSearchTerm(e.target.value)}
+                              placeholder="Buscar negócio ou responsável..."
+                              className="bg-transparent border-none text-xs text-slate-800 dark:text-slate-200 focus:outline-none w-full font-medium"
+                            />
+                            <button
+                              onClick={() => {
+                                setKanbanSearchTerm('');
+                                setIsSearchOpen(false);
+                              }}
+                              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xs font-bold ml-1 cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          {kanbanSearchTerm.trim().length > 0 && (() => {
+                            const termo = kanbanSearchTerm.trim().toLowerCase();
+                            const sugestoes = vendedoresVisiveis.filter(v => (v.nome || '').toLowerCase().includes(termo)).slice(0, 3);
+                            if (sugestoes.length === 0) return null;
+                            return (
+                              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-20 overflow-hidden py-1">
+                                {sugestoes.map(v => (
+                                  <button
+                                    key={v.id}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      setKanbanFilterResponsavelId(String(v.id));
+                                      setKanbanFilterResponsavelNome(v.nome);
+                                      setKanbanSearchTerm('');
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <span>👤</span>
+                                    <span>Filtrar por responsável: <strong>{v.nome}</strong></span>
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
@@ -7866,6 +8107,7 @@ function App() {
                     setStatusFilter={setDealsListStatus}
                     onClose={() => setShowDealsList(false)}
                     supabaseClient={supabaseClient}
+                    kanbanFilterResponsavelId={kanbanFilterResponsavelId}
                   />
                 )}
 
@@ -7878,6 +8120,7 @@ function App() {
                     filterFabricante={filterFabricante}
                     setFilterFabricante={setFilterFabricante}
                     kanbanSearchTerm={kanbanSearchTerm}
+                    kanbanFilterResponsavelId={kanbanFilterResponsavelId}
                     getTaskOptionId={getTaskOptionId}
                     getOpportunityValue={getOpportunityValue}
                     onCardClick={handleCardClick}
@@ -7895,6 +8138,7 @@ function App() {
                     const tasksInCol = kanbanTasks.filter(t => {
                       const inCol = getTaskOptionId(t, kanbanColumns) === col.id;
                       if (!inCol) return false;
+                      if (kanbanFilterResponsavelId && String(t.responsavel_clickup_id) !== kanbanFilterResponsavelId) return false;
                       return taskMatchesSearchTerm(t, kanbanSearchTerm.toLowerCase().trim());
                     });
                     
@@ -7982,7 +8226,14 @@ function App() {
 
         {empresasTabMounted && (
           <div className={activeTab === 'empresas' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
-            <EmpresasTab supabaseClient={supabaseClient} onOpenNegocio={handleCardClick} vendedores={vendedoresVisiveis} />
+            <EmpresasTab
+              supabaseClient={supabaseClient}
+              onOpenNegocio={handleCardClick}
+              vendedores={vendedoresVisiveis}
+              contaParaAbrir={contaParaAbrir}
+              abaParaAbrir={abaContaParaAbrir}
+              onContaAberta={() => { setContaParaAbrir(null); setAbaContaParaAbrir('visao_geral'); }}
+            />
           </div>
         )}
 

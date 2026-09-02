@@ -1379,8 +1379,8 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
 // ─────────────────────────────────────────────
 // DRAWER FICHA 360º v3.2
 // ─────────────────────────────────────────────
-const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, onClose, onOpenNegocio, onNovaOportunidade, onNovoContato, onEditarEmpresa, onEditarContato, onExcluirContato, onExcluirEmpresa, onEditarNegocio, onExcluirNegocio, isModalAberto }) => {
-  const [aba, setAba] = React.useState('visao_geral');
+const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, onClose, onOpenNegocio, onNovaOportunidade, onNovoContato, onEditarEmpresa, onEditarContato, onExcluirContato, onExcluirEmpresa, onEditarNegocio, onExcluirNegocio, isModalAberto, abaInicial = 'visao_geral' }) => {
+  const [aba, setAba] = React.useState(abaInicial);
   const [filtroEstagio, setFiltroEstagio] = React.useState('todos');
 
   React.useEffect(() => {
@@ -1724,7 +1724,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
 // ─────────────────────────────────────────────
 // ABA PRINCIPAL — EMPRESAS v3.2
 // ─────────────────────────────────────────────
-const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
+const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [], contaParaAbrir = null, abaParaAbrir = 'visao_geral', onContaAberta }) => {
   const [contas, setContas] = React.useState([]);
   const [negocios, setNegocios] = React.useState([]);
   const [propostasPorNegocio, setPropostasPorNegocio] = React.useState(new Map());
@@ -1735,6 +1735,20 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
   const [filtroTier, setFiltroTier] = React.useState('');
 
   const [contaSelecionada, setContaSelecionada] = React.useState(null);
+
+  // Ponte pra abrir uma conta específica vinda de fora (busca global do
+  // cabeçalho, app.js) — contaParaAbrir chega como o objeto completo da
+  // conta (ou {id} + busca própria no caso de contato, ver app.js), então
+  // não depende de EmpresasTab já ter carregado sua própria lista de
+  // contas. onContaAberta limpa o estado no app.js pra não reabrir de novo
+  // num próximo render.
+  React.useEffect(() => {
+    if (contaParaAbrir) {
+      setContaSelecionada(contaParaAbrir);
+      if (onContaAberta) onContaAberta();
+    }
+  }, [contaParaAbrir]);
+
   const [showEmpresaModal, setShowEmpresaModal] = React.useState(false);
   const [empresaParaEditar, setEmpresaParaEditar] = React.useState(null);
   const [showNovaOportunidade, setShowNovaOportunidade] = React.useState(false);
@@ -2010,7 +2024,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
 
       {/* DRAWER */}
       {contaSelecionada && (
-        <FichaEmpresaDrawer conta={contaSelecionada} negocios={negocios.filter(n => n.conta_id === contaSelecionada.id)} contatos={contatos.filter(c => c.conta_id === contaSelecionada.id)} propostasPorNegocio={propostasPorNegocio} isModalAberto={isModalAberto} onClose={() => setContaSelecionada(null)} onOpenNegocio={onOpenNegocio} onNovaOportunidade={() => setShowNovaOportunidade(true)} onNovoContato={() => { setContatoParaEditar(null); setShowNovoContato(true); }} onEditarEmpresa={(c) => { setEmpresaParaEditar(c); setShowEmpresaModal(true); }} onEditarContato={(ct) => { setContatoParaEditar(ct); setShowNovoContato(true); }} onExcluirContato={handleExcluirContato} onExcluirEmpresa={handleExcluirEmpresa} onEditarNegocio={(n) => { setNegocioParaEditar(n); setShowEditarNegocio(true); }} onExcluirNegocio={handleExcluirNegocio} />
+        <FichaEmpresaDrawer key={contaSelecionada.id} conta={contaSelecionada} negocios={negocios.filter(n => n.conta_id === contaSelecionada.id)} contatos={contatos.filter(c => c.conta_id === contaSelecionada.id)} propostasPorNegocio={propostasPorNegocio} isModalAberto={isModalAberto} abaInicial={abaParaAbrir} onClose={() => setContaSelecionada(null)} onOpenNegocio={onOpenNegocio} onNovaOportunidade={() => setShowNovaOportunidade(true)} onNovoContato={() => { setContatoParaEditar(null); setShowNovoContato(true); }} onEditarEmpresa={(c) => { setEmpresaParaEditar(c); setShowEmpresaModal(true); }} onEditarContato={(ct) => { setContatoParaEditar(ct); setShowNovoContato(true); }} onExcluirContato={handleExcluirContato} onExcluirEmpresa={handleExcluirEmpresa} onEditarNegocio={(n) => { setNegocioParaEditar(n); setShowEditarNegocio(true); }} onExcluirNegocio={handleExcluirNegocio} />
       )}
       {showEmpresaModal && (<EmpresaFormModal supabaseClient={supabaseClient} conta={empresaParaEditar} onClose={() => setShowEmpresaModal(false)} onSalvo={() => { setShowEmpresaModal(false); carregarDados(); }} />)}
       {showNovoContato && contaSelecionada && (<ContatoFormModal supabaseClient={supabaseClient} conta={contaSelecionada} contas={contas} todosContatos={contatos} contato={contatoParaEditar} onClose={() => setShowNovoContato(false)} onSalvo={() => { setShowNovoContato(false); carregarDados(); }} />)}
