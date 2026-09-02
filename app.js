@@ -7186,6 +7186,22 @@ function App() {
                   autoFocus
                   value={globalSearchTerm}
                   onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setIsGlobalSearchOpen(false);
+                      setGlobalSearchTerm('');
+                      setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+                    }
+                  }}
+                  onBlur={() => {
+                    // Itens do dropdown usam onMouseDown+preventDefault (não
+                    // onClick) exatamente pra não disparar esse blur antes de
+                    // registrar o clique — então isso só fecha quando o clique
+                    // é de verdade fora da busca inteira.
+                    setIsGlobalSearchOpen(false);
+                    setGlobalSearchTerm('');
+                    setGlobalSearchResults({ contas: [], contatos: [], negocios: [] });
+                  }}
                   placeholder="Buscar empresa, contato, negócio..."
                   className="bg-transparent border-0 p-0 text-sm text-slate-800 dark:text-slate-200 focus:ring-0 focus:outline-none w-full font-medium"
                 />
@@ -7203,7 +7219,7 @@ function App() {
             )}
 
             {isGlobalSearchOpen && globalSearchTerm.trim().length > 0 && (
-              <div className="absolute top-full right-0 mt-2 w-96 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 rounded-2xl shadow-2xl z-30 max-h-[28rem] overflow-y-auto">
+              <div className="absolute top-full right-0 mt-2 w-96 h-[28rem] bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 rounded-2xl shadow-2xl z-30 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-indigo-300 dark:[&::-webkit-scrollbar-thumb]:bg-indigo-600 [&::-webkit-scrollbar-thumb]:rounded-full">
                 {globalSearchLoading ? (
                   <p className="px-5 py-4 text-xs text-slate-400 dark:text-slate-500 font-medium">Buscando...</p>
                 ) : globalSearchTerm.trim().length < 2 ? (
