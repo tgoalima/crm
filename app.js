@@ -7181,47 +7181,47 @@ function App() {
             )}
 
             {isGlobalSearchOpen && globalSearchTerm.trim().length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-30 max-h-96 overflow-y-auto">
+              <div className="absolute top-full right-0 mt-2 w-96 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 rounded-2xl shadow-2xl z-30 max-h-[28rem] overflow-y-auto">
                 {globalSearchLoading ? (
-                  <p className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-medium">Buscando...</p>
+                  <p className="px-5 py-4 text-xs text-slate-400 dark:text-slate-500 font-medium">Buscando...</p>
                 ) : globalSearchTerm.trim().length < 2 ? (
-                  <p className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-medium">Digite ao menos 2 letras...</p>
+                  <p className="px-5 py-4 text-xs text-slate-400 dark:text-slate-500 font-medium">Digite ao menos 2 letras...</p>
                 ) : (() => {
                   const { contas, contatos, negocios } = globalSearchResults;
                   if (contas.length === 0 && contatos.length === 0 && negocios.length === 0) {
-                    return <p className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-medium">Nenhum resultado encontrado.</p>;
+                    return <p className="px-5 py-4 text-xs text-slate-400 dark:text-slate-500 font-medium">Nenhum resultado encontrado.</p>;
                   }
                   return (
                     <React.Fragment>
                       {contas.length > 0 && (
-                        <div className="py-1">
-                          <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Empresas</p>
+                        <div className="py-2">
+                          <p className="px-5 pt-1 pb-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Empresas</p>
                           {contas.map(c => (
-                            <button key={c.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('conta', c); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
+                            <button key={c.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('conta', c); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
                               <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{c.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{c.cnpj ? formatCNPJ(c.cnpj) : (c.cidade || '')}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{c.cnpj ? formatCNPJ(c.cnpj) : (c.cidade || '')}</p>
                             </button>
                           ))}
                         </div>
                       )}
                       {contatos.length > 0 && (
-                        <div className="py-1 border-t border-slate-100 dark:border-slate-700">
-                          <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Contatos</p>
+                        <div className="py-2 border-t border-slate-200 dark:border-slate-700">
+                          <p className="px-5 pt-2 pb-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Contatos</p>
                           {contatos.map(ct => (
-                            <button key={ct.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('contato', ct); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
+                            <button key={ct.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('contato', ct); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
                               <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{ct.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{ct.cargo || ct.email || ''}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{ct.cargo || ct.email || ''}</p>
                             </button>
                           ))}
                         </div>
                       )}
                       {negocios.length > 0 && (
-                        <div className="py-1 border-t border-slate-100 dark:border-slate-700">
-                          <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Negócios &amp; Propostas</p>
+                        <div className="py-2 border-t border-slate-200 dark:border-slate-700">
+                          <p className="px-5 pt-2 pb-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Negócios &amp; Propostas</p>
                           {negocios.map(n => (
-                            <button key={n.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('negocio', n); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
+                            <button key={n.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('negocio', n); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
                               <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{n.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{n.estagio || ''}{n.numero_proposta_oficial ? ` · Nº ${n.numero_proposta_oficial}` : ''}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{n.estagio || ''}{n.numero_proposta_oficial ? ` · Nº ${n.numero_proposta_oficial}` : ''}</p>
                             </button>
                           ))}
                         </div>
