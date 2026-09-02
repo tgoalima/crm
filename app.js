@@ -7199,7 +7199,7 @@ function App() {
                           {contas.map(c => (
                             <button key={c.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('conta', c); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
                               <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{c.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{c.cnpj || c.cidade || ''}</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{c.cnpj ? formatCNPJ(c.cnpj) : (c.cidade || '')}</p>
                             </button>
                           ))}
                         </div>
