@@ -491,7 +491,7 @@ const ForecastFunnelPanel = ({
   filterFabricante,
   setFilterFabricante,
   kanbanSearchTerm,
-  kanbanFilterResponsavelId,
+  kanbanFilterResponsavelNome,
   getTaskOptionId,
   getOpportunityValue,
   onCardClick
@@ -516,7 +516,7 @@ const ForecastFunnelPanel = ({
 
   const safeTasks = allTasks
     .filter(t => !filterFabricante || (Array.isArray(t.fabricantes) && t.fabricantes.includes(filterFabricante)))
-    .filter(t => !kanbanFilterResponsavelId || String(t.responsavel_clickup_id) === kanbanFilterResponsavelId)
+    .filter(t => !kanbanFilterResponsavelNome || t.responsavel_negocio === kanbanFilterResponsavelNome)
     .filter(t => taskMatchesSearchTerm(t, searchTermNormalized));
 
   const activeCols = safeColumns.filter(col => {
@@ -753,7 +753,7 @@ const DealsListView = ({
   setStatusFilter,
   onClose,
   supabaseClient,
-  kanbanFilterResponsavelId,
+  kanbanFilterResponsavelNome,
 }) => {
   const [exportingCompleto, setExportingCompleto] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -766,7 +766,7 @@ const DealsListView = ({
   const [sortDir, setSortDir] = useState('desc');
 
   const safeTasks = (Array.isArray(kanbanTasks) ? kanbanTasks : [])
-    .filter(t => !kanbanFilterResponsavelId || String(t.responsavel_clickup_id) === kanbanFilterResponsavelId);
+    .filter(t => !kanbanFilterResponsavelNome || t.responsavel_negocio === kanbanFilterResponsavelNome);
   const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];
 
   const getStatus = (task) => {
@@ -8125,7 +8125,7 @@ function App() {
                     setStatusFilter={setDealsListStatus}
                     onClose={() => setShowDealsList(false)}
                     supabaseClient={supabaseClient}
-                    kanbanFilterResponsavelId={kanbanFilterResponsavelId}
+                    kanbanFilterResponsavelNome={kanbanFilterResponsavelNome}
                   />
                 )}
 
@@ -8138,7 +8138,7 @@ function App() {
                     filterFabricante={filterFabricante}
                     setFilterFabricante={setFilterFabricante}
                     kanbanSearchTerm={kanbanSearchTerm}
-                    kanbanFilterResponsavelId={kanbanFilterResponsavelId}
+                    kanbanFilterResponsavelNome={kanbanFilterResponsavelNome}
                     getTaskOptionId={getTaskOptionId}
                     getOpportunityValue={getOpportunityValue}
                     onCardClick={handleCardClick}
@@ -8156,7 +8156,14 @@ function App() {
                     const tasksInCol = kanbanTasks.filter(t => {
                       const inCol = getTaskOptionId(t, kanbanColumns) === col.id;
                       if (!inCol) return false;
-                      if (kanbanFilterResponsavelId && String(t.responsavel_clickup_id) !== kanbanFilterResponsavelId) return false;
+                      // Compara por NOME (responsavel_negocio), não por
+                      // responsavel_clickup_id — negócios antigos podem não
+                      // ter o id preenchido mesmo já mostrando o nome
+                      // corretamente no card (fallback pro criado_por da
+                      // proposta, ver fetchKanbanData), o que fazia o filtro
+                      // por id excluir negócios que visivelmente já eram do
+                      // responsável selecionado.
+                      if (kanbanFilterResponsavelNome && t.responsavel_negocio !== kanbanFilterResponsavelNome) return false;
                       return taskMatchesSearchTerm(t, kanbanSearchTerm.toLowerCase().trim());
                     });
                     
