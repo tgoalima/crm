@@ -639,7 +639,7 @@ const ForecastFunnelPanel = ({
 
           {/* Resumo de valor da etapa — empilhado abaixo do funil quando filtrado */}
           {filterStage && selectedStageObj && (
-            <div className="w-full mt-2 bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 border-l-4 border-l-indigo-600 shadow-sm shadow-slate-100/50 flex flex-col justify-center items-center text-center">
+            <div className="w-full mt-2 bg-gradient-to-br from-emerald-50/70 to-white dark:from-emerald-950/30 dark:to-slate-800 p-5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 border-l-4 border-l-emerald-500 shadow-lg shadow-emerald-100/50 dark:shadow-emerald-950/30 flex flex-col justify-center items-center text-center">
               <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5 block">
                 {`TOTAL EM ${selectedStageObj.name.toUpperCase()}`}
               </span>
@@ -658,7 +658,7 @@ const ForecastFunnelPanel = ({
 
         {/* Right Column: Card de Total Geral (quando sem filtro) */}
         {!filterStage && (
-          <div className="w-full lg:w-[35%] bg-white dark:bg-slate-800 p-8 rounded-xl border border-slate-200/80 dark:border-slate-700/80 border-l-4 border-l-indigo-600 shadow-sm shadow-slate-100/50 flex flex-col justify-center items-center text-center h-full">
+          <div className="w-full lg:w-[35%] bg-gradient-to-br from-emerald-50/70 to-white dark:from-emerald-950/30 dark:to-slate-800 p-8 rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 border-l-4 border-l-emerald-500 shadow-lg shadow-emerald-100/50 dark:shadow-emerald-950/30 flex flex-col justify-center items-center text-center h-full">
             <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3 block">
               TOTAL EM NEGOCIAÇÃO
             </span>
