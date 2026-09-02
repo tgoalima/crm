@@ -7116,7 +7116,7 @@ function App() {
     <div className="flex-1 min-h-0 flex flex-col bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 overflow-hidden">
       
       {/* 1. Header do Sistema */}
-      <header className="h-16 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-6 flex items-center justify-between z-10">
+      <header className="h-16 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-6 flex items-center justify-between z-40 relative">
         <div className="flex items-center space-x-3">
           <div className="bg-indigo-600 p-2 rounded-lg">
             <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -7197,9 +7197,14 @@ function App() {
                         <div className="py-2">
                           <p className="px-5 pt-1 pb-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Empresas</p>
                           {contas.map(c => (
-                            <button key={c.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('conta', c); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
-                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{c.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{c.cnpj ? formatCNPJ(c.cnpj) : (c.cidade || '')}</p>
+                            <button key={c.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('conta', c); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer flex items-start gap-3">
+                              <span className="mt-0.5 w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 flex items-center justify-center shrink-0">
+                                <IconBuilding size={14} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{c.nome}</p>
+                                <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{c.cnpj ? formatCNPJ(c.cnpj) : (c.cidade || '')}</p>
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -7208,9 +7213,14 @@ function App() {
                         <div className="py-2 border-t border-slate-200 dark:border-slate-700">
                           <p className="px-5 pt-2 pb-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Contatos</p>
                           {contatos.map(ct => (
-                            <button key={ct.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('contato', ct); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
-                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{ct.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{ct.cargo || ct.email || ''}</p>
+                            <button key={ct.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('contato', ct); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer flex items-start gap-3">
+                              <span className="mt-0.5 w-7 h-7 rounded-lg bg-sky-100 dark:bg-sky-900/60 text-sky-600 dark:text-sky-300 flex items-center justify-center shrink-0">
+                                <IconUsers size={14} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{ct.nome}</p>
+                                <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{ct.cargo || ct.email || ''}</p>
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -7219,9 +7229,14 @@ function App() {
                         <div className="py-2 border-t border-slate-200 dark:border-slate-700">
                           <p className="px-5 pt-2 pb-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Negócios &amp; Propostas</p>
                           {negocios.map(n => (
-                            <button key={n.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('negocio', n); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer">
-                              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{n.nome}</p>
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{n.estagio || ''}{n.numero_proposta_oficial ? ` · Nº ${n.numero_proposta_oficial}` : ''}</p>
+                            <button key={n.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('negocio', n); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer flex items-start gap-3">
+                              <span className="mt-0.5 w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-300 flex items-center justify-center shrink-0">
+                                <IconBriefcase size={14} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{n.nome}</p>
+                                <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{n.estagio || ''}{n.numero_proposta_oficial ? ` · Nº ${n.numero_proposta_oficial}` : ''}</p>
+                              </span>
                             </button>
                           ))}
                         </div>
