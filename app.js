@@ -8081,10 +8081,18 @@ function App() {
                               }}
                               onBlur={() => {
                                 // A sugestão de responsável usa onMouseDown+preventDefault,
-                                // não onClick — clicar nela não dispara esse blur antes de
-                                // registrar o clique, então isso só fecha em clique de fora.
-                                setKanbanSearchTerm('');
-                                setIsSearchOpen(false);
+                                // então clicar nela nunca chega a disparar esse blur. Mas os
+                                // CARDS do board (resultado da busca por texto) usam onClick
+                                // normal — sem esse setTimeout, o blur fecharia a busca e
+                                // resetaria o filtro ANTES do clique no card completar,
+                                // fazendo o card "fugir" de baixo do cursor (mudou de
+                                // posição ao re-renderizar sem filtro) e o clique cair no
+                                // vazio. O atraso deixa o clique no card terminar primeiro;
+                                // pra um clique realmente fora, o resultado visual é o mesmo.
+                                setTimeout(() => {
+                                  setKanbanSearchTerm('');
+                                  setIsSearchOpen(false);
+                                }, 200);
                               }}
                               placeholder="Buscar negócio ou responsável..."
                               className="bg-transparent border-none text-xs text-slate-800 dark:text-slate-200 focus:outline-none w-full font-medium"
