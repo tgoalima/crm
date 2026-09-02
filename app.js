@@ -7177,7 +7177,7 @@ function App() {
                 </svg>
               </button>
             ) : (
-              <div className="flex items-center bg-slate-100/50 dark:bg-slate-700/50 border border-indigo-400 dark:border-indigo-500 rounded-lg px-3 py-1 h-9 w-96">
+              <div className="flex items-center bg-slate-100/50 dark:bg-slate-700/50 border border-indigo-400 dark:border-indigo-500 rounded-lg px-3 py-1 h-9 w-[32rem]">
                 <svg className="w-4 h-4 text-indigo-500 mr-2 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
@@ -7219,7 +7219,7 @@ function App() {
             )}
 
             {isGlobalSearchOpen && globalSearchTerm.trim().length > 0 && (
-              <div className="absolute top-full right-0 mt-2 w-96 h-[28rem] bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 rounded-2xl shadow-2xl z-30 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-indigo-300 dark:[&::-webkit-scrollbar-thumb]:bg-indigo-600 [&::-webkit-scrollbar-thumb]:rounded-full">
+              <div className="absolute top-full right-0 mt-2 w-[32rem] h-[28rem] bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 rounded-2xl shadow-2xl z-30 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-indigo-300 dark:[&::-webkit-scrollbar-thumb]:bg-indigo-600 [&::-webkit-scrollbar-thumb]:rounded-full">
                 {globalSearchLoading ? (
                   <p className="px-5 py-4 text-xs text-slate-400 dark:text-slate-500 font-medium">Buscando...</p>
                 ) : globalSearchTerm.trim().length < 2 ? (
@@ -7240,7 +7240,7 @@ function App() {
                                 <IconBuilding size={14} />
                               </span>
                               <span className="min-w-0 flex-1">
-                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{c.nome}</p>
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate" title={c.nome}>{c.nome}</p>
                                 <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{c.cnpj ? formatCNPJ(c.cnpj) : (c.cidade || '')}</p>
                               </span>
                             </button>
@@ -7256,7 +7256,7 @@ function App() {
                                 <IconUsers size={14} />
                               </span>
                               <span className="min-w-0 flex-1">
-                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{ct.nome}</p>
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate" title={ct.nome}>{ct.nome}</p>
                                 <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{ct.cargo || ct.email || ''}</p>
                               </span>
                             </button>
@@ -7276,7 +7276,7 @@ function App() {
                                 {n.numero_proposta_oficial ? <IconDocument size={14} /> : <IconBriefcase size={14} />}
                               </span>
                               <span className="min-w-0 flex-1">
-                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{n.nome}</p>
+                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate" title={n.nome}>{n.nome}</p>
                                 <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{n.estagio || ''}{n.numero_proposta_oficial ? ` · Nº ${n.numero_proposta_oficial}` : ''}</p>
                               </span>
                             </button>
@@ -8073,6 +8073,19 @@ function App() {
                               autoFocus
                               value={kanbanSearchTerm}
                               onChange={(e) => setKanbanSearchTerm(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  setKanbanSearchTerm('');
+                                  setIsSearchOpen(false);
+                                }
+                              }}
+                              onBlur={() => {
+                                // A sugestão de responsável usa onMouseDown+preventDefault,
+                                // não onClick — clicar nela não dispara esse blur antes de
+                                // registrar o clique, então isso só fecha em clique de fora.
+                                setKanbanSearchTerm('');
+                                setIsSearchOpen(false);
+                              }}
                               placeholder="Buscar negócio ou responsável..."
                               className="bg-transparent border-none text-xs text-slate-800 dark:text-slate-200 focus:outline-none w-full font-medium"
                             />
