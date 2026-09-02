@@ -1474,7 +1474,7 @@ const SegmentosSettings = ({ client }) => {
                       value={editandoNome}
                       onChange={e => setEditandoNome(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') salvarEdicao(realIdx); if (e.key === 'Escape') { setEditandoIdx(null); setEditandoNome(''); } }}
-                      className="flex-1 px-3 py-1.5 bg-indigo-50 border border-indigo-300 rounded-lg text-sm font-medium text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+                      className="flex-1 px-3 py-1.5 bg-indigo-50 border border-indigo-300 rounded-lg text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
                     />
                     <button onClick={() => salvarEdicao(realIdx)} className="px-2.5 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg cursor-pointer">✓</button>
                     <button onClick={() => { setEditandoIdx(null); setEditandoNome(''); }} className="px-2.5 py-1 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs font-bold rounded-lg cursor-pointer">✕</button>
@@ -7346,14 +7346,14 @@ function App() {
                   <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 shadow-sm">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                     <span>{biMetrics.currentLabel || 'Atual'}:</span>
-                    <span className="text-slate-900 dark:text-slate-100 font-extrabold">R$ {((biMetrics?.wonValue || 0) / 1000000).toFixed(2)} MI</span>
+                    <span className="text-slate-900 font-extrabold">R$ {((biMetrics?.wonValue || 0) / 1000000).toFixed(2)} MI</span>
                     <span className="text-[10px] text-emerald-700 font-medium">({biMetrics?.wonCount || 0} deals)</span>
                   </div>
                   {biMetrics.compLabel && compareStartDate && compareEndDate && (
                     <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-bold text-indigo-800 shadow-sm">
                       <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 border border-white"></span>
                       <span>{biMetrics.compLabel}:</span>
-                      <span className="text-slate-900 dark:text-slate-100 font-extrabold">R$ {((biMetrics?.wonValueComp || 0) / 1000000).toFixed(2)} MI</span>
+                      <span className="text-slate-900 font-extrabold">R$ {((biMetrics?.wonValueComp || 0) / 1000000).toFixed(2)} MI</span>
                       <span className="text-[10px] text-indigo-700 font-medium">({biMetrics?.wonCountComp || 0} deals)</span>
                     </div>
                   )}
@@ -7391,7 +7391,7 @@ function App() {
                 </div>
 
                 {/* 2. Valor em Vendas */}
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
+                <div className="bg-emerald-50/50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 border-l-4 border-l-emerald-500 rounded-xl p-3.5 flex flex-col justify-between hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors">
                   <div>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mb-1 block truncate">Valor em Vendas</span>
                     <span className="text-base font-extrabold text-slate-900 dark:text-slate-100 truncate block">
@@ -7399,7 +7399,7 @@ function App() {
                     </span>
                   </div>
                   {compareStartDate && compareEndDate && biMetrics?.wonValDiff !== null && (
-                    <div className="mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-[10px]">
+                    <div className="mt-2 pt-2 border-t border-emerald-200/60 dark:border-emerald-800/50 flex items-center justify-between text-[10px]">
                       <span className="text-slate-500 dark:text-slate-400 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>R$ {((biMetrics.wonValueComp || 0) / 1000000).toFixed(2)}M</strong></span>
                       <span className={`font-bold px-1.5 py-0.5 rounded ${
                         biMetrics.wonValDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
@@ -7449,7 +7449,7 @@ function App() {
                 </div>
 
                 {/* 5. Negócios Perdidos */}
-                <div className="bg-rose-50/50 dark:bg-slate-900 border border-rose-200/80 dark:border-slate-700 border-l-4 border-l-rose-500 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-slate-600 transition-colors">
+                <div className="bg-rose-50/50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-800/60 border-l-4 border-l-rose-500 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-colors">
                   <div>
                     <span className="text-[11px] text-rose-700 dark:text-slate-400 font-semibold mb-1 block truncate">Negócios Perdidos</span>
                     <div className="flex items-baseline gap-1">
@@ -7460,7 +7460,7 @@ function App() {
                     </div>
                   </div>
                   {compareStartDate && compareEndDate && (
-                    <div className="mt-2 pt-2 border-t border-rose-200/60 dark:border-slate-700/50 flex items-center justify-between text-[10px]">
+                    <div className="mt-2 pt-2 border-t border-rose-200/60 dark:border-rose-800/50 flex items-center justify-between text-[10px]">
                       <span className="text-rose-700/80 dark:text-slate-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.lostCountComp || 0}</strong></span>
                       <span className="font-bold text-rose-800 dark:text-slate-200">
                         {biMetrics.lostQtyDiff <= 0 ? '0' : `+${biMetrics.lostQtyDiff}`}
