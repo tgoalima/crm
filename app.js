@@ -2798,13 +2798,16 @@ function App() {
     setGlobalSearchLoading(true);
     try {
       const t = `%${termo.trim()}%`;
+      // Limite subiu de 5 pra 10 por categoria — o dropdown já rola
+      // (overflow-y-auto) quando tem muito resultado, então não faz
+      // sentido cortar no servidor antes disso.
       const [contasRes, contatosRes, negociosRes] = await Promise.all([
         supabaseClient.from('contas').select('id,nome,cnpj,razao_social,cidade')
-          .or(`nome.ilike.${t},cnpj.ilike.${t},razao_social.ilike.${t}`).limit(5),
+          .or(`nome.ilike.${t},cnpj.ilike.${t},razao_social.ilike.${t}`).limit(10),
         supabaseClient.from('contatos').select('id,nome,email,cargo,conta_id')
-          .or(`nome.ilike.${t},email.ilike.${t}`).limit(5),
+          .or(`nome.ilike.${t},email.ilike.${t}`).limit(10),
         supabaseClient.from('negocios').select('id,nome,numero_proposta_oficial,estagio,conta_id,clickup_negocio_id')
-          .or(`nome.ilike.${t},numero_proposta_oficial.ilike.${t}`).limit(5),
+          .or(`nome.ilike.${t},numero_proposta_oficial.ilike.${t}`).limit(10),
       ]);
       setGlobalSearchResults({
         contas: contasRes.data || [],
@@ -8046,10 +8049,10 @@ function App() {
                           </div>
                           {kanbanSearchTerm.trim().length > 0 && (() => {
                             const termo = kanbanSearchTerm.trim().toLowerCase();
-                            const sugestoes = vendedoresVisiveis.filter(v => (v.nome || '').toLowerCase().includes(termo)).slice(0, 3);
+                            const sugestoes = vendedoresVisiveis.filter(v => (v.nome || '').toLowerCase().includes(termo));
                             if (sugestoes.length === 0) return null;
                             return (
-                              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-20 overflow-hidden py-1">
+                              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-20 max-h-56 overflow-y-auto py-1">
                                 {sugestoes.map(v => (
                                   <button
                                     key={v.id}
