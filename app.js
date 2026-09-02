@@ -494,8 +494,10 @@ const ForecastFunnelPanel = ({
   kanbanFilterResponsavelNome,
   getTaskOptionId,
   getOpportunityValue,
-  onCardClick
+  onCardClick,
+  theme
 }) => {
+  const isDark = theme === 'dark';
   // Guards defensivos: garante que arrays nunca sejam undefined
   const safeColumns = Array.isArray(kanbanColumns) ? kanbanColumns : [];
   const allTasks = Array.isArray(kanbanTasks) ? kanbanTasks : [];
@@ -591,7 +593,16 @@ const ForecastFunnelPanel = ({
                     style={{
                       width: stage.funnelWidth,
                       borderLeft: `4px solid ${stage.color}`,
-                      backgroundColor: isSelected ? undefined : `${stage.color}1A`,
+                      // No dark mode as cores pastel dos estágios (pensadas pra fundo
+                      // claro) quase somem com uma tintura de 10% (1A) — sobe pra ~28%
+                      // (47) só no escuro, e reforça a borda com a própria cor em vez
+                      // do cinza padrão, que tinha contraste quase nulo ali.
+                      backgroundColor: isSelected ? undefined : `${stage.color}${isDark ? '47' : '1A'}`,
+                      ...(isDark && !isSelected ? {
+                        borderTopColor: `${stage.color}80`,
+                        borderRightColor: `${stage.color}80`,
+                        borderBottomColor: `${stage.color}80`,
+                      } : {}),
                     }}
                     className={`flex justify-between items-center py-2.5 px-4 rounded-lg transition-all duration-200 border cursor-pointer relative overflow-hidden ${
                       isSelected
@@ -600,11 +611,17 @@ const ForecastFunnelPanel = ({
                     }`}
                   >
                     <div className="z-10 flex items-center gap-2 pr-2">
-                      <span 
-                        className="w-1.5 h-1.5 rounded-full flex-shrink-0" 
-                        style={{ backgroundColor: stage.color }}
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{
+                          backgroundColor: stage.color,
+                          boxShadow: isDark ? `0 0 6px ${stage.color}` : undefined,
+                        }}
                       />
-                      <span className={`text-[10px] md:text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${isSelected ? 'text-white font-bold' : 'text-slate-950 dark:text-slate-100'}`}>
+                      <span
+                        className={`text-[10px] md:text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${isSelected ? 'text-white font-bold' : 'text-slate-950'}`}
+                        style={{ color: isDark && !isSelected ? stage.color : undefined }}
+                      >
                         {stage.name}
                       </span>
                     </div>
@@ -8202,6 +8219,7 @@ function App() {
                     getTaskOptionId={getTaskOptionId}
                     getOpportunityValue={getOpportunityValue}
                     onCardClick={handleCardClick}
+                    theme={theme}
                   />
                 )}
 
