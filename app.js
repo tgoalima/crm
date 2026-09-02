@@ -76,11 +76,6 @@ const CHART_UI_COLORS_LIGHT = {
   tooltipBg: '#0f172a',
   tooltipTitle: '#ffffff',
   tooltipBody: '#e2e8f0',
-  // Contorno entre as fatias do doughnut de Produtos Mais Vendidos —
-  // precisa casar com o fundo do card (branco no claro, slate-800 no
-  // escuro) pra "sumir" entre as fatias em vez de aparecer como um
-  // contorno branco esquisito sobre o card escuro.
-  doughnutBorder: '#ffffff',
 };
 const CHART_UI_COLORS_DARK = {
   legendText: '#cbd5e1',
@@ -89,7 +84,6 @@ const CHART_UI_COLORS_DARK = {
   tooltipBg: '#f8fafc',
   tooltipTitle: '#0f172a',
   tooltipBody: '#334155',
-  doughnutBorder: '#1e293b',
 };
 
 // Estabiliza a saída de um useMemo por VALOR, não só por referência. O poll
@@ -4139,14 +4133,17 @@ function App() {
       totalQty += qty;
     });
 
-    const palette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b', '#6366f1', '#a855f7'];
-
     const result = Object.values(groups).map((g, idx) => {
       const pctValNum = totalVal > 0 ? (g.val / totalVal) * 100 : 0;
       const pctQtyNum = totalQty > 0 ? (g.qty / totalQty) * 100 : 0;
       return {
         ...g,
-        color: palette[idx % palette.length],
+        // Mesma paleta compartilhada dos gráficos de Distribuidor/Fabricante
+        // (chartColors/chartBorderColors, topo do arquivo) — antes usava uma
+        // paleta própria, o que fazia o gráfico de Produtos destoar
+        // visualmente dos outros dois (cores diferentes, contorno diferente).
+        color: chartColors[idx % chartColors.length],
+        borderColor: chartBorderColors[idx % chartBorderColors.length],
         pctValNum,
         pctQtyNum,
         pctValStr: `${pctValNum.toFixed(1)}%`,
@@ -4267,6 +4264,7 @@ function App() {
     if (prodCtx && topProductsAggregated.length > 0) {
       const productLabels = topProductsAggregated.map(p => p.name);
       const productColors = topProductsAggregated.map(p => p.color);
+      const productBorderColors = topProductsAggregated.map(p => p.borderColor);
       const isValueMode = topProductsFilterMode === 'value';
       const dataValues = topProductsAggregated.map(p => isValueMode ? p.val : p.qty);
       const totalSum = dataValues.reduce((a, b) => a + b, 0);
@@ -4278,10 +4276,10 @@ function App() {
           datasets: [{
             data: dataValues,
             backgroundColor: productColors,
-            borderColor: chartUiColors.doughnutBorder,
-            borderWidth: 2,
-            cutout: '70%',
-            hoverOffset: 6
+            borderColor: productBorderColors,
+            borderWidth: 1.5,
+            cutout: '75%',
+            hoverOffset: 4
           }]
         },
         options: {
@@ -9870,7 +9868,7 @@ function App() {
                                     isCurrent
                                       ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03] ring-2 ring-indigo-400/30 ring-offset-1'
                                       : isPassed
-                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-emerald-950/50 dark:to-emerald-900/40 text-indigo-700 dark:text-emerald-300 hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-emerald-900 dark:hover:to-emerald-800'
+                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-emerald-700 dark:to-emerald-700 text-indigo-700 dark:text-white hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-emerald-600 dark:hover:to-emerald-600'
                                       : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-600/80 hover:text-slate-700 dark:hover:text-slate-300'
                                   }`}
                                 >
@@ -9878,13 +9876,13 @@ function App() {
                                     isCurrent
                                       ? 'bg-white/25 dark:bg-slate-800/25'
                                       : isPassed
-                                      ? 'bg-indigo-200/60 dark:bg-emerald-800/50'
+                                      ? 'bg-indigo-200/60 dark:bg-white/25'
                                       : 'bg-slate-200/60 dark:bg-slate-600/60'
                                   }`}>
                                     {isCurrent ? (
                                       <span className="w-2 h-2 bg-white dark:bg-slate-800 rounded-full animate-pulse" />
                                     ) : isPassed ? (
-                                      <svg className="w-3 h-3 text-indigo-600 dark:text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                      <svg className="w-3 h-3 text-indigo-600 dark:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                       </svg>
                                     ) : (
@@ -9892,7 +9890,7 @@ function App() {
                                     )}
                                   </div>
                                   <span className={`text-[10px] font-bold text-center leading-tight ${
-                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
+                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                                   }`}>
                                     {col.name}
                                   </span>
