@@ -1277,7 +1277,7 @@ const LoginScreen = ({ onLogin, error }) => {
             />
             
             {showTokenHelp && (
-              <div className="mt-2 bg-indigo-50/70 dark:bg-indigo-950/80 border border-indigo-100 dark:border-indigo-800/60 rounded-xl p-3 text-[11px] text-indigo-900 dark:text-indigo-200 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="mt-2 bg-indigo-50/70 dark:bg-slate-900 border border-indigo-100 dark:border-slate-700 rounded-xl p-3 text-[11px] text-indigo-900 dark:text-slate-200 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                 <p className="font-bold">💡 Como obter seu token no ClickUp:</p>
                 <ol className="list-decimal list-inside space-y-1 leading-relaxed text-[11px]">
                   <li>Clique no seu <b>perfil / foto</b> no canto superior direito do ClickUp.</li>
@@ -6276,7 +6276,7 @@ function App() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
             </svg>
-            <span>+ Criar Nova Versão</span>
+            <span>Criar Nova Versão</span>
           </button>
         )}
       </div>
@@ -6662,7 +6662,7 @@ function App() {
                     <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     Data de Início
                   </span>
-                  <span className="text-[8px] font-black text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com todas as versões">NEGÓCIO</span>
+                  <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com todas as versões">NEGÓCIO</span>
                 </label>
                 <input
                   type="date"
@@ -6679,7 +6679,7 @@ function App() {
                     <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     Data Fechamento
                   </span>
-                  <span className="text-[8px] font-black text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com o ClickUp e todas as versões">NEGÓCIO</span>
+                  <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com o ClickUp e todas as versões">NEGÓCIO</span>
                 </label>
                 <input
                   type="date"
@@ -6850,7 +6850,7 @@ function App() {
                                             });
                                           }}
                                           className={`p-2.5 text-xs cursor-pointer flex justify-between items-center transition-colors ${
-                                            (item.highlightedIndex || 0) === idx ? 'bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300 font-medium'
+                                            (item.highlightedIndex || 0) === idx ? 'bg-indigo-50/80 text-indigo-900 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300 font-medium'
                                           }`}
                                         >
                                           <div>
@@ -6964,7 +6964,7 @@ function App() {
           {/* Rodapé Resumo Comercial Ultra-Premium */}
           <div className="border-t border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-800 px-7 py-4.5 flex flex-col md:flex-row justify-between items-center gap-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-50/80 dark:bg-indigo-950/80 rounded-2xl flex items-center justify-center border border-indigo-100 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-300 shadow-2xs">
+              <div className="w-10 h-10 bg-indigo-50/80 rounded-2xl flex items-center justify-center border border-indigo-100 text-indigo-600 shadow-2xs">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
@@ -7449,20 +7449,20 @@ function App() {
                 </div>
 
                 {/* 5. Negócios Perdidos */}
-                <div className="bg-rose-50/50 dark:bg-rose-950/80 border border-rose-200/80 dark:border-rose-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-colors">
+                <div className="bg-rose-50/50 dark:bg-slate-900 border border-rose-200/80 dark:border-slate-700 border-l-4 border-l-rose-500 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <span className="text-[11px] text-rose-700 dark:text-slate-400 font-semibold mb-1 block truncate">Negócios Perdidos</span>
                     <div className="flex items-baseline gap-1">
                       <span className="text-xl font-extrabold text-rose-950 dark:text-slate-100">{biMetrics?.lostCount || 0}</span>
-                      <span className="text-[10px] font-medium text-rose-700/80 dark:text-rose-400/80">
+                      <span className="text-[10px] font-medium text-rose-700/80 dark:text-slate-400/80">
                         (R$ {(biMetrics?.lostValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                       </span>
                     </div>
                   </div>
                   {compareStartDate && compareEndDate && (
-                    <div className="mt-2 pt-2 border-t border-rose-200/60 dark:border-rose-800/50 flex items-center justify-between text-[10px]">
-                      <span className="text-rose-700/80 dark:text-rose-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.lostCountComp || 0}</strong></span>
-                      <span className="font-bold text-rose-800 dark:text-rose-300">
+                    <div className="mt-2 pt-2 border-t border-rose-200/60 dark:border-slate-700/50 flex items-center justify-between text-[10px]">
+                      <span className="text-rose-700/80 dark:text-slate-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{biMetrics.lostCountComp || 0}</strong></span>
+                      <span className="font-bold text-rose-800 dark:text-slate-200">
                         {biMetrics.lostQtyDiff <= 0 ? '0' : `+${biMetrics.lostQtyDiff}`}
                       </span>
                     </div>
@@ -7470,14 +7470,14 @@ function App() {
                 </div>
 
                 {/* 6. Taxa de Conversão */}
-                <div className="bg-indigo-50/50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+                <div className="bg-indigo-50/50 dark:bg-slate-900 border border-indigo-200/80 dark:border-slate-700 border-l-4 border-l-indigo-500 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <span className="text-[11px] text-indigo-700 dark:text-slate-400 font-semibold mb-1 block truncate">Taxa Conversão</span>
                     <span className="text-xl font-extrabold text-indigo-950 dark:text-slate-100">{(biMetrics?.convRate || 0).toFixed(1)}%</span>
                   </div>
                   {compareStartDate && compareEndDate && biMetrics?.convRateDiff !== null && (
-                    <div className="mt-2 pt-2 border-t border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-between text-[10px]">
-                      <span className="text-indigo-700/80 dark:text-indigo-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{(biMetrics.convRateComp || 0).toFixed(1)}%</strong></span>
+                    <div className="mt-2 pt-2 border-t border-indigo-200/60 dark:border-slate-700/50 flex items-center justify-between text-[10px]">
+                      <span className="text-indigo-700/80 dark:text-slate-400/80 font-medium truncate">vs {biMetrics.compLabel || 'ant.'}: <strong>{(biMetrics.convRateComp || 0).toFixed(1)}%</strong></span>
                       <span className={`font-bold px-1.5 py-0.5 rounded ${
                         biMetrics.convRateDiff >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                       }`}>
@@ -9225,7 +9225,7 @@ function App() {
                 </label>
                 <div className="relative">
                   {selectedProposalForTask ? (
-                    <div className="px-3.5 py-2.5 bg-indigo-50/90 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-800/60 rounded-xl flex items-center justify-between shadow-xs">
+                    <div className="px-3.5 py-2.5 bg-indigo-50/90 dark:bg-slate-900 border border-indigo-200 dark:border-slate-700 rounded-xl flex items-center justify-between shadow-xs">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <span className="w-2 h-2 rounded-full bg-indigo-600 flex-shrink-0 animate-pulse" />
                         <span className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
@@ -9663,7 +9663,7 @@ function App() {
                   <div className="flex items-center gap-2 shrink-0">
                     <button 
                       onClick={() => handleAbrirEditarNegocioDrawer(selectedTask)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
                       title="Editar oportunidade"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
@@ -9674,7 +9674,7 @@ function App() {
 
                     <button 
                       onClick={() => handleExcluirNegocioDrawer(selectedTask)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
                       title="Excluir oportunidade"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">

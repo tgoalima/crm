@@ -66,18 +66,18 @@ const getCriadoPorUserId = () => {
 
 const normalizeTier = (t) => {
   if (!t || t === '0' || t === 'none' || t === '') return null;
-  if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', Icon: IconDiamond, color: 'bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800/60', cardColor: 'bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800/60', accentBorder: 'border-l-violet-400 dark:border-l-violet-600' };
-  if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', Icon: IconStar, color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60', cardColor: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60', accentBorder: 'border-l-amber-400 dark:border-l-amber-600' };
+  if (t === '1' || t === 'Tier 1') return { label: 'Tier 1', Icon: IconDiamond, color: 'bg-violet-50 text-violet-700 border-violet-200', cardColor: 'bg-violet-50 text-violet-700 border-violet-200', accentBorder: 'border-l-violet-400' };
+  if (t === '2' || t === 'Tier 2') return { label: 'Tier 2', Icon: IconStar, color: 'bg-amber-50 text-amber-700 border-amber-200', cardColor: 'bg-amber-50 text-amber-700 border-amber-200', accentBorder: 'border-l-amber-400' };
   if (t === '3' || t === 'Tier 3') return { label: 'Tier 3', Icon: IconPackage, color: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700', cardColor: 'bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700', accentBorder: 'border-l-slate-300 dark:border-l-slate-600' };
   return null;
 };
 
 const normalizeStatus = (s) => {
   const map = {
-    'active':        { label: 'Active',        color: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60', dot: 'bg-emerald-500' },
-    'customer base': { label: 'Customer Base', color: 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/60',             dot: 'bg-sky-500'     },
-    'prospect':      { label: 'Prospect',      color: 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/60',          dot: 'bg-blue-500'    },
-    'at risk':       { label: 'At Risk',        color: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/60',          dot: 'bg-rose-500'    },
+    'active':        { label: 'Active',        color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+    'customer base': { label: 'Customer Base', color: 'bg-sky-50 text-sky-700 border-sky-200',             dot: 'bg-sky-500'     },
+    'prospect':      { label: 'Prospect',      color: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500'    },
+    'at risk':       { label: 'At Risk',        color: 'bg-rose-50 text-rose-700 border-rose-200',          dot: 'bg-rose-500'    },
   };
   return map[(s || '').toLowerCase()] || { label: s || '—', color: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700', dot: 'bg-slate-400' };
 };
@@ -1533,9 +1533,12 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           </div>
 
           {/* ABAS */}
-          <div className="flex border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 gap-1">
+          <div className="flex items-center gap-1.5 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1 pt-1.5">
             {[['visao_geral','Visão Geral'],['contatos',`Contatos (${contatos.length})`],['oportunidades',`Oportunidades (${negocios.length})`]].map(([id,label]) => (
-              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'}`}>{label}</button>
+              <button key={id} onClick={() => setAba(id)} className={`relative px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${aba===id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'}`}>
+                {label}
+                {aba===id && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>}
+              </button>
             ))}
           </div>
         </div>
@@ -1642,7 +1645,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                       <button onClick={() => onExcluirContato(c)} title="Excluir contato" className="w-8 h-8 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><IconTrash size={13} /></button>
                     </div>
                   </div>
-                  {c.champion && (<div className="px-4 py-2 border-t border-amber-100 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/80 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5"><IconStar size={11} /> Champion — Principal decisor desta conta</p></div>)}
+                  {c.champion && (<div className="px-4 py-2 border-t border-amber-100 bg-amber-50/60 rounded-b-2xl"><p className="text-[11px] font-bold text-amber-800 flex items-center gap-1.5"><IconStar size={11} /> Champion — Principal decisor desta conta</p></div>)}
                 </div>
               ))}
             </div>
@@ -1960,7 +1963,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                         <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Pipeline em Aberto</span>
                         <span className="text-base font-black text-indigo-700 dark:text-slate-100 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
                       </div>
-                      <div className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900 border border-indigo-200/80 dark:border-indigo-700 rounded-lg text-indigo-700 dark:text-indigo-200 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
+                      <div className="px-2 py-1 bg-indigo-50 border border-indigo-200/80 rounded-lg text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
                         <span>Em Aberto</span>
                       </div>
@@ -1974,17 +1977,17 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                       {status.label}
                     </span>
                     <div className="flex items-center gap-3">
-                      <span className="flex items-center gap-1 text-[11px]" title={`${numC} contato${numC !== 1 ? 's' : ''}`}>
-                        <IconUsers size={12} className="text-slate-400 dark:text-slate-500" />
+                      <span className="flex items-center gap-1.5 text-xs" title={`${numC} contato${numC !== 1 ? 's' : ''}`}>
+                        <IconUsers size={14} className="text-slate-400 dark:text-slate-500" />
                         <span className="font-bold text-slate-700 dark:text-slate-300">{numC}</span>
                       </span>
-                      <span className="flex items-center gap-1 text-[11px]" title={`${numN} negócio${numN !== 1 ? 's' : ''}`}>
-                        <IconBriefcase size={12} className="text-slate-400 dark:text-slate-500" />
+                      <span className="flex items-center gap-1.5 text-xs" title={`${numN} negócio${numN !== 1 ? 's' : ''}`}>
+                        <IconBriefcase size={14} className="text-slate-400 dark:text-slate-500" />
                         <span className="font-bold text-slate-700 dark:text-slate-300">{numN}</span>
                       </span>
                       {taxa !== null && (
-                        <span className="flex items-center gap-1 text-[11px]" title={`Taxa de conversão: ${taxa}%`}>
-                          <IconPercent size={11} className={taxa >= 60 ? 'text-emerald-500 dark:text-emerald-400' : taxa > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'} />
+                        <span className="flex items-center gap-1.5 text-xs" title={`Taxa de conversão: ${taxa}%`}>
+                          <IconPercent size={13} className={taxa >= 60 ? 'text-emerald-500 dark:text-emerald-400' : taxa > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'} />
                           <span className={`font-bold ${taxa >= 60 ? 'text-emerald-600 dark:text-emerald-400' : taxa > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'}`}>{taxa}%</span>
                         </span>
                       )}
