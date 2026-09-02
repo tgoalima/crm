@@ -1442,7 +1442,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                 {conta.razao_social && conta.razao_social !== conta.nome && (
                   <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">{conta.razao_social}</p>
                 )}
-                <p className="text-xs text-slate-400 dark:text-slate-500 font-mono mt-0.5">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}{conta.cidade ? ` · ${conta.cidade}/${conta.estado}` : ''}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-300 font-mono mt-0.5">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}{conta.cidade ? ` · ${conta.cidade}/${conta.estado}` : ''}</p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full border ${status.color}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>{status.label}
@@ -1942,7 +1942,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5 truncate">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-300 font-mono mt-0.5 truncate">{formatCNPJ(conta.cnpj) || 'CNPJ não informado'}</p>
                     </div>
                   </div>
 
@@ -1955,7 +1955,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
 
                   {/* Linha 3: Pipeline (se houver) — número em destaque, é a informação mais importante do card */}
                   {pipelineValor > 0 && (
-                    <div className="bg-indigo-50/60 dark:bg-indigo-950/80 border border-indigo-100 dark:border-indigo-800/60 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
+                    <div className="bg-indigo-50/60 dark:bg-slate-900 border border-indigo-100 dark:border-slate-700 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
                       <div>
                         <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Pipeline em Aberto</span>
                         <span className="text-base font-black text-indigo-700 dark:text-slate-100 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>

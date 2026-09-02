@@ -9870,7 +9870,7 @@ function App() {
                                     isCurrent
                                       ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03] ring-2 ring-indigo-400/30 ring-offset-1'
                                       : isPassed
-                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-slate-700/80 dark:to-slate-700/60 text-indigo-700 dark:text-slate-300 hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-slate-600 dark:hover:to-slate-600'
+                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-emerald-950/50 dark:to-emerald-900/40 text-indigo-700 dark:text-emerald-300 hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-emerald-900 dark:hover:to-emerald-800'
                                       : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-600/80 hover:text-slate-700 dark:hover:text-slate-300'
                                   }`}
                                 >
@@ -9878,13 +9878,13 @@ function App() {
                                     isCurrent
                                       ? 'bg-white/25 dark:bg-slate-800/25'
                                       : isPassed
-                                      ? 'bg-indigo-200/60 dark:bg-slate-600/60'
+                                      ? 'bg-indigo-200/60 dark:bg-emerald-800/50'
                                       : 'bg-slate-200/60 dark:bg-slate-600/60'
                                   }`}>
                                     {isCurrent ? (
                                       <span className="w-2 h-2 bg-white dark:bg-slate-800 rounded-full animate-pulse" />
                                     ) : isPassed ? (
-                                      <svg className="w-3 h-3 text-indigo-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                      <svg className="w-3 h-3 text-indigo-600 dark:text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                       </svg>
                                     ) : (
@@ -9892,7 +9892,7 @@ function App() {
                                     )}
                                   </div>
                                   <span className={`text-[10px] font-bold text-center leading-tight ${
-                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-slate-300' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
+                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                                   }`}>
                                     {col.name}
                                   </span>
