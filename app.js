@@ -76,6 +76,11 @@ const CHART_UI_COLORS_LIGHT = {
   tooltipBg: '#0f172a',
   tooltipTitle: '#ffffff',
   tooltipBody: '#e2e8f0',
+  // Contorno entre as fatias do doughnut de Produtos Mais Vendidos —
+  // precisa casar com o fundo do card (branco no claro, slate-800 no
+  // escuro) pra "sumir" entre as fatias em vez de aparecer como um
+  // contorno branco esquisito sobre o card escuro.
+  doughnutBorder: '#ffffff',
 };
 const CHART_UI_COLORS_DARK = {
   legendText: '#cbd5e1',
@@ -84,6 +89,7 @@ const CHART_UI_COLORS_DARK = {
   tooltipBg: '#f8fafc',
   tooltipTitle: '#0f172a',
   tooltipBody: '#334155',
+  doughnutBorder: '#1e293b',
 };
 
 // Estabiliza a saída de um useMemo por VALOR, não só por referência. O poll
@@ -4178,6 +4184,8 @@ function App() {
         seasonalityChartInst.current = null;
       }
 
+    const chartUiColors = theme === 'dark' ? CHART_UI_COLORS_DARK : CHART_UI_COLORS_LIGHT;
+
     // Criar Gráfico A (Distribuidor)
     const distCtx = distributorCanvasRef.current?.getContext('2d');
     if (distCtx && Object.keys(distributorTotals).length > 0) {
@@ -4270,7 +4278,7 @@ function App() {
           datasets: [{
             data: dataValues,
             backgroundColor: productColors,
-            borderColor: '#ffffff',
+            borderColor: chartUiColors.doughnutBorder,
             borderWidth: 2,
             cutout: '70%',
             hoverOffset: 6
@@ -4312,7 +4320,6 @@ function App() {
       
       const currentYearLabel = biMetrics.currentYearLabel || (startDate ? startDate.slice(0, 4) : 'Atual');
       const compYearLabel = biMetrics.compYearLabel || (compareStartDate ? compareStartDate.slice(0, 4) : 'Comparativo');
-      const chartUiColors = theme === 'dark' ? CHART_UI_COLORS_DARK : CHART_UI_COLORS_LIGHT;
 
       const datasets = [
         {
@@ -6047,7 +6054,7 @@ function App() {
       <div className="flex flex-col h-full">
         {showHeader && (
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] font-bold uppercase tracking-widest text-indigo-500 flex items-center gap-1.5">
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-indigo-500 dark:text-slate-300 flex items-center gap-1.5">
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -6469,7 +6476,7 @@ function App() {
 
                 {/* Status Select */}
                 <div className={`flex items-center gap-2 bg-slate-100/70 dark:bg-slate-700/70 hover:bg-slate-100 dark:hover:bg-slate-700 px-3 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 transition-all ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}>
-                  <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">STATUS:</span>
+                  <span className="text-[10px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">STATUS:</span>
                   <select
                     disabled={isReadOnly}
                     value={currentProposta.situacao === 'Ganho' ? 'Ganho' : currentProposta.situacao === 'Perdido' ? 'Perdido' : currentProposta.situacao === 'Desconsiderada' ? 'Desconsiderada' : 'Em Andamento'}
@@ -6584,8 +6591,8 @@ function App() {
           <div className="mx-7 my-5 p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5">
               <div>
-                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                  <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                  <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
                   Tipo Oportunidade
                 </label>
                 <select
@@ -6615,8 +6622,8 @@ function App() {
               </div>
 
               <div>
-                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                  <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                  <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                   Tipo de Projeto
                 </label>
                 <select
@@ -6634,8 +6641,8 @@ function App() {
               </div>
 
               <div>
-                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                  <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                  <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                   Vendedor / Responsável
                 </label>
                 <select
@@ -6652,12 +6659,12 @@ function App() {
               </div>
 
               <div>
-                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1">
-                    <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     Data de Início
                   </span>
-                  <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com todas as versões">NEGÓCIO</span>
+                  <span className="text-[8px] font-black text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com todas as versões">NEGÓCIO</span>
                 </label>
                 <input
                   type="date"
@@ -6669,12 +6676,12 @@ function App() {
               </div>
 
               <div>
-                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1">
-                    <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     Data Fechamento
                   </span>
-                  <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com o ClickUp e todas as versões">NEGÓCIO</span>
+                  <span className="text-[8px] font-black text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md uppercase" title="Sincroniza com o ClickUp e todas as versões">NEGÓCIO</span>
                 </label>
                 <input
                   type="date"
@@ -6852,7 +6859,7 @@ function App() {
                                             <span className="font-bold block text-slate-800 dark:text-slate-200">{p.nome}</span>
                                             <span className="text-[10px] text-slate-400 dark:text-slate-500">{p.fabricante || 'Fabricante não informado'}</span>
                                           </div>
-                                          <span className="font-mono text-xs text-indigo-600 font-bold">
+                                          <span className="font-mono text-xs text-indigo-600 dark:text-slate-200 font-bold">
                                             R$ {Number(p.preco_base || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
                                           </span>
                                         </div>
@@ -6965,7 +6972,7 @@ function App() {
                 </svg>
               </div>
               <div>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-widest block">RESUMO COMERCIAL</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-400 font-extrabold uppercase tracking-widest block">RESUMO COMERCIAL</span>
                 <p className="text-xs text-slate-600 dark:text-slate-300 font-bold mt-0.5">Cálculo ativo com base em {itens.length} {itens.length === 1 ? 'item' : 'itens'}.</p>
               </div>
             </div>
@@ -7446,9 +7453,9 @@ function App() {
                 {/* 5. Negócios Perdidos */}
                 <div className="bg-rose-50/50 dark:bg-rose-950/80 border border-rose-200/80 dark:border-rose-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-colors">
                   <div>
-                    <span className="text-[11px] text-rose-700 dark:text-rose-400 font-semibold mb-1 block truncate">Negócios Perdidos</span>
+                    <span className="text-[11px] text-rose-700 dark:text-slate-400 font-semibold mb-1 block truncate">Negócios Perdidos</span>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-extrabold text-rose-950 dark:text-rose-300">{biMetrics?.lostCount || 0}</span>
+                      <span className="text-xl font-extrabold text-rose-950 dark:text-slate-100">{biMetrics?.lostCount || 0}</span>
                       <span className="text-[10px] font-medium text-rose-700/80 dark:text-rose-400/80">
                         (R$ {(biMetrics?.lostValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                       </span>
@@ -7467,8 +7474,8 @@ function App() {
                 {/* 6. Taxa de Conversão */}
                 <div className="bg-indigo-50/50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
                   <div>
-                    <span className="text-[11px] text-indigo-700 dark:text-indigo-400 font-semibold mb-1 block truncate">Taxa Conversão</span>
-                    <span className="text-xl font-extrabold text-indigo-950 dark:text-indigo-300">{(biMetrics?.convRate || 0).toFixed(1)}%</span>
+                    <span className="text-[11px] text-indigo-700 dark:text-slate-400 font-semibold mb-1 block truncate">Taxa Conversão</span>
+                    <span className="text-xl font-extrabold text-indigo-950 dark:text-slate-100">{(biMetrics?.convRate || 0).toFixed(1)}%</span>
                   </div>
                   {compareStartDate && compareEndDate && biMetrics?.convRateDiff !== null && (
                     <div className="mt-2 pt-2 border-t border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-between text-[10px]">
@@ -8039,6 +8046,15 @@ function App() {
             'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  Icon: (typeof IconMapPin !== 'undefined' ? IconMapPin : null) },
             'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) },
           };
+          // Tipo de tarefa é texto livre, editável pelo usuário (Configurações →
+          // Tipos de Tarefa) — sem essa normalização, uma variação como "Follow Up"
+          // (sem hífen) não bate com a chave 'Follow-up' acima e cai sempre no
+          // fallback genérico (ícone/cor errados), mesmo sendo claramente o mesmo
+          // tipo. Compara ignorando espaço/hífen e maiúsculas.
+          const normalizeTypeKey = (s) => (s || '').toLowerCase().replace(/[\s-]+/g, '');
+          const typeConfigByNormalizedKey = Object.fromEntries(
+            Object.entries(typeConfig).map(([k, v]) => [normalizeTypeKey(k), v])
+          );
 
           const formatTaskDate = (dateStr) => {
             const d = new Date(dateStr);
@@ -8054,7 +8070,7 @@ function App() {
 
           const TaskCard = ({ task }) => {
             const isDone = task.status === 'concluida';
-            const tc = typeConfig[task.tipo] || { dot: 'bg-slate-400', bg: 'bg-slate-50 dark:bg-slate-900', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
+            const tc = typeConfigByNormalizedKey[normalizeTypeKey(task.tipo)] || { dot: 'bg-slate-400', bg: 'bg-slate-50 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
             const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
             const assigneeName = matchedUser ? matchedUser.nome : '—';
             const negocio = getTaskNegocio(task);
@@ -8098,7 +8114,7 @@ function App() {
                         </p>
                         {/* Negócio associado */}
                         {negocio && negocio !== 'Sem Projeto' && (
-                          <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium mt-0.5 truncate flex items-center gap-1">
+                          <p className="text-[11px] text-slate-400 dark:text-slate-400 font-medium mt-0.5 truncate flex items-center gap-1">
                             <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
@@ -8279,19 +8295,19 @@ function App() {
                 {/* KPI Cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
                   <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5">
-                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Pendentes</p>
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-widest">Pendentes</p>
                     <p className="text-2xl font-black text-slate-800 dark:text-slate-200 mt-0.5">{pendingItems.length}</p>
                   </div>
-                  <div className={`rounded-xl p-3.5 border ${overdueItems.length > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/80'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest ${overdueItems.length > 0 ? 'text-rose-500' : 'text-slate-400 dark:text-slate-500'}`}>Vencidas</p>
-                    <p className={`text-2xl font-black mt-0.5 ${overdueItems.length > 0 ? 'text-rose-700' : 'text-slate-800 dark:text-slate-200'}`}>{overdueItems.length}</p>
+                  <div className={`rounded-xl p-3.5 border ${overdueItems.length > 0 ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800/60' : 'bg-slate-50 dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/80'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest ${overdueItems.length > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-slate-400 dark:text-slate-400'}`}>Vencidas</p>
+                    <p className={`text-2xl font-black mt-0.5 ${overdueItems.length > 0 ? 'text-rose-700 dark:text-slate-100' : 'text-slate-800 dark:text-slate-200'}`}>{overdueItems.length}</p>
                   </div>
-                  <div className={`rounded-xl p-3.5 border ${todayItems.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/80'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest ${todayItems.length > 0 ? 'text-amber-600' : 'text-slate-400 dark:text-slate-500'}`}>Para Hoje</p>
-                    <p className={`text-2xl font-black mt-0.5 ${todayItems.length > 0 ? 'text-amber-700' : 'text-slate-800 dark:text-slate-200'}`}>{todayItems.length}</p>
+                  <div className={`rounded-xl p-3.5 border ${todayItems.length > 0 ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800/60' : 'bg-slate-50 dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/80'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest ${todayItems.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-400'}`}>Para Hoje</p>
+                    <p className={`text-2xl font-black mt-0.5 ${todayItems.length > 0 ? 'text-amber-700 dark:text-slate-100' : 'text-slate-800 dark:text-slate-200'}`}>{todayItems.length}</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3.5">
-                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Concluídas</p>
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-widest">Concluídas</p>
                     <p className="text-2xl font-black text-slate-800 dark:text-slate-200 mt-0.5">{doneItems.length}</p>
                   </div>
                 </div>
@@ -9548,7 +9564,7 @@ function App() {
               {/* Registros de Oportunidade (R.O.) */}
               <div>
                 <div className="flex items-center gap-3 pt-1 mb-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">Registros de Oportunidade (R.O.)</span>
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-400">Registros de Oportunidade (R.O.)</span>
                   <div className="flex-1 h-px bg-slate-100 dark:bg-slate-700"></div>
                 </div>
                 <div className="space-y-2.5">
@@ -9638,7 +9654,7 @@ function App() {
                         const numProp = selectedTask?.numero_proposta_oficial;
                         if (!numProp) return null;
                         return (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/60 px-2 py-0.5 rounded-md mt-0.5">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md mt-0.5">
                             Nº da Oportunidade: {numProp}
                           </span>
                         );
@@ -9692,7 +9708,7 @@ function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 border-l-4 border-l-indigo-400 shadow-sm shadow-slate-200/50">
                       <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <svg className="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                         Responsável pelo Negócio
                       </span>
                       <select
@@ -9854,7 +9870,7 @@ function App() {
                                     isCurrent
                                       ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03] ring-2 ring-indigo-400/30 ring-offset-1'
                                       : isPassed
-                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950/60 dark:to-indigo-900/60 text-indigo-700 dark:text-indigo-300 hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-indigo-900 dark:hover:to-indigo-800'
+                                      ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-slate-700/80 dark:to-slate-700/60 text-indigo-700 dark:text-slate-300 hover:from-indigo-100 hover:to-indigo-200 dark:hover:from-slate-600 dark:hover:to-slate-600'
                                       : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-slate-200/80 dark:hover:bg-slate-600/80 hover:text-slate-700 dark:hover:text-slate-300'
                                   }`}
                                 >
@@ -9862,13 +9878,13 @@ function App() {
                                     isCurrent
                                       ? 'bg-white/25 dark:bg-slate-800/25'
                                       : isPassed
-                                      ? 'bg-indigo-200/60 dark:bg-indigo-800/60'
+                                      ? 'bg-indigo-200/60 dark:bg-slate-600/60'
                                       : 'bg-slate-200/60 dark:bg-slate-600/60'
                                   }`}>
                                     {isCurrent ? (
                                       <span className="w-2 h-2 bg-white dark:bg-slate-800 rounded-full animate-pulse" />
                                     ) : isPassed ? (
-                                      <svg className="w-3 h-3 text-indigo-600 dark:text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                      <svg className="w-3 h-3 text-indigo-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                       </svg>
                                     ) : (
@@ -9876,7 +9892,7 @@ function App() {
                                     )}
                                   </div>
                                   <span className={`text-[10px] font-bold text-center leading-tight ${
-                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
+                                    isCurrent ? 'text-white' : isPassed ? 'text-indigo-700 dark:text-slate-300' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                                   }`}>
                                     {col.name}
                                   </span>
@@ -10118,7 +10134,7 @@ function App() {
                                     type="checkbox" 
                                     checked={isDone}
                                     onChange={() => toggleTaskStatus(task)}
-                                    className="w-3.5 h-3.5 rounded border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 cursor-pointer mt-0.5"
+                                    className="w-3.5 h-3.5 rounded border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 cursor-pointer mt-0.5"
                                   />
                                   <div>
                                     <p className={`text-xs font-semibold ${isDone ? 'line-through text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
@@ -10405,7 +10421,7 @@ function App() {
                 {/* Lado Esquerdo: Timeline sempre visível */}
                 <div className="drawer-split-sidebar flex flex-col p-4">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-200/80 dark:border-slate-700/80 mb-4 flex-shrink-0">
-                    <h4 className="text-xs font-black uppercase tracking-wider text-indigo-400">Histórico de Versões</h4>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-indigo-400 dark:text-slate-300">Histórico de Versões</h4>
                   </div>
                   <div className="flex-1 overflow-y-auto min-h-0 pr-1">
                     {renderTimeline()}

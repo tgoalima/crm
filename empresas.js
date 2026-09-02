@@ -1480,7 +1480,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Ganho</span>
                   <IconDollar size={13} className="text-emerald-500 dark:text-emerald-400" />
                 </div>
-                <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight tabular-nums">
+                <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-slate-100 tracking-tight tabular-nums">
                   {kpis.qtdGanho > 0 ? formatCurrency(kpis.ganho) : '—'}
                 </p>
                 <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
@@ -1494,7 +1494,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pipeline</span>
                   <IconZap size={13} className="text-indigo-500 dark:text-indigo-400" />
                 </div>
-                <p className="text-sm sm:text-base font-black text-indigo-600 dark:text-indigo-400 tracking-tight tabular-nums">
+                <p className="text-sm sm:text-base font-black text-indigo-600 dark:text-slate-100 tracking-tight tabular-nums">
                   {kpis.qtdAberto > 0 ? formatCurrency(kpis.pipeline) : '—'}
                 </p>
                 <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
@@ -1522,7 +1522,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                   <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Conversão</span>
                   <IconTrophy size={13} className={kpis.taxa >= 60 ? 'text-emerald-500 dark:text-emerald-400' : kpis.taxa > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'} />
                 </div>
-                <p className={`text-sm sm:text-base font-black tracking-tight tabular-nums ${kpis.taxa >= 60 ? 'text-emerald-600 dark:text-emerald-400' : kpis.taxa > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                <p className={`text-sm sm:text-base font-black tracking-tight tabular-nums ${kpis.taxa >= 60 ? 'text-emerald-600 dark:text-slate-100' : kpis.taxa > 0 ? 'text-amber-600 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>
                   {kpis.total > 0 ? `${kpis.taxa}%` : '—'}
                 </p>
                 <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-1">
@@ -1535,7 +1535,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
           {/* ABAS */}
           <div className="flex border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 gap-1">
             {[['visao_geral','Visão Geral'],['contatos',`Contatos (${contatos.length})`],['oportunidades',`Oportunidades (${negocios.length})`]].map(([id,label]) => (
-              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-50/60 dark:bg-indigo-950/50' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'}`}>{label}</button>
+              <button key={id} onClick={() => setAba(id)} className={`px-4 py-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${aba===id ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'}`}>{label}</button>
             ))}
           </div>
         </div>
@@ -1957,8 +1957,8 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [] }) => {
                   {pipelineValor > 0 && (
                     <div className="bg-indigo-50/60 dark:bg-indigo-950/80 border border-indigo-100 dark:border-indigo-800/60 border-l-4 border-l-indigo-500 rounded-xl p-2.5 mb-3 flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] font-extrabold text-slate-500 dark:text-indigo-400 uppercase tracking-wider block">Pipeline em Aberto</span>
-                        <span className="text-base font-black text-indigo-700 dark:text-indigo-300 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
+                        <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Pipeline em Aberto</span>
+                        <span className="text-base font-black text-indigo-700 dark:text-slate-100 tracking-tight block mt-0.5">{formatCurrency(pipelineValor)}</span>
                       </div>
                       <div className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900 border border-indigo-200/80 dark:border-indigo-700 rounded-lg text-indigo-700 dark:text-indigo-200 font-extrabold text-[10px] uppercase tracking-wide shrink-0 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
