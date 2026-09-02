@@ -2374,6 +2374,12 @@ function App() {
   };
 
   const handleResponsavelChange = async (taskId, responsavelNome, responsavelId = null) => {
+    // Responsável anterior (pra poder "remover" no ClickUp — a API de lá é
+    // incremental, add/rem, não substitui a lista de assignees de uma vez)
+    // — precisa capturar ANTES da atualização otimista abaixo sobrescrever.
+    const tarefaAtual = kanbanTasks.find(t => t.id === taskId);
+    const responsavelIdAnterior = tarefaAtual?.responsavel_clickup_id ? String(tarefaAtual.responsavel_clickup_id) : null;
+
     // 1. Interface Otimista: Mudar na tela imediatamente preservando o valor estimado
     setKanbanTasks(prevTasks => prevTasks.map(t => t.id === taskId ? { ...t, responsavel_negocio: responsavelNome, valor_estimado: t.valor_estimado } : t));
     if (selectedTask && selectedTask.id === taskId) {
@@ -2382,18 +2388,31 @@ function App() {
 
     const cleanId = String(taskId).replace('#', '').trim();
 
-    // 2. Sincronização com ClickUp via Assignees nativos
-    try {
-      if (responsavelId) {
-        const res = await fetch(`/clickup-api/task/${taskId}/assignee`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
-          body: JSON.stringify({ assignees: [responsavelId] })
-        });
-        if (!res.ok) throw new Error("Erro ClickUp Assignee");
+    // 2. Sincronização com ClickUp via Assignees nativos — antes chamava
+    // POST /task/{id}/assignee com {assignees: [id]}, que não é um endpoint
+    // real da API do ClickUp (a atualização de assignee em tarefa existente
+    // é PUT /task/{id} com {assignees: {add, rem}} — só CRIAÇÃO de tarefa
+    // aceita um array direto, ver sync-negocio-clickup). Isso fazia a
+    // chamada falhar (404) silenciosamente — só um console.warn, nada
+    // avisava o usuário — e o Supabase/CRM ficavam atualizados enquanto o
+    // ClickUp continuava com o responsável antigo (ou sem nenhum).
+    const novoIdStr = responsavelId ? String(responsavelId) : null;
+    if (novoIdStr !== responsavelIdAnterior) {
+      try {
+        const add = novoIdStr ? [Number(novoIdStr)] : [];
+        const rem = (responsavelIdAnterior && responsavelIdAnterior !== novoIdStr) ? [Number(responsavelIdAnterior)] : [];
+        if (add.length > 0 || rem.length > 0) {
+          const res = await fetch(`/clickup-api/task/${taskId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
+            body: JSON.stringify({ assignees: { add, rem } })
+          });
+          if (!res.ok) throw new Error(`ClickUp respondeu ${res.status}`);
+        }
+      } catch (e) {
+        console.warn("Erro ao atualizar responsável no ClickUp:", e);
+        showToast('Responsável atualizado no CRM, mas falhou ao sincronizar com o ClickUp. Confira lá manualmente.', 'warning');
       }
-    } catch (e) {
-      console.warn("Erro ao atualizar responsável no ClickUp:", e);
     }
 
     // 3. Atualizar no Supabase
