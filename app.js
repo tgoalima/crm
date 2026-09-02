@@ -7177,7 +7177,7 @@ function App() {
                 </svg>
               </button>
             ) : (
-              <div className="flex items-center bg-slate-100/50 dark:bg-slate-700/50 border border-indigo-400 dark:border-indigo-500 rounded-lg px-3 py-1 h-9 w-72">
+              <div className="flex items-center bg-slate-100/50 dark:bg-slate-700/50 border border-indigo-400 dark:border-indigo-500 rounded-lg px-3 py-1 h-9 w-96">
                 <svg className="w-4 h-4 text-indigo-500 mr-2 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
@@ -7269,7 +7269,11 @@ function App() {
                           {negocios.map(n => (
                             <button key={n.id} onMouseDown={(e) => { e.preventDefault(); handleGlobalSearchSelect('negocio', n); }} className="w-full text-left px-5 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer flex items-start gap-3">
                               <span className="mt-0.5 w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-300 flex items-center justify-center shrink-0">
-                                <IconBriefcase size={14} />
+                                {/* Número oficial de proposta = já tem proposta associada
+                                    (ícone de documento); sem número = só negócio, ainda sem
+                                    proposta formal (maleta) — mesma distinção que aparece na
+                                    linha secundária logo abaixo, só que visual. */}
+                                {n.numero_proposta_oficial ? <IconDocument size={14} /> : <IconBriefcase size={14} />}
                               </span>
                               <span className="min-w-0 flex-1">
                                 <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{n.nome}</p>
