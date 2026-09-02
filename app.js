@@ -1908,6 +1908,8 @@ function App() {
   const [newProduct, setNewProduct] = useState({ nome: '', fabricante: '', custo_referencia: '' });
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [infoMsg, setInfoMsg] = useState('');
+  const [warningMsg, setWarningMsg] = useState('');
   const [showNovaOportunidadeKanban, setShowNovaOportunidadeKanban] = useState(false);
   const [contasParaBusca, setContasParaBusca] = useState([]);
 
@@ -4721,10 +4723,20 @@ function App() {
     showToast('Configurações salvas com sucesso!', 'success');
   };
 
+  // Antes só reconhecia 'success' — qualquer outro tipo (inclusive os
+  // 'info'/'warning' já usados em vários lugares, ex.: "Negócio Congelado")
+  // caía direto no branch de erro (toast vermelho), fazendo mensagens
+  // neutras/informativas aparecerem como se fosse uma falha.
   const showToast = (msg, type = 'success') => {
     if (type === 'success') {
       setSuccessMsg(msg);
       setTimeout(() => setSuccessMsg(''), 4000);
+    } else if (type === 'info') {
+      setInfoMsg(msg);
+      setTimeout(() => setInfoMsg(''), 4000);
+    } else if (type === 'warning') {
+      setWarningMsg(msg);
+      setTimeout(() => setWarningMsg(''), 4000);
     } else {
       setErrorMsg(msg);
       setTimeout(() => setErrorMsg(''), 4000);
@@ -7199,6 +7211,24 @@ function App() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <span className="text-sm font-medium">{successMsg}</span>
+        </div>
+      )}
+
+      {infoMsg && (
+        <div className="fixed top-20 right-6 z-[9999] bg-sky-950/90 border border-sky-500/30 text-sky-200 px-4 py-3 rounded-xl flex items-center space-x-2 shadow-2xl backdrop-blur-md">
+          <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-sm font-medium">{infoMsg}</span>
+        </div>
+      )}
+
+      {warningMsg && (
+        <div className="fixed top-20 right-6 z-[9999] bg-amber-950/90 border border-amber-500/30 text-amber-200 px-4 py-3 rounded-xl flex items-center space-x-2 shadow-2xl backdrop-blur-md">
+          <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="text-sm font-medium">{warningMsg}</span>
         </div>
       )}
 
