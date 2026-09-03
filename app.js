@@ -169,6 +169,63 @@ const calcularValidadeProposta = (prop, dealStatus = null) => {
   }
 };
 
+// ─────────────────────────────────────────────
+// TAREFAS COMERCIAIS — helpers de apresentação
+// ─────────────────────────────────────────────
+// Vivem no escopo de módulo (e não dentro do bloco da aba de Tarefas, como
+// antes) porque são puros e agora servem a dois consumidores: os cards da
+// lista e o modal de resumo da tarefa.
+
+// Tipo de tarefa é texto livre, editável pelo usuário (Configurações →
+// Tipos de Tarefa) — sem essa normalização, uma variação como "Follow Up"
+// (sem hífen) não bate com a chave 'Follow-up' e cai sempre no fallback
+// genérico (ícone/cor errados), mesmo sendo claramente o mesmo tipo.
+// Compara ignorando espaço/hífen e maiúsculas.
+const normalizeTypeKey = (s) => (s || '').toLowerCase().replace(/[\s-]+/g, '');
+
+// getTaskTypeConfig é uma FUNÇÃO (e não um objeto pré-computado) de
+// propósito: os componentes de ícone vêm de empresas.js, outro <script>.
+// Resolver na hora da chamada — sempre em render, muito depois dos dois
+// arquivos carregarem — elimina qualquer dependência de ordem de avaliação
+// entre eles.
+const getTaskTypeConfig = (tipo) => {
+  const TASK_TYPE_CONFIG = {
+    'Ligação':   { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',   text: 'text-indigo-700',   border: 'border-indigo-200', Icon: (typeof IconPhone !== 'undefined' ? IconPhone : null) },
+    'Reunião':   { dot: 'bg-emerald-500', bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200', Icon: (typeof IconUsers !== 'undefined' ? IconUsers : null) },
+    'E-mail':    { dot: 'bg-amber-500',   bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',   Icon: (typeof IconMail !== 'undefined' ? IconMail : null) },
+    'Follow-up': { dot: 'bg-rose-500',    bg: 'bg-rose-50',     text: 'text-rose-700',     border: 'border-rose-200',    Icon: (typeof IconRefresh !== 'undefined' ? IconRefresh : null) },
+    'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  Icon: (typeof IconMapPin !== 'undefined' ? IconMapPin : null) },
+    'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) },
+  };
+  const key = normalizeTypeKey(tipo);
+  const match = Object.entries(TASK_TYPE_CONFIG).find(([k]) => normalizeTypeKey(k) === key);
+  if (match) return match[1];
+  return { dot: 'bg-slate-400', bg: 'bg-slate-50 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
+};
+
+const TASK_URGENCY_CONFIG = {
+  overdue: { bg: 'bg-rose-100',   text: 'text-rose-700',   ring: 'ring-rose-200' },
+  today:   { bg: 'bg-amber-100',  text: 'text-amber-700',  ring: 'ring-amber-200' },
+  soon:    { bg: 'bg-sky-50',     text: 'text-sky-700',    ring: 'ring-sky-200' },
+  normal:  { bg: 'bg-slate-100 dark:bg-slate-700',  text: 'text-slate-500 dark:text-slate-400',  ring: 'ring-slate-200 dark:ring-slate-700' },
+};
+
+// `now` entra por parâmetro (antes era capturado do escopo do bloco da aba):
+// a lista passa o mesmo `now` de todos os cards, mantendo os rótulos
+// coerentes entre si, e o modal usa o instante da abertura.
+const formatTaskDate = (dateStr, now = new Date()) => {
+  const d = new Date(dateStr);
+  const dStr = d.toDateString();
+  const todayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toDateString();
+  const diffMs = d - now;
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  if (dStr === todayStr) return { label: 'Hoje ' + d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}), urgent: 'today' };
+  if (diffDays < 0) return { label: `Venceu há ${Math.abs(diffDays)}d`, urgent: 'overdue' };
+  if (diffDays === 1) return { label: 'Amanhã', urgent: 'soon' };
+  if (diffDays <= 3) return { label: `Em ${diffDays} dias`, urgent: 'soon' };
+  return { label: d.toLocaleDateString('pt-BR', {day: '2-digit', month: 'short'}), urgent: 'normal' };
+};
+
 // Utilitário seguro para localStorage blindado contra QuotaExceededError do Safari
 const safeStorage = {
   getItem: (key) => {
@@ -198,6 +255,52 @@ const safeStorage = {
   }
 };
 
+// ─────────────────────────────────────────────
+// TEMA (claro/escuro) — escopado por usuário
+// ─────────────────────────────────────────────
+// A preferência mora só no navegador (nunca no banco), mas a chave é por
+// usuário: dois vendedores no mesmo navegador têm temas independentes, e
+// trocar de conta não herda o tema de quem estava logado antes.
+// O id usado é o clickup_user_id (userProfile.id) — o mesmo identificador
+// canônico de autoria do sistema (criado_por_user_id) e o único disponível
+// de forma SÍNCRONA no boot (via crm_user_profile no localStorage), o que
+// permite ao script anti-flash do index.html resolver o tema certo antes do
+// primeiro paint. O id da sessão do Supabase só resolve async e traria de
+// volta o flash de tema errado.
+const themeKeyFor = (uid) => `crm_theme:${uid || 'anon'}`;
+
+const readProfileIdFromStorage = () => {
+  try {
+    const raw = safeStorage.getItem('crm_user_profile');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.id ? String(parsed.id) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const readStoredTheme = (uid) => {
+  const v = safeStorage.getItem(themeKeyFor(uid));
+  return (v === 'dark' || v === 'light') ? v : null;
+};
+
+const getSystemTheme = () =>
+  (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+
+// Migração one-shot da chave global antiga (crm_theme) para a chave escopada,
+// preservando a preferência de quem já usava o CRM. O removeItem é a parte
+// essencial: se a chave global sobreviver, o index.html continua caindo nela
+// como fallback e o próximo usuário a logar nesse navegador herda o tema do
+// anterior — exatamente o bug que essa mudança resolve.
+(() => {
+  const legacy = safeStorage.getItem('crm_theme');
+  if (legacy === 'dark' || legacy === 'light') {
+    safeStorage.setItem(themeKeyFor(readProfileIdFromStorage()), legacy);
+    safeStorage.removeItem('crm_theme');
+  }
+})();
+
 // Configuração padrão
 const getInitialConfig = () => {
   return {
@@ -210,6 +313,35 @@ const getSupabaseHeaders = () => {
   const token = safeStorage.getItem('crm_user_clickup_token');
   return token ? { 'Authorization': token } : {};
 };
+
+// Registra uma atividade no histórico de um negócio. Sem estado de propósito:
+// além do formulário do drawer (handleCreateAtividade), o fluxo de "concluir
+// tarefa registrando atividade" chama isso de fora do negócio, passando o id
+// que veio da própria tarefa. Lança em caso de erro — quem chama decide como
+// avisar o usuário.
+const createAtividade = async ({ clickupNegocioId, texto }) => {
+  const idClean = String(clickupNegocioId || '').replace('#', '').trim();
+  if (!idClean) throw new Error('Negócio não identificado para registrar a atividade.');
+  const conteudo = String(texto || '').trim();
+  if (!conteudo) throw new Error('Escreva o texto da atividade.');
+
+  const res = await fetch('/api/atividades', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
+    body: JSON.stringify({ clickup_negocio_id: idClean, texto: conteudo })
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Erro ao registrar atividade.');
+  }
+  return res.json().catch(() => ({}));
+};
+
+// Texto da atividade gerada ao concluir uma tarefa: leva o tipo e o título
+// junto, pra dar pra rastrear de qual tarefa veio o registro — tanto aqui
+// quanto no comentário espelhado no ClickUp.
+const buildAtividadeTextoDaTarefa = (task, texto) =>
+  `✅ [${task?.tipo || 'Tarefa'}] ${task?.titulo || 'Tarefa'} — ${String(texto || '').trim()}`;
 
 // Sincroniza o token pessoal e perfil do ClickUp de forma segura (criptografado com AES-GCM)
 // com as Edge Functions do Supabase para que as ações em background possam agir em nome do vendedor.
@@ -1591,21 +1723,8 @@ function App() {
     }
   }, [activeTab]);
 
-  // Tema (claro/escuro) — mesma chave (crm_theme) que o script anti-flash
-  // no <head> do index.html já lê antes do 1º paint, pra não haver flash
-  // de tema errado. Preferência do sistema só serve de valor inicial na
-  // 1ª visita (sem nada salvo ainda); depois disso o botão manual manda.
-  const getInitialTheme = () => {
-    const stored = safeStorage.getItem('crm_theme');
-    if (stored === 'dark' || stored === 'light') return stored;
-    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-  };
-  const [theme, setTheme] = useState(getInitialTheme);
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    safeStorage.setItem('crm_theme', theme);
-  }, [theme]);
-  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+  // (O bloco de tema foi movido para logo depois de `userProfile` — ele
+  // precisa do id do usuário para escopar a chave de storage.)
 
   // Listener para sincronizar navegação por hash (Avançar/Voltar do navegador)
   useEffect(() => {
@@ -1653,6 +1772,16 @@ function App() {
   const [tasksCustomEndDate, setTasksCustomEndDate] = useState('');
   const [tasksShowCompleted, setTasksShowCompleted] = useState(false);
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
+  // Modal de RESUMO da tarefa (read-only, aberto ao clicar no card).
+  // Guarda o ID, nunca o objeto: toggleTaskStatus recria os objetos de
+  // commercialTasks a cada mudança, então um snapshot congelado continuaria
+  // mostrando "pendente" logo depois de concluir e travaria o botão de
+  // reabrir. Com o id, a tarefa é derivada do estado vivo — e some sozinha
+  // do modal se for excluída.
+  const [taskDetailId, setTaskDetailId] = useState(null);
+  const [taskDetailShowAtividade, setTaskDetailShowAtividade] = useState(false);
+  const [taskDetailAtividadeTexto, setTaskDetailAtividadeTexto] = useState('');
+  const [taskDetailSaving, setTaskDetailSaving] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskType, setNewTaskType] = useState('Ligação');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
@@ -1700,6 +1829,42 @@ function App() {
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [inputToken, setInputToken] = useState('');
   const [validatingToken, setValidatingToken] = useState(false);
+
+  // Tema (claro/escuro) — a chave de storage é escopada pelo usuário
+  // (ver themeKeyFor/readStoredTheme no topo do arquivo), e o script
+  // anti-flash no <head> do index.html resolve a mesma chave antes do 1º
+  // paint pra não piscar tema errado. Preferência do sistema só serve de
+  // valor inicial pra quem nunca escolheu; depois disso o botão manda.
+  // Precisa ficar DEPOIS de `userProfile` — é dele que sai o id do usuário.
+  const getInitialTheme = () => readStoredTheme(readProfileIdFromStorage()) || getSystemTheme();
+  const [theme, setTheme] = useState(getInitialTheme);
+  const prevThemeUidRef = useRef(userProfile?.id ? String(userProfile.id) : null);
+
+  // Um único efeito de propósito: separar "persistir o tema" de "adotar o
+  // tema do usuário que acabou de logar" em dois efeitos cria uma corrida —
+  // o de persistir roda primeiro e grava o tema do usuário ANTERIOR na chave
+  // do novo, antes do outro conseguir ler o que estava salvo.
+  useEffect(() => {
+    const uid = userProfile?.id ? String(userProfile.id) : null;
+
+    if (prevThemeUidRef.current !== uid) {
+      // Trocou de usuário (login, logout ou troca de conta).
+      prevThemeUidRef.current = uid;
+      // Ao sair (uid null) preserva o tema que está na tela, só reescrevendo
+      // sob a chave 'anon' — assim o logout não pisca. Ao entrar, adota o
+      // tema salvo daquela pessoa, ou o do sistema se ela nunca escolheu.
+      const next = uid ? (readStoredTheme(uid) || getSystemTheme()) : theme;
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      safeStorage.setItem(themeKeyFor(uid), next);
+      if (next !== theme) setTheme(next);
+      return;
+    }
+
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    safeStorage.setItem(themeKeyFor(uid), theme);
+  }, [theme, userProfile?.id]);
+
+  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
   const validateAndSaveToken = async (tokenToTest) => {
     const cleanToken = tokenToTest ? tokenToTest.trim() : '';
@@ -1968,6 +2133,12 @@ function App() {
           setProposalSearchResults([]);
           return;
         }
+        // Depois do modal de edição: o de resumo é o mais superficial dos
+        // dois, então só fecha quando a edição não estiver por cima.
+        if (taskDetailId) {
+          closeTaskDetail();
+          return;
+        }
         if (openMenuVersionId !== null) {
           setOpenMenuVersionId(null);
           return;
@@ -1993,7 +2164,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showSettingsModal, showNewTaskModal, openMenuVersionId, showCloseModal, showProductModal, showDrawer, drawerTab]);
+  }, [showSettingsModal, showNewTaskModal, taskDetailId, openMenuVersionId, showCloseModal, showProductModal, showDrawer, drawerTab]);
 
   // Listener para fechar o menu dos 3 pontinhos ao rolar a página ou container
   useEffect(() => {
@@ -3274,26 +3445,13 @@ function App() {
     if (!novaAtividade.trim() || !clickupTaskId) return;
     setSavingAtividade(true);
     try {
-      const idClean = String(clickupTaskId).replace('#', '');
-      const res = await fetch('/api/atividades', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
-        body: JSON.stringify({
-          clickup_negocio_id: idClean,
-          texto: novaAtividade.trim()
-        })
-      });
-      if (res.ok) {
-        showToast('Atividade registrada com sucesso!', 'success');
-        setNovaAtividade('');
-        fetchAtividades(clickupTaskId);
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        showToast(errData.error || 'Erro ao registrar atividade.', 'error');
-      }
+      await createAtividade({ clickupNegocioId: clickupTaskId, texto: novaAtividade });
+      showToast('Atividade registrada com sucesso!', 'success');
+      setNovaAtividade('');
+      fetchAtividades(clickupTaskId);
     } catch (err) {
       console.error('[ATIVIDADES] Erro ao criar atividade:', err);
-      showToast('Erro ao registrar atividade.', 'error');
+      showToast(err?.message || 'Erro ao registrar atividade.', 'error');
     } finally {
       setSavingAtividade(false);
     }
@@ -3784,6 +3942,109 @@ function App() {
     }
     
     setShowNewTaskModal(true);
+  };
+
+  // Nome do negócio de uma tarefa. Ficava dentro do bloco da aba de Tarefas;
+  // subiu pro corpo do componente porque o modal de resumo também precisa.
+  // Depende de `propostas`/`kanbanTasks`, então não pode ir pro escopo de
+  // módulo junto dos helpers puros.
+  const getTaskNegocio = (task) => {
+    const localProps = (typeof propostas !== 'undefined' && Array.isArray(propostas) ? propostas : []);
+    let matchedProp = localProps.find(p =>
+      (task.proposta_id && p.id === task.proposta_id) ||
+      (task.clickup_negocio_id && p.clickup_negocio_id === task.clickup_negocio_id)
+    );
+    if (matchedProp) return matchedProp.nome_projeto || matchedProp.projeto || 'Projeto';
+    const activeKanbanCards = (typeof kanbanTasks !== 'undefined' ? kanbanTasks : null) || [];
+    const matchedKanbanCard = Array.isArray(activeKanbanCards) && activeKanbanCards.find(c =>
+      c.id === task.clickup_negocio_id || c.clickup_id === task.clickup_negocio_id
+    );
+    if (matchedKanbanCard) return matchedKanbanCard.name || matchedKanbanCard.nome || 'Projeto';
+    if (task.nome_projeto && task.nome_projeto !== 'Sem Proposta') return task.nome_projeto;
+    const propObj = Array.isArray(task.propostas) ? task.propostas[0] : task.propostas;
+    return propObj?.nome_projeto || task.proposta?.nome_projeto || 'Sem Projeto';
+  };
+
+  // Id do negócio no ClickUp a partir da tarefa — é o destino da atividade
+  // registrada ao concluir. O fallback via proposta_id cobre tarefas antigas
+  // que só têm o vínculo com a proposta.
+  const getTaskNegocioId = (task) => {
+    if (!task) return null;
+    if (task.clickup_negocio_id) return task.clickup_negocio_id;
+    const localProps = Array.isArray(propostas) ? propostas : [];
+    const matchedProp = localProps.find(p => task.proposta_id && p.id === task.proposta_id);
+    return matchedProp?.clickup_negocio_id || null;
+  };
+
+  const openTaskDetail = (task) => {
+    if (!task) return;
+    setTaskDetailId(task.id);
+    setTaskDetailShowAtividade(false);
+    setTaskDetailAtividadeTexto('');
+    setTaskDetailSaving(false);
+  };
+
+  const closeTaskDetail = () => {
+    setTaskDetailId(null);
+    setTaskDetailShowAtividade(false);
+    setTaskDetailAtividadeTexto('');
+    setTaskDetailSaving(false);
+  };
+
+  // Conclui (ou reabre) direto, sem registrar nada — mesmo caminho do
+  // checkbox da lista.
+  const handleConcluirTarefa = async (task) => {
+    if (!task) return;
+    await toggleTaskStatus(task);
+    closeTaskDetail();
+  };
+
+  // Conclui registrando o resultado no histórico do negócio vinculado, sem
+  // precisar abrir o negócio.
+  //
+  // A ordem importa: a atividade vai PRIMEIRO. Se ela falhar, nada mudou —
+  // o modal continua aberto com o erro e dá pra tentar de novo. No inverso,
+  // a tarefa ficaria concluída sem registro e "refazer" inverteria o status,
+  // porque toggleTaskStatus alterna em vez de setar.
+  const handleConcluirTarefaComAtividade = async (task) => {
+    if (!task) return;
+    const texto = taskDetailAtividadeTexto.trim();
+    if (!texto) return;
+
+    const negocioId = getTaskNegocioId(task);
+    if (!negocioId) {
+      showToast('Esta tarefa não está vinculada a um negócio — edite a tarefa para vincular.', 'error');
+      return;
+    }
+
+    setTaskDetailSaving(true);
+    try {
+      await createAtividade({
+        clickupNegocioId: negocioId,
+        texto: buildAtividadeTextoDaTarefa(task, texto)
+      });
+
+      // Se o negócio já estiver aberto no drawer, atualiza a lista de
+      // atividades pra não ficar desatualizada atrás do modal.
+      const drawerId = String(clickupTaskId || '').replace('#', '').trim();
+      if (showDrawer && drawerId && drawerId === String(negocioId).replace('#', '').trim()) {
+        fetchAtividades(clickupTaskId);
+      }
+
+      // Atividade gravada: se o status falhar agora, o próprio
+      // toggleTaskStatus reverte o otimista e avisa — sobra só a atividade
+      // registrada, que é reparável.
+      if (task.status !== 'concluida') {
+        await toggleTaskStatus(task);
+      }
+      showToast('Tarefa concluída e atividade registrada no negócio!', 'success');
+      closeTaskDetail();
+    } catch (err) {
+      console.error('[TAREFAS] Erro ao concluir com atividade:', err);
+      showToast(err?.message || 'Erro ao registrar atividade.', 'error');
+    } finally {
+      setTaskDetailSaving(false);
+    }
   };
 
   const handleEditTaskClick = (task) => {
@@ -8494,71 +8755,33 @@ function App() {
           const pendingItems = filtered.filter(t => t.status !== 'concluida');
           const doneItems = filtered.filter(t => t.status === 'concluida');
 
-          const getTaskNegocio = (task) => {
-            const localProps = (typeof propostas !== 'undefined' && Array.isArray(propostas) ? propostas : []);
-            let matchedProp = localProps.find(p =>
-              (task.proposta_id && p.id === task.proposta_id) ||
-              (task.clickup_negocio_id && p.clickup_negocio_id === task.clickup_negocio_id)
-            );
-            if (matchedProp) return matchedProp.nome_projeto || matchedProp.projeto || 'Projeto';
-            const activeKanbanCards = (typeof kanbanTasks !== 'undefined' ? kanbanTasks : null) || [];
-            const matchedKanbanCard = Array.isArray(activeKanbanCards) && activeKanbanCards.find(c =>
-              c.id === task.clickup_negocio_id || c.clickup_id === task.clickup_negocio_id
-            );
-            if (matchedKanbanCard) return matchedKanbanCard.name || matchedKanbanCard.nome || 'Projeto';
-            if (task.nome_projeto && task.nome_projeto !== 'Sem Proposta') return task.nome_projeto;
-            const propObj = Array.isArray(task.propostas) ? task.propostas[0] : task.propostas;
-            return propObj?.nome_projeto || task.proposta?.nome_projeto || 'Sem Projeto';
-          };
+          // getTaskNegocio agora vive no corpo do componente (depende de
+          // `propostas`/`kanbanTasks`) — compartilhado com o modal de resumo.
 
-          const typeConfig = {
-            'Ligação':   { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',   text: 'text-indigo-700',   border: 'border-indigo-200', Icon: (typeof IconPhone !== 'undefined' ? IconPhone : null) },
-            'Reunião':   { dot: 'bg-emerald-500', bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200', Icon: (typeof IconUsers !== 'undefined' ? IconUsers : null) },
-            'E-mail':    { dot: 'bg-amber-500',   bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',   Icon: (typeof IconMail !== 'undefined' ? IconMail : null) },
-            'Follow-up': { dot: 'bg-rose-500',    bg: 'bg-rose-50',     text: 'text-rose-700',     border: 'border-rose-200',    Icon: (typeof IconRefresh !== 'undefined' ? IconRefresh : null) },
-            'Visita':    { dot: 'bg-violet-500',  bg: 'bg-violet-50',   text: 'text-violet-700',   border: 'border-violet-200',  Icon: (typeof IconMapPin !== 'undefined' ? IconMapPin : null) },
-            'Proposta':  { dot: 'bg-sky-500',     bg: 'bg-sky-50',      text: 'text-sky-700',      border: 'border-sky-200',     Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) },
-          };
-          // Tipo de tarefa é texto livre, editável pelo usuário (Configurações →
-          // Tipos de Tarefa) — sem essa normalização, uma variação como "Follow Up"
-          // (sem hífen) não bate com a chave 'Follow-up' acima e cai sempre no
-          // fallback genérico (ícone/cor errados), mesmo sendo claramente o mesmo
-          // tipo. Compara ignorando espaço/hífen e maiúsculas.
-          const normalizeTypeKey = (s) => (s || '').toLowerCase().replace(/[\s-]+/g, '');
-          const typeConfigByNormalizedKey = Object.fromEntries(
-            Object.entries(typeConfig).map(([k, v]) => [normalizeTypeKey(k), v])
-          );
-
-          const formatTaskDate = (dateStr) => {
-            const d = new Date(dateStr);
-            const dStr = d.toDateString();
-            const diffMs = d - now;
-            const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-            if (dStr === todayStr) return { label: 'Hoje ' + d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}), urgent: 'today' };
-            if (diffDays < 0) return { label: `Venceu há ${Math.abs(diffDays)}d`, urgent: 'overdue' };
-            if (diffDays === 1) return { label: 'Amanhã', urgent: 'soon' };
-            if (diffDays <= 3) return { label: `Em ${diffDays} dias`, urgent: 'soon' };
-            return { label: d.toLocaleDateString('pt-BR', {day: '2-digit', month: 'short'}), urgent: 'normal' };
-          };
+          // getTaskTypeConfig, TASK_URGENCY_CONFIG e formatTaskDate agora vivem
+          // no escopo de módulo (topo do arquivo) — são compartilhados com o
+          // modal de resumo da tarefa, que fica fora deste bloco.
 
           const TaskCard = ({ task }) => {
             const isDone = task.status === 'concluida';
-            const tc = typeConfigByNormalizedKey[normalizeTypeKey(task.tipo)] || { dot: 'bg-slate-400', bg: 'bg-slate-50 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700', Icon: (typeof IconDocument !== 'undefined' ? IconDocument : null) };
+            const tc = getTaskTypeConfig(task.tipo);
             const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
             const assigneeName = matchedUser ? matchedUser.nome : '—';
             const negocio = getTaskNegocio(task);
-            const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento);
-
-            const urgencyConfig = {
-              overdue: { bg: 'bg-rose-100',   text: 'text-rose-700',   ring: 'ring-rose-200' },
-              today:   { bg: 'bg-amber-100',  text: 'text-amber-700',  ring: 'ring-amber-200' },
-              soon:    { bg: 'bg-sky-50',     text: 'text-sky-700',    ring: 'ring-sky-200' },
-              normal:  { bg: 'bg-slate-100 dark:bg-slate-700',  text: 'text-slate-500 dark:text-slate-400',  ring: 'ring-slate-200 dark:ring-slate-700' },
-            };
-            const uc = urgencyConfig[urgent] || urgencyConfig.normal;
+            // `now` explícito: mantém todos os cards da lista referenciados ao
+            // mesmo instante, como era quando a função fechava sobre ele.
+            const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento, now);
+            const uc = TASK_URGENCY_CONFIG[urgent] || TASK_URGENCY_CONFIG.normal;
 
             return (
-              <div className={`group relative bg-white dark:bg-slate-800 rounded-xl border transition-all duration-200 hover:shadow-md ${isDone ? 'opacity-60 border-slate-200 dark:border-slate-700' : 'border-slate-200/80 dark:border-slate-700/80 hover:border-indigo-200/80'}`}>
+              <div
+                onClick={() => openTaskDetail(task)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTaskDetail(task); } }}
+                role="button"
+                tabIndex={0}
+                title="Ver detalhes da tarefa"
+                className={`group relative bg-white dark:bg-slate-800 rounded-xl border transition-all duration-200 hover:shadow-md cursor-pointer ${isDone ? 'opacity-60 border-slate-200 dark:border-slate-700' : 'border-slate-200/80 dark:border-slate-700/80 hover:border-indigo-200/80'}`}
+              >
                 {/* Barra lateral de urgência */}
                 {!isDone && (
                   <div className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full ${
@@ -8567,8 +8790,10 @@ function App() {
                 )}
 
                 <div className="flex items-center gap-3 p-4 pl-5">
-                  {/* Checkbox */}
-                  <div className="flex-shrink-0">
+                  {/* Checkbox — stopPropagation no wrapper (e não no input) pra
+                      não interferir na ordem de eventos do onChange: preserva o
+                      atalho de concluir direto sem abrir o modal de detalhes. */}
+                  <div className="flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={isDone}
@@ -8630,8 +8855,10 @@ function App() {
                           )}
                         </div>
 
-                        {/* Ações */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Ações — stopPropagation no container cobre editar e
+                            excluir de uma vez, pra não abrir o modal de
+                            detalhes junto. */}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => handleEditTaskClick(task)}
                             className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
@@ -8747,14 +8974,14 @@ function App() {
                       {tasksShowCompleted ? 'Ocultar Concluídas' : 'Ver Concluídas'}
                     </button>
 
-                    {/* Nova Tarefa */}
+                    {/* Nova Tarefa — usa handleNewTaskClick (e não um onClick
+                        inline) porque só ele faz setEditingTask(null) e limpa
+                        título/tipo/data/responsável. Sem isso, abrir "Nova
+                        Tarefa" logo depois de cancelar uma edição reabria o
+                        modal em modo edição e o submit virava PUT,
+                        sobrescrevendo a tarefa editada por engano. */}
                     <button
-                      onClick={() => {
-                        setSelectedProposalForTask(null);
-                        setSearchProposalQuery('');
-                        setProposalSearchResults([]);
-                        setShowNewTaskModal(true);
-                      }}
+                      onClick={handleNewTaskClick}
                       className="px-4 py-1.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-bold transition-all shadow-sm shadow-indigo-600/20 cursor-pointer flex items-center gap-1.5"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -8805,7 +9032,7 @@ function App() {
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Crie uma nova tarefa para começar a registrar atividades comerciais.</p>
                     </div>
                     <button
-                      onClick={() => { setSelectedProposalForTask(null); setSearchProposalQuery(''); setProposalSearchResults([]); setShowNewTaskModal(true); }}
+                      onClick={handleNewTaskClick}
                       className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
                     >
                       + Criar Primeira Tarefa
@@ -9665,6 +9892,200 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* 6.4 Modal de RESUMO da Tarefa (read-only) — abre ao clicar no card.
+          z-[105] fica abaixo do modal de edição (z-[110]): o lápis daqui fecha
+          este e abre aquele, mas a ordem garante o empilhamento certo caso os
+          dois coexistam por um instante. */}
+      {(() => {
+        const task = taskDetailId ? commercialTasks.find(t => t.id === taskDetailId) : null;
+        if (!task) return null;
+
+        const isDone = task.status === 'concluida';
+        const tc = getTaskTypeConfig(task.tipo);
+        const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
+        const assigneeName = matchedUser ? matchedUser.nome : '—';
+        const negocio = getTaskNegocio(task);
+        const negocioId = getTaskNegocioId(task);
+        const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento);
+        const uc = TASK_URGENCY_CONFIG[urgent] || TASK_URGENCY_CONFIG.normal;
+        const emoji = (taskTypes.find(t => t.nome === task.tipo)?.emoji) || '📋';
+        const dataCompleta = task.data_vencimento
+          ? new Date(task.data_vencimento).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : '—';
+
+        return (
+          <div className="fixed inset-0 z-[105] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4" onClick={closeTaskDetail}>
+            <div
+              className="w-full max-w-lg bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden relative animate-in fade-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Cabeçalho: tipo + ações (lápis e fechar) */}
+              <div className="border-b border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/80 dark:bg-slate-900/80 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2 min-w-0">
+                  <span className={`w-7 h-7 rounded-lg flex items-center justify-center shadow-sm text-sm ${tc.bg} ${tc.text} border ${tc.border}`}>
+                    {emoji}
+                  </span>
+                  <span className="truncate">Detalhes da Tarefa</span>
+                </h3>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => { const t = task; closeTaskDetail(); handleEditTaskClick(t); }}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
+                    title="Editar tarefa"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={closeTaskDetail}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    title="Fechar (ESC)"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Corpo: resumo somente leitura */}
+              <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+                <div>
+                  <p className={`text-base font-black leading-snug ${isDone ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'}`}>
+                    {task.titulo}
+                  </p>
+                  {negocio && negocio !== 'Sem Projeto' && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1.5 flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                      <span className="truncate">{negocio}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3">
+                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Tipo</span>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-1 flex items-center gap-1.5">
+                      <span>{emoji}</span>{task.tipo || '—'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3">
+                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Atribuído a</span>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-1 flex items-center gap-1.5 min-w-0">
+                      {typeof AvatarInicial !== 'undefined' && assigneeName !== '—'
+                        ? <AvatarInicial nome={assigneeName} size="xs" />
+                        : null}
+                      <span className="truncate">{assigneeName}</span>
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3">
+                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Vencimento</span>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-1">{dataCompleta}</p>
+                    {!isDone && (
+                      <span className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md ring-1 ${uc.bg} ${uc.text} ${uc.ring}`}>
+                        {dateLabel}
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl p-3">
+                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Status</span>
+                    <p className="mt-1">
+                      <span className={`inline-block text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wide ${
+                        isDone
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
+                          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                      }`}>
+                        {isDone ? 'Concluída' : 'Pendente'}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Caixa de registro de atividade (revelada pelo botão abaixo) */}
+                {taskDetailShowAtividade && !isDone && (
+                  <div className="bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl p-3.5">
+                    <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                      Registrar no histórico do negócio
+                    </span>
+                    <MentionTextarea
+                      value={taskDetailAtividadeTexto}
+                      onChange={setTaskDetailAtividadeTexto}
+                      membros={vendedores}
+                      placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega."
+                      rows={3}
+                    />
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 truncate">
+                      Será registrado como: ✅ [{task.tipo || 'Tarefa'}] {task.titulo} — ...
+                    </p>
+                    <div className="flex gap-2 mt-2.5">
+                      <button
+                        onClick={() => { setTaskDetailShowAtividade(false); setTaskDetailAtividadeTexto(''); }}
+                        disabled={taskDetailSaving}
+                        className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={() => handleConcluirTarefaComAtividade(task)}
+                        disabled={taskDetailSaving || !taskDetailAtividadeTexto.trim()}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          taskDetailSaving || !taskDetailAtividadeTexto.trim()
+                            ? 'bg-slate-200 dark:bg-slate-600 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                            : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
+                        }`}
+                      >
+                        {taskDetailSaving ? 'Salvando...' : 'Confirmar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Rodapé: ações de conclusão */}
+              {!taskDetailShowAtividade && (
+                <div className="border-t border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/60 dark:bg-slate-900/60 flex gap-2.5">
+                  {isDone ? (
+                    <button
+                      onClick={() => handleConcluirTarefa(task)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                    >
+                      ↩️ Reabrir tarefa
+                    </button>
+                  ) : (
+                    <React.Fragment>
+                      <button
+                        onClick={() => handleConcluirTarefa(task)}
+                        className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
+                      >
+                        ✅ Concluir
+                      </button>
+                      <button
+                        onClick={() => setTaskDetailShowAtividade(true)}
+                        disabled={!negocioId}
+                        title={negocioId
+                          ? 'Concluir e registrar o resultado no histórico do negócio'
+                          : 'Vincule um negócio a esta tarefa (lápis) para registrar atividade'}
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                          negocioId
+                            ? 'border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        📝 Concluir e registrar
+                      </button>
+                    </React.Fragment>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 6.5 Modal de Criar Nova Tarefa Comercial (Salesforce Style) */}
       {showNewTaskModal && (

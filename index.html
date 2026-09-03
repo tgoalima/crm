@@ -8,11 +8,23 @@
   <!-- Aplica o tema salvo (ou a preferência do sistema, na 1ª visita) antes
        do primeiro paint, pra não piscar o tema errado (FOUC). Síncrono e
        bloqueante de propósito — precisa terminar antes do <body> pintar.
-       Mesma chave (crm_theme) que o toggle no cabeçalho do app.js usa. -->
+       A chave é escopada por usuário (crm_theme:<clickup_user_id>), a mesma
+       que o app.js usa — por isso lê antes o crm_user_profile do
+       localStorage, único jeito de saber quem está logado neste ponto (a
+       sessão do Supabase só resolve async, tarde demais pro 1º paint).
+       SOMENTE LEITURA: migração e escrita ficam só no app.js, pra não haver
+       duas cópias da mesma regra divergindo. O fallback pra chave global
+       antiga (crm_theme) cobre o 1º load após o deploy, quando a migração
+       do app.js ainda não rodou. -->
   <script>
     (function () {
       try {
-        var stored = localStorage.getItem('crm_theme');
+        var uid = null;
+        try {
+          var perfil = JSON.parse(localStorage.getItem('crm_user_profile') || 'null');
+          if (perfil && perfil.id) uid = String(perfil.id);
+        } catch (e) {}
+        var stored = localStorage.getItem('crm_theme:' + (uid || 'anon')) || localStorage.getItem('crm_theme');
         var isDark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
         if (isDark) document.documentElement.classList.add('dark');
       } catch (e) {}
@@ -20,7 +32,7 @@
   </script>
 
   <!-- Estilos de Produção (Tailwind v4 + Custom CSS compilados) -->
-  <link rel="stylesheet" href="/dist/styles.css?v=36.0">
+  <link rel="stylesheet" href="/dist/styles.css?v=37.0">
 
   <!-- Supabase JS Client CDN (versão pinada — a mesma que já estava sendo
        servida via @2 antes, só travada pra não quebrar numa atualização
@@ -50,6 +62,6 @@
        JSX a cada carregamento, pra todo usuário). `defer` preserva a ordem
        de execução dos scripts abaixo, incluindo os CDN acima. -->
   <script defer src="/dist/empresas.js?v=5.15"></script>
-  <script defer src="/dist/app.js?v=87.0"></script>
+  <script defer src="/dist/app.js?v=88.0"></script>
 </body>
 </html>
