@@ -4739,7 +4739,7 @@ function App() {
     };
   }, [session, supabaseClient]);
 
-  const loadPropostas = async (targetId = null, silent = false) => {
+  const loadPropostas = async (targetId = null, silent = false, skipDirtyGuard = false) => {
     if (!supabaseClient || !clickupTaskId || typeof clickupTaskId !== 'string' || !clickupTaskId.trim()) return;
     if (!silent) setLoading(true);
     try {
@@ -4764,7 +4764,7 @@ function App() {
           ? props.find(p => p.id === targetId) || props.find(p => p.versao === 'vA') || props[0]
           : props.find(p => p.versao === 'vA') || props[0];
         
-        loadProposalDetails(selected.id, silent);
+        loadProposalDetails(selected.id, silent, skipDirtyGuard);
       } else {
         setCurrentProposta(null);
         setItens([]);
@@ -4791,13 +4791,17 @@ function App() {
     }
   };
 
-  const loadProposalDetails = async (proposalId, silent = false) => {
+  const loadProposalDetails = async (proposalId, silent = false, skipDirtyGuard = false) => {
     // Se houver itens ainda não salvos (id temporário, criado por handleAddItem mas nunca
     // persistido no banco), uma atualização silenciosa em segundo plano (polling) NÃO pode
     // recarregar a proposta: isso apagaria o que o usuário está digitando antes de salvar.
     // Lê de itensRef (não do estado `itens` direto) porque o polling roda dentro de um
     // setInterval de closure antiga — ver comentário na declaração de itensRef.
-    if (silent && (itensRef.current.some(it => String(it.id).startsWith('temp-')) || propostaDirtyRef.current)) {
+    // skipDirtyGuard existe pro reload silencioso disparado logo após um save bem-sucedido
+    // (handleSaveProposal): ali os "temp-" ids em itensRef são sempre das linhas que ACABAMOS
+    // de apagar e reinserir com id novo — a proteção não se aplica, e bloquear geraria itens
+    // "presos" com id antigo/inválido pro resto da sessão.
+    if (silent && !skipDirtyGuard && (itensRef.current.some(it => String(it.id).startsWith('temp-')) || propostaDirtyRef.current)) {
       return;
     }
     // Carga explícita (usuário abrindo uma proposta/versão) sempre reseta o
@@ -5331,7 +5335,12 @@ function App() {
       propostaDirtyRef.current = false;
       showToast('Proposta salva com sucesso!', 'success');
       setIsEditingProposal(false);
-      loadPropostas(currentProposta.id);
+      // Silencioso (não mostra o spinner de tela cheia — o botão "Salvar" já
+      // dá esse feedback) mas com skipDirtyGuard: os itens acabaram de ser
+      // apagados e reinseridos no banco com id novo, então os "temp-" ainda
+      // em memória são só resíduo local — precisam ser substituídos pelos
+      // ids reais vindos do banco, não preservados.
+      loadPropostas(currentProposta.id, true, true);
       // Confirma a lista global com dados frescos do banco em segundo plano
       refreshSupabaseProposalsList();
     } catch (err) {
@@ -6089,7 +6098,10 @@ function App() {
       });
 
       setShowLossModal(false);
-      loadPropostas(currentProposta.id);
+      // Silencioso: só situação/motivo mudaram (sem delete+reinsert de itens),
+      // e a proposta já vira read-only assim que recarregar — não há por que
+      // piscar a tela cheia de "Carregando..." por cima do editor.
+      loadPropostas(currentProposta.id, true, true);
     } catch (err) {
       console.error(err);
       showToast('Erro ao atualizar situação para Perdido.', 'error');
