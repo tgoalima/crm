@@ -40,17 +40,6 @@ const FOLDER_PROJETOS_ID = "90134052120";
 const TECH_CUSTOM_ITEM_ID = 1014;
 const PREFIX_TASK = "Enviar Proposta ";
 
-// A lista técnica/"Enviar Proposta vX" só faz sentido pra propostas do tipo
-// PROJETO — o app.js grava o "Tipo de Oportunidade" direto na coluna
-// `cenario`: PROJETO fica com cenario "" (ainda não escolheu o "Tipo de
-// Projeto") ou um dos 4 valores abaixo (Tipo de Projeto, dentro de Projeto);
-// os outros 5 tipos de oportunidade (Garantias/Serviços/SSU/Volumes/Upgrade)
-// gravam o próprio nome do tipo, em CAIXA ALTA, direto em `cenario` — daí o
-// match ser sensível a maiúsculas/minúsculas: "Upgrade" (Tipo de Projeto,
-// dentro de Projeto) é uma string diferente de "UPGRADE" (Tipo de
-// Oportunidade, não-projeto), e não podem ser confundidas aqui.
-const TIPOS_SEM_LISTA_TECNICA = new Set(["GARANTIAS", "SERVIÇOS", "SSU", "VOLUMES", "UPGRADE"]);
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -218,21 +207,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Filtro por tipo de oportunidade: só PROJETO gera lista técnica.
-    const cenarioRecord = String(record.cenario || "").trim();
-    if (TIPOS_SEM_LISTA_TECNICA.has(cenarioRecord)) {
-      return new Response(JSON.stringify({ success: true, message: `Ignorado (tipo de oportunidade "${cenarioRecord}" não gera lista técnica)` }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      });
-    }
-
     // 1) Achar o negócio de origem (pelo clickup_negocio_id, normalizando '#')
     const idLimpo = normalizeId(record.clickup_negocio_id);
     const idComHash = "#" + idLimpo;
     const { data: negocio, error: negocioErr } = await supabase
       .from("negocios")
-      .select("nome, numero_proposta_oficial, clickup_negocio_id")
+      .select("nome, numero_proposta_oficial, clickup_negocio_id, tipo_oportunidade")
       .or(`clickup_negocio_id.eq.${idLimpo},clickup_negocio_id.eq.${idComHash}`)
       .limit(1)
       .maybeSingle();
@@ -240,6 +220,23 @@ Deno.serve(async (req) => {
     if (negocioErr || !negocio || !negocio.numero_proposta_oficial) {
       console.warn(`[sync-proposta-tecnica-clickup] Ignorado — negócio não encontrado ou sem número de proposta (clickup_negocio_id=${record.clickup_negocio_id}).`);
       return new Response(JSON.stringify({ success: true, message: "Ignorado (negócio sem número de proposta)" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // Filtro por tipo de oportunidade: só PROJETO gera lista técnica. Antes
+    // lia propostas.cenario (que, num design anterior, ecoava o próprio nome
+    // do tipo em CAIXA ALTA pra negócios não-Projeto) — desde a reforma do
+    // CRM que fez `cenario` passar a guardar só o SUBTIPO do projeto
+    // (HCI/Cloud/Tradicional/Upgrade), esse campo fica sempre vazio pra
+    // negócios não-Projeto, e a checagem antiga nunca mais batia (tentava
+    // criar lista técnica pra TODO tipo de oportunidade). Fonte de verdade
+    // agora é negocios.tipo_oportunidade, gravado uma vez e sincronizado em
+    // todas as versões da proposta.
+    const tipoOportunidade = negocio.tipo_oportunidade || "Projeto";
+    if (tipoOportunidade !== "Projeto") {
+      return new Response(JSON.stringify({ success: true, message: `Ignorado (tipo de oportunidade "${tipoOportunidade}" não gera lista técnica)` }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
