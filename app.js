@@ -3132,10 +3132,16 @@ function App() {
                     const registradosIds = new Set(registrados.map(r => String(r.clickup_user_id)));
                     users = users.filter(u => registradosIds.has(String(u.id)));
                   } else if (registradosErr) {
+                    // Antes só logava no console — passava despercebido e o
+                    // Painel de Configurações acabava mostrando o workspace
+                    // ClickUp inteiro (sem filtrar por quem já logou no CRM)
+                    // sem ninguém perceber que era uma falha, não o normal.
                     console.warn("Erro ao carregar usuários registrados no CRM, exibindo todo o workspace ClickUp:", registradosErr);
+                    showToast('Não foi possível filtrar por usuários cadastrados no CRM — exibindo todo o workspace do ClickUp.', 'warning');
                   }
                 } catch (registradosErr) {
                   console.warn("Erro ao carregar usuários registrados no CRM, exibindo todo o workspace ClickUp:", registradosErr);
+                  showToast('Não foi possível filtrar por usuários cadastrados no CRM — exibindo todo o workspace do ClickUp.', 'warning');
                 }
               }
 
@@ -3157,6 +3163,18 @@ function App() {
       console.warn("Erro ao carregar vendedores do ClickUp:", err);
     }
   };
+
+  // A aba "Vendedores" do Painel de Configurações existe justamente pra
+  // conferir quem está realmente cadastrado (usuarios_clickup_registrados) —
+  // mas `vendedores` só era recarregado em eventos de login/sessão inicial,
+  // então numa aba aberta há tempo ela ficava presa num crm_cache_vendedores
+  // antigo do localStorage, mostrando gente desatualizada. Recarrega toda
+  // vez que essa aba específica é aberta, pra sempre refletir o estado atual.
+  useEffect(() => {
+    if (showSettingsModal && settingsActiveTab === 'venders' && supabaseClient) {
+      loadVendedores(supabaseClient);
+    }
+  }, [showSettingsModal, settingsActiveTab, supabaseClient]);
 
   // Funções para Tarefas Comerciais
   const fetchCommercialTasks = async (client = supabaseClient, silent = false) => {
