@@ -8877,7 +8877,13 @@ function App() {
       {/* 4. Modal de Configurações Completo */}
       {showSettingsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-5xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden relative">
+          {/* h-[85vh] fixo (não max-h): o corpo tem abas com conteúdo de
+              tamanhos bem diferentes (Catálogo de Produtos vs. Distribuidores/
+              Vendedores) — com max-h o modal encolhia pro tamanho de cada
+              aba, mudando de altura toda vez que trocava. Com altura fixa,
+              o tamanho fica padronizado e a área de conteúdo (já com
+              overflow-y-auto) rola sozinha quando uma aba tem mais coisa. */}
+          <div className="w-full max-w-5xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl flex flex-col h-[85vh] overflow-hidden relative">
             <button 
               type="button"
               onClick={() => setShowSettingsModal(false)}
