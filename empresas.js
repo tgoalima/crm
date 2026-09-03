@@ -872,9 +872,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
     nome: '',
     estagio: 'Registro',
     tipo: 'Projeto',
-    valor: '',
     probabilidade: '50',
-    dataPrevisao: '',
     contatoId: '',
     responsavelId: '',
     roInfra: '',
@@ -921,7 +919,6 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
       const { data: num, error: numErr } = await supabaseClient.rpc('gerar_numero_proposta');
       if (numErr) throw numErr;
 
-      const valorNum = parseFloat(form.valor) || 0;
       const probNum = parseInt(form.probabilidade) || 50;
       const vendedorEscolhido = form.responsavelId
         ? vendedores.find(v => String(v.id) === form.responsavelId)
@@ -931,16 +928,19 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
       // 'pending') e retorna na hora — a Edge Function sync-negocio-clickup
       // cria a tarefa no ClickUp em segundo plano, disparada pelo Database
       // Webhook no INSERT.
+      // valor_clickup_fallback e data_previsao não são mais preenchidos aqui:
+      // o primeiro nunca era atualizado depois (virava lixo assim que a 1ª
+      // proposta existia); o segundo agora vem sozinho da proposta marcada
+      // "Usar no Forecast" (ver handleSaveProposal/handleUpdateVersionStatus
+      // em app.js) em vez de ser um chute digitado na criação.
       const { error } = await supabaseClient.from('negocios').insert({
         clickup_negocio_id: null,
         nome: form.nome.trim(),
         conta_id: contaEscolhida.id,
         estagio: form.estagio,
         numero_proposta_oficial: num || null,
-        valor_clickup_fallback: valorNum > 0 ? valorNum : null,
         tipo_oportunidade: form.tipo || null,
         probabilidade: probNum || null,
-        data_previsao: form.dataPrevisao || null,
         descricao: form.descricao || null,
         ro_infra: form.roInfra ? form.roInfra.trim() : null,
         ro_sw1: form.roSw1 ? form.roSw1.trim() : null,
@@ -1074,16 +1074,12 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
             </div>
           </div>
 
-          {/* SEÇÃO 3: VALORES & PREVISÃO */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
-            <SectionTitle>Valores & Previsão</SectionTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              <CRMCurrencyInput label="Valor Estimado" name="valor" value={form.valor} onChange={handleChange} />
-              <CRMInput label="Previsão de Fechamento do Negócio" name="dataPrevisao" type="date" value={form.dataPrevisao} onChange={handleChange} />
-            </div>
-          </div>
-
-          {/* SEÇÃO 4: ESCOPO & NOTAS */}
+          {/* SEÇÃO 4: ESCOPO & NOTAS
+              (SEÇÃO 3 antiga, "Valores & Previsão", foi removida: Valor Estimado
+              nunca era atualizado depois da criação e virava lixo assim que a
+              1ª proposta existia; Previsão de Fechamento agora vem sozinha da
+              proposta marcada "Usar no Forecast" — ver handleSaveProposal e
+              handleUpdateVersionStatus em app.js — em vez de digitada aqui.) */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Escopo & Solução Técnica</SectionTitle>
             <div className="mt-2">
@@ -1131,10 +1127,8 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
   const [form, setForm] = React.useState({
     nome: negocio?.nome || '',
     estagio: negocio?.estagio || 'Registro',
-    tipo: 'Projeto',
-    valor: negocio?.valor_clickup_fallback ? String(negocio.valor_clickup_fallback) : '',
-    probabilidade: '50',
-    dataPrevisao: '',
+    tipo: negocio?.tipo_oportunidade || 'Projeto',
+    probabilidade: negocio?.probabilidade ? String(negocio.probabilidade) : '50',
     responsavelId: negocio?.responsavel_clickup_id || '',
     roInfra: '',
     roSw1: '',
@@ -1166,7 +1160,6 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
           setForm(p => ({
             ...p,
             descricao: t.text_content || t.description || p.descricao,
-            dataPrevisao: t.due_date ? new Date(parseInt(t.due_date)).toISOString().split('T')[0] : p.dataPrevisao,
             roInfra: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roInfra) || p.roInfra,
             roSw1: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roSw1) || p.roSw1,
             roSw2: cfMap.get(RO_CLICKUP_IDS_EMPRESAS.roSw2) || p.roSw2,
@@ -1188,7 +1181,6 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
     setSalvando(true); setErro('');
 
     try {
-      const valorNum = parseFloat(form.valor) || 0;
       const probNum = parseInt(form.probabilidade) || 50;
       // Se o responsável não mudou mas está oculto (fora de vendedoresVisiveis),
       // não achar na lista não pode significar "limpar" — mantém o nome original.
@@ -1199,12 +1191,17 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
         : null;
 
       // 1. Atualiza no Supabase
+      // tipo_oportunidade e probabilidade eram preenchidos no form mas nunca
+      // persistidos aqui — igual ao bug já corrigido no drawer Editar do
+      // Kanban (app.js). valor_clickup_fallback não é mais editável nesta
+      // tela (ver remoção do campo Valor Estimado).
       const { error } = await supabaseClient
         .from('negocios')
         .update({
           nome: form.nome.trim(),
           estagio: form.estagio,
-          valor_clickup_fallback: valorNum > 0 ? valorNum : null,
+          tipo_oportunidade: form.tipo || null,
+          probabilidade: probNum || null,
           responsavel_nome: vendedorEscolhido ? vendedorEscolhido.nome : null,
           responsavel_clickup_id: vendedorEscolhido ? String(vendedorEscolhido.id) : null,
           updated_at: new Date().toISOString()
@@ -1219,7 +1216,6 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
             { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: 'cd6922b0-34f4-45e3-853a-cba995a2591c' }, // Negócio
             ...(ESTAGIO_CLICKUP_IDS[form.estagio] ? [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: ESTAGIO_CLICKUP_IDS[form.estagio] }] : []),
             ...(TIPO_OPORTUNIDADE_CLICKUP_EMPRESAS[form.tipo] ? [{ id: '5d384245-0640-4621-a2dd-98370f7efa82', value: TIPO_OPORTUNIDADE_CLICKUP_EMPRESAS[form.tipo] }] : []),
-            ...(valorNum > 0 ? [{ id: 'ee65221a-029d-4d0a-a981-b71b5a29b4b4', value: valorNum }] : []),
             ...(probNum ? [{ id: '2c667b12-79c6-4949-b995-5c3938e7ff51', value: probNum }] : []),
             ...(form.roInfra !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roInfra, value: form.roInfra.trim() }] : []),
             ...(form.roSw1 !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roSw1, value: form.roSw1.trim() }] : []),
@@ -1228,6 +1224,11 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
             ...(form.roSw4 !== undefined ? [{ id: RO_CLICKUP_IDS_EMPRESAS.roSw4, value: form.roSw4.trim() }] : [])
           ];
 
+          // due_date do ClickUp não recebe mais Previsão de Fechamento daqui —
+          // esse campo saiu do formulário; a Proposta (data_fechamento) já
+          // sincroniza pra esse mesmo campo do ClickUp (ver app.js), e as
+          // duas juntas colidiam. Previsão de Fechamento agora vem sozinha
+          // da proposta marcada "Usar no Forecast".
           await fetch(`/clickup-api/task/${negocio.clickup_negocio_id}?custom_item_id=1004`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', ...getEmpresasClickUpHeaders() },
@@ -1236,7 +1237,6 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
               custom_item_id: 1004,
               description: form.descricao || undefined,
               custom_fields: customFields,
-              ...(form.dataPrevisao ? { due_date: new Date(form.dataPrevisao + 'T12:00:00Z').getTime() } : {})
             })
           });
         } catch (cuErr) {
@@ -1326,16 +1326,12 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
             </div>
           </div>
 
-          {/* SEÇÃO 3: VALORES & PREVISÃO */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
-            <SectionTitle>Valores & Previsão</SectionTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              <CRMCurrencyInput label="Valor Estimado" name="valor" value={form.valor} onChange={handleChange} />
-              <CRMInput label="Previsão de Fechamento do Negócio" name="dataPrevisao" type="date" value={form.dataPrevisao} onChange={handleChange} />
-            </div>
-          </div>
-
-          {/* SEÇÃO 4: ESCOPO & NOTAS */}
+          {/* SEÇÃO 4: ESCOPO & NOTAS
+              (SEÇÃO 3 antiga, "Valores & Previsão", foi removida: Valor Estimado
+              nunca era atualizado depois da criação e virava lixo assim que a
+              1ª proposta existia; Previsão de Fechamento agora vem sozinha da
+              proposta marcada "Usar no Forecast" — ver handleSaveProposal e
+              handleUpdateVersionStatus em app.js — em vez de digitada aqui.) */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
             <SectionTitle>Escopo & Solução Técnica</SectionTitle>
             <div className="mt-2">

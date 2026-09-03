@@ -1668,9 +1668,7 @@ function App() {
     nome: '',
     estagio: 'Registro',
     tipo: 'Projeto',
-    valor: '',
     probabilidade: '50',
-    dataPrevisao: '',
     descricao: ''
   });
   const [savingEditNegocioDrawer, setSavingEditNegocioDrawer] = useState(false);
@@ -3489,9 +3487,7 @@ function App() {
       nome: task.nome || task.name || '',
       estagio: task.estagio || 'Registro',
       tipo: task.tipo_oportunidade || 'Projeto',
-      valor: task.valor_estimado ? String(task.valor_estimado) : (task.valor_clickup_fallback ? String(task.valor_clickup_fallback) : ''),
       probabilidade: task.probabilidade ? String(task.probabilidade) : '50',
-      dataPrevisao: task.data_previsao || '',
       descricao: task.descricao || task.description || '',
       ...roData
     });
@@ -3506,23 +3502,21 @@ function App() {
     }
     setSavingEditNegocioDrawer(true);
     try {
-      const valorNum = parseFloat(editNegocioDrawerForm.valor) || 0;
       const probNum = parseInt(editNegocioDrawerForm.probabilidade) || 50;
       const cuTaskId = selectedTask.clickup_negocio_id || (selectedTask.id && !String(selectedTask.id).includes('-') ? selectedTask.id : null);
 
       // 1. Atualiza no Supabase
-      // Tipo de Oportunidade, Probabilidade e Previsão de Fechamento eram
-      // preenchidos no formulário mas nunca gravados aqui — só nome, estágio
-      // e valor eram persistidos. Edição desses 3 campos era descartada
-      // silenciosamente (ver Tela de Proposta, que agora depende de
-      // negocios.tipo_oportunidade estar correto).
+      // Tipo de Oportunidade e Probabilidade eram preenchidos no formulário
+      // mas nunca gravados aqui — só nome, estágio e valor eram persistidos.
+      // Valor Estimado e Previsão de Fechamento saíram do formulário: o
+      // primeiro nunca era atualizado depois (virava lixo assim que a 1ª
+      // proposta existia); o segundo agora vem sozinho da proposta marcada
+      // "Usar no Forecast" em vez de digitado aqui.
       const negocioUpdatePayload = {
         nome: editNegocioDrawerForm.nome.trim(),
         estagio: editNegocioDrawerForm.estagio,
-        valor_clickup_fallback: valorNum > 0 ? valorNum : null,
         tipo_oportunidade: editNegocioDrawerForm.tipo || null,
         probabilidade: probNum || null,
-        data_previsao: editNegocioDrawerForm.dataPrevisao || null,
         updated_at: new Date().toISOString()
       };
       if (supabaseClient) {
@@ -3540,7 +3534,6 @@ function App() {
           const customFields = [
             { id: 'bc39138f-fe02-4480-9c08-f1a8a4eefd5d', value: 'cd6922b0-34f4-45e3-853a-cba995a2591c' }, // Negócio
             ...(estOpt ? [{ id: 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63', value: estOpt.id }] : []),
-            ...(valorNum > 0 ? [{ id: 'ee65221a-029d-4d0a-a981-b71b5a29b4b4', value: valorNum }] : []),
             ...(probNum ? [{ id: '2c667b12-79c6-4949-b995-5c3938e7ff51', value: probNum }] : []),
             ...(editNegocioDrawerForm.roInfra !== undefined ? [{ id: RO_CLICKUP_IDS.roInfra, value: editNegocioDrawerForm.roInfra.trim() }] : []),
             ...(editNegocioDrawerForm.roSw1 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw1, value: editNegocioDrawerForm.roSw1.trim() }] : []),
@@ -3549,12 +3542,10 @@ function App() {
             ...(editNegocioDrawerForm.roSw4 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw4, value: editNegocioDrawerForm.roSw4.trim() }] : [])
           ];
 
-          // due_date do ClickUp NÃO recebe mais a Previsão de Fechamento daqui:
-          // a Proposta (data_fechamento, a data real de fechamento) também
-          // sincroniza pra esse mesmo campo do ClickUp — as duas juntas
-          // colidiam e podiam se sobrescrever silenciosamente dependendo de
-          // qual tela fosse salva por último. O CRM é a fonte de verdade;
-          // Previsão de Fechamento agora fica só no Supabase (negocios.data_previsao).
+          // Previsão de Fechamento não é mais digitada aqui nem sincronizada
+          // com o due_date do ClickUp — vem sozinha da proposta marcada
+          // "Usar no Forecast" (ver handleSaveProposal/handleUpdateVersionStatus),
+          // que já sincroniza esse mesmo campo do ClickUp via data_fechamento.
           await fetch(`/clickup-api/task/${cuTaskId}?custom_item_id=1004`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
@@ -3576,11 +3567,8 @@ function App() {
         nome: editNegocioDrawerForm.nome.trim(),
         name: editNegocioDrawerForm.nome.trim(),
         estagio: editNegocioDrawerForm.estagio,
-        valor_estimado: valorNum > 0 ? valorNum : prev?.valor_estimado,
-        valor_clickup_fallback: valorNum > 0 ? valorNum : prev?.valor_clickup_fallback,
         tipo_oportunidade: editNegocioDrawerForm.tipo || null,
         probabilidade: probNum || null,
-        data_previsao: editNegocioDrawerForm.dataPrevisao || null,
         descricao: editNegocioDrawerForm.descricao,
         roInfra: editNegocioDrawerForm.roInfra,
         roSw1: editNegocioDrawerForm.roSw1,
@@ -5300,6 +5288,23 @@ function App() {
             body: JSON.stringify(datesPayload)
           }).catch(err => console.error("Erro ao sincronizar datas no ClickUp:", err));
         }
+
+        // Previsão de Fechamento do negócio (negocios.data_previsao) só
+        // reflete a Data de Fechamento da proposta marcada "Usar no
+        // Forecast" (situacao 'Selecionada') — é a única com uma expectativa
+        // real de quando o negócio fecha; antes de propor, qualquer data
+        // seria só um chute. Ver também handleUpdateVersionStatus, que limpa
+        // isso quando uma NOVA proposta vira a selecionada.
+        if (currentProposta.situacao === 'Selecionada') {
+          try {
+            await supabaseClient.from('negocios').update({ data_previsao: currentProposta.data_fechamento || null }).eq('clickup_negocio_id', cleanCuId);
+            setSelectedTask(prev => (prev && String(prev.clickup_negocio_id || prev.id || '').replace('#', '').trim() === cleanCuId)
+              ? { ...prev, data_previsao: currentProposta.data_fechamento || null }
+              : prev);
+          } catch (err) {
+            console.warn('Erro ao sincronizar Previsão de Fechamento do negócio:', err);
+          }
+        }
       }
 
       const { error: deleteError } = await supabaseClient
@@ -5833,6 +5838,22 @@ function App() {
         .eq('id', versionId);
 
       if (error) throw error;
+
+      // Essa proposta acabou de virar a "Selecionada" e teve seu próprio
+      // data_fechamento resetado (updateData acima) — a Previsão de
+      // Fechamento do negócio precisa acompanhar, senão fica presa
+      // mostrando a data de uma proposta que não é mais a usada no Forecast.
+      // Volta a ser preenchida no próximo save com uma Data Fechamento real.
+      if (newStatus === 'Selecionada') {
+        try {
+          await supabaseClient.from('negocios').update({ data_previsao: null }).eq('clickup_negocio_id', taskId);
+          setSelectedTask(prev => (prev && String(prev.clickup_negocio_id || prev.id || '').replace('#', '').trim() === taskId)
+            ? { ...prev, data_previsao: null }
+            : prev);
+        } catch (err) {
+          console.warn('Erro ao limpar Previsão de Fechamento do negócio:', err);
+        }
+      }
 
       // Sincroniza o valor da proposta selecionada com o Deal Value no ClickUp.
       // NÃO mexe em negocios.estagio: selecionar uma versão é uma decisão sobre
@@ -9982,18 +10003,10 @@ function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Valor Estimado (R$)</label>
-                  <input type="number" step="0.01" placeholder="0,00" value={editNegocioDrawerForm.valor} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, valor: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Previsão de Fechamento do Negócio</label>
-                  <input type="date" value={editNegocioDrawerForm.dataPrevisao} onChange={e => setEditNegocioDrawerForm(p => ({ ...p, dataPrevisao: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all" />
-                </div>
-              </div>
+              {/* Valor Estimado e Previsão de Fechamento saíram deste formulário:
+                  Valor Estimado nunca era atualizado depois da criação e virava
+                  lixo assim que a 1ª proposta existia; Previsão de Fechamento
+                  agora vem sozinha da proposta marcada "Usar no Forecast". */}
 
               {/* Registros de Oportunidade (R.O.) */}
               <div>
