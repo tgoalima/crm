@@ -1920,7 +1920,6 @@ function App() {
   });
   const [importFormat, setImportFormat] = useState('csv'); // 'csv' | 'xml'
   const [importText, setImportText] = useState('');
-  const [isProjeto, setIsProjeto] = useState(false);
   const [openMenuVersionId, setOpenMenuVersionId] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [isEditingProposal, setIsEditingProposal] = useState(false);
@@ -2495,7 +2494,7 @@ function App() {
       // O Kanban não faz mais nenhuma chamada ao ClickUp pra se popular (a
       // SPA é a fonte de verdade; ver docs/resumo.md, tabela `negocios`).
       const negociosPromise = supabaseClient
-        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback, conta_id, responsavel_nome, responsavel_clickup_id')
+        ? supabaseClient.from('negocios').select('clickup_negocio_id, nome, estagio, valor_clickup_fallback, conta_id, responsavel_nome, responsavel_clickup_id, tipo_oportunidade, data_previsao, probabilidade')
         : Promise.resolve({ data: [], error: null });
 
       const propsPromise = supabaseClient
@@ -2592,6 +2591,12 @@ function App() {
           custom_fields: [],
           responsavel_negocio: resp,
           responsavel_clickup_id: n.responsavel_clickup_id || null,
+          // Tipo de Oportunidade é sempre do negócio (não muda por versão de
+          // proposta) — ver comentário na tela de Proposta sobre por que
+          // "cenario" (por versão) não serve pra isso.
+          tipo_oportunidade: n.tipo_oportunidade || 'Projeto',
+          data_previsao: n.data_previsao || null,
+          probabilidade: n.probabilidade || null,
           supabase_deal_value: supabaseDealValue,
           fabricantes,
           valorPorFabricante,
@@ -2811,14 +2816,21 @@ function App() {
   // useCallback com deps vazias: só chama setters de estado (sempre estáveis
   // pelo React), mesmo motivo do handleDragStart acima.
   const handleCardClick = useCallback((task) => {
-    setSelectedTask(task);
+    // Mescla com o registro já enriquecido em kanbanTasks (quando existir) —
+    // cobre entradas parciais como a da Busca Global, que monta um objeto
+    // mínimo a partir da query de negocios (sem tipo_oportunidade,
+    // data_previsao, fabricantes etc.). kanbanTasks vence nos campos em
+    // comum por ser o dado mais recente/completo; os campos exclusivos do
+    // objeto recebido (ex.: numero_proposta_oficial da busca) são mantidos.
+    const full = kanbanTasks.find(t => t.id === task.id);
+    setSelectedTask(full ? { ...task, ...full } : task);
     setClickupTaskId(task.id);
     setDrawerTab('details');
     setDrawerSection('propostas');
     setEmpresaDoNegocio(null);
     setContatosDoNegocio([]);
     setShowDrawer(true);
-  }, []);
+  }, [kanbanTasks]);
 
   // Busca global do cabeçalho: 3 queries em paralelo, uma por tabela —
   // cada .or() só referencia colunas da própria tabela, então não esbarra
@@ -3499,21 +3511,25 @@ function App() {
       const cuTaskId = selectedTask.clickup_negocio_id || (selectedTask.id && !String(selectedTask.id).includes('-') ? selectedTask.id : null);
 
       // 1. Atualiza no Supabase
+      // Tipo de Oportunidade, Probabilidade e Previsão de Fechamento eram
+      // preenchidos no formulário mas nunca gravados aqui — só nome, estágio
+      // e valor eram persistidos. Edição desses 3 campos era descartada
+      // silenciosamente (ver Tela de Proposta, que agora depende de
+      // negocios.tipo_oportunidade estar correto).
+      const negocioUpdatePayload = {
+        nome: editNegocioDrawerForm.nome.trim(),
+        estagio: editNegocioDrawerForm.estagio,
+        valor_clickup_fallback: valorNum > 0 ? valorNum : null,
+        tipo_oportunidade: editNegocioDrawerForm.tipo || null,
+        probabilidade: probNum || null,
+        data_previsao: editNegocioDrawerForm.dataPrevisao || null,
+        updated_at: new Date().toISOString()
+      };
       if (supabaseClient) {
         if (selectedTask.id && String(selectedTask.id).includes('-')) {
-          await supabaseClient.from('negocios').update({
-            nome: editNegocioDrawerForm.nome.trim(),
-            estagio: editNegocioDrawerForm.estagio,
-            valor_clickup_fallback: valorNum > 0 ? valorNum : null,
-            updated_at: new Date().toISOString()
-          }).eq('id', selectedTask.id);
+          await supabaseClient.from('negocios').update(negocioUpdatePayload).eq('id', selectedTask.id);
         } else if (cuTaskId) {
-          await supabaseClient.from('negocios').update({
-            nome: editNegocioDrawerForm.nome.trim(),
-            estagio: editNegocioDrawerForm.estagio,
-            valor_clickup_fallback: valorNum > 0 ? valorNum : null,
-            updated_at: new Date().toISOString()
-          }).eq('clickup_negocio_id', cuTaskId);
+          await supabaseClient.from('negocios').update(negocioUpdatePayload).eq('clickup_negocio_id', cuTaskId);
         }
       }
 
@@ -3533,6 +3549,12 @@ function App() {
             ...(editNegocioDrawerForm.roSw4 !== undefined ? [{ id: RO_CLICKUP_IDS.roSw4, value: editNegocioDrawerForm.roSw4.trim() }] : [])
           ];
 
+          // due_date do ClickUp NÃO recebe mais a Previsão de Fechamento daqui:
+          // a Proposta (data_fechamento, a data real de fechamento) também
+          // sincroniza pra esse mesmo campo do ClickUp — as duas juntas
+          // colidiam e podiam se sobrescrever silenciosamente dependendo de
+          // qual tela fosse salva por último. O CRM é a fonte de verdade;
+          // Previsão de Fechamento agora fica só no Supabase (negocios.data_previsao).
           await fetch(`/clickup-api/task/${cuTaskId}?custom_item_id=1004`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
@@ -3541,7 +3563,6 @@ function App() {
               custom_item_id: 1004,
               description: editNegocioDrawerForm.descricao || undefined,
               custom_fields: customFields,
-              ...(editNegocioDrawerForm.dataPrevisao ? { due_date: new Date(editNegocioDrawerForm.dataPrevisao + 'T12:00:00Z').getTime() } : {})
             })
           });
         } catch (cuErr) {
@@ -3557,6 +3578,9 @@ function App() {
         estagio: editNegocioDrawerForm.estagio,
         valor_estimado: valorNum > 0 ? valorNum : prev?.valor_estimado,
         valor_clickup_fallback: valorNum > 0 ? valorNum : prev?.valor_clickup_fallback,
+        tipo_oportunidade: editNegocioDrawerForm.tipo || null,
+        probabilidade: probNum || null,
+        data_previsao: editNegocioDrawerForm.dataPrevisao || null,
         descricao: editNegocioDrawerForm.descricao,
         roInfra: editNegocioDrawerForm.roInfra,
         roSw1: editNegocioDrawerForm.roSw1,
@@ -4786,8 +4810,6 @@ function App() {
     const existingProp = propostas.find(p => p.id === proposalId);
     if (existingProp) {
       setCurrentProposta(existingProp);
-      const isProj = ['HCI', 'Cloud', 'Tradicional', 'Upgrade'].map(x => x.toUpperCase()).includes((existingProp.cenario || '').toUpperCase()) || existingProp.cenario === '' || (existingProp.cenario || '').toUpperCase() === 'PROJETO';
-      setIsProjeto(!!isProj);
     } else if (!silent) {
       setLoading(true);
     }
@@ -4805,8 +4827,6 @@ function App() {
       let updatedProp = { ...prop };
       setCurrentProposta(updatedProp);
       setIsEditingProposal(false);
-      const isProj = updatedProp && (['HCI', 'Cloud', 'Tradicional', 'Upgrade'].map(x => x.toUpperCase()).includes((updatedProp.cenario || '').toUpperCase()) || updatedProp.cenario === '' || (updatedProp.cenario || '').toUpperCase() === 'PROJETO');
-      setIsProjeto(!!isProj);
 
       // 2. Busca itens da proposta em paralelo com resposta rápida
       const { data: items, error: itemsErr } = await supabaseClient
@@ -6463,11 +6483,15 @@ function App() {
       );
     }
 
-    const getTipoOportunidade = () => {
-      const c = currentProposta.cenario || '';
-      if (['HCI', 'Cloud', 'Tradicional', 'Upgrade'].includes(c)) return 'PROJETO';
-      return c;
-    };
+    // Tipo de Oportunidade é do NEGÓCIO, não da proposta/versão — por isso vem
+    // de selectedTask.tipo_oportunidade (sincronizado em negocios, ver
+    // fetchKanbanData) e não de currentProposta.cenario. cenario continua
+    // existindo, mas agora só guarda o SUBTIPO do projeto (HCI/Cloud/
+    // Tradicional/Upgrade) quando o negócio é do tipo Projeto — faz sentido
+    // ser por versão, já que cada "cenário" pode explorar uma solução técnica
+    // diferente pro mesmo negócio (ex.: v.A = HCI, v.B = Cloud).
+    const tipoOportunidadeAtual = selectedTask?.tipo_oportunidade || 'Projeto';
+    const isProjeto = tipoOportunidadeAtual === 'Projeto';
 
     const isReadOnly = (currentProposta.situacao === 'Ganho' || currentProposta.situacao === 'Perdido') && !isEditingProposal;
 
@@ -6744,33 +6768,48 @@ function App() {
           <div className="mx-7 my-5 p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm shadow-slate-200/50">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5">
               <div>
-                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                  <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
-                  Tipo Oportunidade
+                <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+                    Tipo Oportunidade
+                  </span>
+                  <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded-md uppercase" title="É do negócio, não da versão — sincroniza em todas as propostas">NEGÓCIO</span>
                 </label>
                 <select
                   className="h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 shadow-xs hover:bg-slate-100/70 dark:hover:bg-slate-700/70 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 px-3 text-xs text-slate-800 dark:text-slate-200 font-bold w-full focus:outline-none transition-all cursor-pointer disabled:opacity-60"
-                  value={getTipoOportunidade()}
-                  onChange={(e) => {
+                  value={tipoOportunidadeAtual}
+                  onChange={async (e) => {
                     const val = e.target.value;
                     propostaDirtyRef.current = true;
-                    if (val === 'PROJETO') {
-                      setIsProjeto(true);
-                      setCurrentProposta({ ...currentProposta, cenario: '' });
-                    } else {
-                      setIsProjeto(false);
-                      setCurrentProposta({ ...currentProposta, cenario: val });
+                    // Tipo de Oportunidade é do negócio: atualiza local (reflete
+                    // em qualquer versão aberta depois) e grava direto em
+                    // negocios, sem depender de salvar a proposta.
+                    setSelectedTask(prev => prev ? { ...prev, tipo_oportunidade: val } : prev);
+                    if (val !== 'Projeto') {
+                      // Sem Tipo de Projeto (subtipo) fazendo sentido fora de
+                      // Projeto, limpa o cenário desta versão.
+                      setCurrentProposta(prev => ({ ...prev, cenario: '' }));
+                    }
+                    if (supabaseClient) {
+                      const cuId = selectedTask?.clickup_negocio_id || selectedTask?.id;
+                      if (cuId) {
+                        const cleanId = String(cuId).replace('#', '').trim();
+                        try {
+                          await supabaseClient.from('negocios').update({ tipo_oportunidade: val }).eq('clickup_negocio_id', cleanId);
+                        } catch (err) {
+                          console.warn('Erro ao sincronizar Tipo de Oportunidade:', err);
+                        }
+                      }
                     }
                   }}
                   disabled={isReadOnly}
                 >
-                  <option value="" disabled className="bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400">Selecione a oportunidade...</option>
-                  <option value="PROJETO" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">PROJETO</option>
-                  <option value="GARANTIAS" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">GARANTIAS</option>
-                  <option value="SERVIÇOS" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">SERVIÇOS</option>
-                  <option value="SSU" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">SSU</option>
-                  <option value="VOLUMES" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">VOLUMES</option>
-                  <option value="UPGRADE" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">UPGRADE</option>
+                  <option value="Projeto">Projeto</option>
+                  <option value="Garantias">Garantias</option>
+                  <option value="Serviços">Serviços</option>
+                  <option value="SSU">SSU</option>
+                  <option value="Volumes">Volumes</option>
+                  <option value="Upgrade">Upgrade</option>
                 </select>
               </div>
 
@@ -6784,6 +6823,7 @@ function App() {
                   value={currentProposta.cenario || ""}
                   onChange={(e) => { propostaDirtyRef.current = true; setCurrentProposta({ ...currentProposta, cenario: e.target.value }); }}
                   disabled={isReadOnly || !isProjeto}
+                  title={!isProjeto ? 'Só disponível quando o Tipo de Oportunidade do negócio é "Projeto"' : undefined}
                 >
                   <option value="">Selecione o tipo...</option>
                   <option value="HCI">HCI (Hiperconvergência)</option>
@@ -10086,8 +10126,8 @@ function App() {
                 </div>
 
                 <div className="space-y-4 mb-6">
-                  {/* Cards de Responsável e Valor */}
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* Cards de Responsável, Valor e Previsão de Fechamento */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 border-l-4 border-l-indigo-400 shadow-sm shadow-slate-200/50">
                       <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                         <svg className="w-3 h-3 text-indigo-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
@@ -10124,6 +10164,17 @@ function App() {
                             ? `R$ ${Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
                             : 'R$ 0,00';
                         })()}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 border-l-4 border-l-amber-400 shadow-sm shadow-slate-200/50">
+                      <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        Previsão de Fechamento
+                      </span>
+                      <span className="text-base font-black text-slate-800 dark:text-slate-200 tracking-tight mt-1.5 block">
+                        {selectedTask?.data_previsao ? formatDateSafe(selectedTask.data_previsao) : (
+                          <span className="text-slate-400 dark:text-slate-500 font-semibold text-sm">Não definida</span>
+                        )}
                       </span>
                     </div>
                   </div>

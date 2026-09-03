@@ -527,7 +527,7 @@ const EmpresaFormModal = ({ supabaseClient, conta, onClose, onSalvo }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white dark:from-indigo-950/40 dark:via-slate-800 dark:to-slate-800 shrink-0">
           <AvatarInicial nome={form.nome || 'N'} size="lg" />
           <div className="flex-1">
@@ -969,7 +969,7 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white dark:from-indigo-950/40 dark:via-slate-800 dark:to-slate-800 shrink-0">
           <div className="flex items-center gap-3">
@@ -1258,7 +1258,7 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
         {/* HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50/70 via-white to-white dark:from-indigo-950/40 dark:via-slate-800 dark:to-slate-800 shrink-0">
           <div className="flex items-center gap-3">
