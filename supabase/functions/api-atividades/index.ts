@@ -116,6 +116,38 @@ Deno.serve(async (req) => {
           const cuData = await cuRes.json();
           const comments = cuData.comments || [];
           const sbCommentIds = new Set(atividades.filter((a) => a.clickup_comment_id).map((a) => String(a.clickup_comment_id)));
+
+          // Adota retroativamente o autor real de linhas do Supabase criadas
+          // ANTES de existir a coluna autor_nome (migração 20260904): o
+          // comentário no ClickUp sempre soube quem postou — a gente só não
+          // gravava isso aqui ainda. Sem isso, tarefas concluídas com
+          // registro antes dessa migração aparecem como "Usuário" genérico
+          // pra sempre no feed, mesmo tendo o autor certo disponível.
+          const autorPorComentario = new Map<string, { nome: string | null; id: string | null }>();
+          for (const c of comments) {
+            autorPorComentario.set(String(c.id), {
+              nome: c.user?.username || c.user?.email || null,
+              id: c.user?.id != null ? String(c.user.id) : null,
+            });
+          }
+          const paraAdotar: Array<{ id: string; autor_nome: string; autor_clickup_id: string | null }> = [];
+          atividades = atividades.map((a) => {
+            if (a.autor_nome || !a.clickup_comment_id) return a;
+            const autor = autorPorComentario.get(String(a.clickup_comment_id));
+            if (!autor || !autor.nome) return a;
+            paraAdotar.push({ id: a.id, autor_nome: autor.nome, autor_clickup_id: autor.id });
+            return { ...a, autor_nome: autor.nome, autor_clickup_id: autor.id };
+          });
+          if (paraAdotar.length > 0) {
+            await Promise.all(
+              paraAdotar.map((p) =>
+                supabase.from("atividades_negocio")
+                  .update({ autor_nome: p.autor_nome, autor_clickup_id: p.autor_clickup_id })
+                  .eq("id", p.id)
+              )
+            ).catch((e) => console.warn("[api-atividades] Falha ao adotar autor retroativo:", e.message));
+          }
+
           for (const c of comments) {
             const cId = String(c.id);
             if (!sbCommentIds.has(cId)) {

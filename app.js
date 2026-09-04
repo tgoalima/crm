@@ -2074,6 +2074,11 @@ function App() {
   const [taskDetailShowAtividade, setTaskDetailShowAtividade] = useState(false);
   const [taskDetailAtividadeTexto, setTaskDetailAtividadeTexto] = useState('');
   const [taskDetailSaving, setTaskDetailSaving] = useState(false);
+  // Anexos do "Concluir e registrar" — estado próprio, separado do da aba
+  // Atividades do drawer: são fluxos independentes e podem mirar negócios
+  // diferentes (o da tarefa vs. o que porventura já estiver aberto no drawer).
+  const [taskDetailAnexos, setTaskDetailAnexos] = useState([]);
+  const taskDetailFileInputRef = React.useRef(null);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskType, setNewTaskType] = useState('Ligação');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
@@ -4316,6 +4321,7 @@ function App() {
     setTaskDetailShowAtividade(false);
     setTaskDetailAtividadeTexto('');
     setTaskDetailSaving(false);
+    setTaskDetailAnexos([]);
   };
 
   const closeTaskDetail = () => {
@@ -4323,6 +4329,36 @@ function App() {
     setTaskDetailShowAtividade(false);
     setTaskDetailAtividadeTexto('');
     setTaskDetailSaving(false);
+    setTaskDetailAnexos([]);
+  };
+
+  // Mesma lógica de handleAdicionarAnexosAtividade, só que mirando o negócio
+  // vinculado à TAREFA (não necessariamente o que está aberto no drawer).
+  const handleAdicionarAnexosTaskDetail = (fileList, negocioId) => {
+    const arquivos = Array.from(fileList || []);
+    if (arquivos.length === 0) return;
+    if (!negocioId) {
+      showToast('Vincule um negócio a esta tarefa antes de anexar arquivos.', 'error');
+      return;
+    }
+    const novos = arquivos.map(file => ({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      file, status: 'uploading', result: null, error: null
+    }));
+    setTaskDetailAnexos(prev => [...prev, ...novos]);
+    novos.forEach(async (item) => {
+      try {
+        const result = await uploadAtividadeAnexo({ clickupNegocioId: negocioId, file: item.file });
+        setTaskDetailAnexos(prev => prev.map(a => a.id === item.id ? { ...a, status: 'done', result } : a));
+      } catch (err) {
+        console.error('[TAREFAS] Erro ao enviar anexo:', err);
+        setTaskDetailAnexos(prev => prev.map(a => a.id === item.id ? { ...a, status: 'error', error: err?.message } : a));
+      }
+    });
+  };
+
+  const handleRemoverAnexoTaskDetail = (id) => {
+    setTaskDetailAnexos(prev => prev.filter(a => a.id !== id));
   };
 
   // Conclui (ou reabre) direto, sem registrar nada — mesmo caminho do
@@ -4342,8 +4378,13 @@ function App() {
   // porque toggleTaskStatus alterna em vez de setar.
   const handleConcluirTarefaComAtividade = async (task) => {
     if (!task) return;
-    const texto = taskDetailAtividadeTexto.trim();
+    const anexosProntos = taskDetailAnexos.filter(a => a.status === 'done').map(a => a.result);
+    const texto = taskDetailAtividadeTexto.trim() || (anexosProntos.length > 0 ? `📎 ${anexosProntos.length} anexo${anexosProntos.length > 1 ? 's' : ''}` : '');
     if (!texto) return;
+    if (taskDetailAnexos.some(a => a.status === 'uploading')) {
+      showToast('Aguarde o envio dos anexos terminar.', 'error');
+      return;
+    }
 
     const negocioId = getTaskNegocioId(task);
     if (!negocioId) {
@@ -4364,7 +4405,8 @@ function App() {
         origem: 'tarefa',
         tarefaId: task.id || null,
         tarefaTipo: task.tipo || null,
-        tarefaTitulo: task.titulo || null
+        tarefaTitulo: task.titulo || null,
+        anexos: anexosProntos
       });
 
       // Se o negócio já estiver aberto no drawer, atualiza a lista de
@@ -10480,9 +10522,28 @@ function App() {
                   </div>
                 </div>
 
-                {/* Caixa de registro de atividade (revelada pelo botão abaixo) */}
+                {/* Caixa de registro de atividade (revelada pelo botão abaixo).
+                    Mesmo suporte a anexo da aba Atividades do drawer: botão,
+                    colar (Ctrl+V) e arrastar — onPaste/onDrop no wrapper. */}
                 {taskDetailShowAtividade && !isDone && (
-                  <div className="bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl p-3.5">
+                  <div
+                    className="bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl p-3.5"
+                    onPaste={(e) => {
+                      const arquivos = Array.from(e.clipboardData?.files || []);
+                      if (arquivos.length > 0) {
+                        e.preventDefault();
+                        handleAdicionarAnexosTaskDetail(arquivos, negocioId);
+                      }
+                    }}
+                    onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) e.preventDefault(); }}
+                    onDrop={(e) => {
+                      const arquivos = e.dataTransfer?.files;
+                      if (arquivos && arquivos.length > 0) {
+                        e.preventDefault();
+                        handleAdicionarAnexosTaskDetail(arquivos, negocioId);
+                      }
+                    }}
+                  >
                     <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                       Registrar no histórico do negócio
@@ -10491,15 +10552,57 @@ function App() {
                       value={taskDetailAtividadeTexto}
                       onChange={setTaskDetailAtividadeTexto}
                       membros={vendedores}
-                      placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega."
+                      placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega, ou cole/arraste um print."
                       rows={3}
                     />
+
+                    {taskDetailAnexos.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {taskDetailAnexos.map(a => (
+                          <div
+                            key={a.id}
+                            className={`inline-flex items-center gap-1.5 text-[10px] font-semibold pl-2 pr-1 py-1 rounded-lg border ${
+                              a.status === 'error'
+                                ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                            }`}
+                            title={a.status === 'error' ? a.error : a.file.name}
+                          >
+                            {a.status === 'uploading' && <span className="w-2.5 h-2.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0"></span>}
+                            {a.status === 'done' && <span>📎</span>}
+                            {a.status === 'error' && <span>⚠️</span>}
+                            <span className="max-w-[120px] truncate">{a.file.name}</span>
+                            <button onClick={() => handleRemoverAnexoTaskDetail(a.id)} className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer px-0.5" title="Remover">
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 truncate">
                       Será registrado no histórico com a referência: ✅ Tarefa concluída ({task.tipo || 'Tarefa'}: {task.titulo})
                     </p>
                     <div className="flex gap-2 mt-2.5">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,.pdf,application/pdf"
+                        ref={taskDetailFileInputRef}
+                        onChange={(e) => { handleAdicionarAnexosTaskDetail(e.target.files, negocioId); e.target.value = ''; }}
+                        className="hidden"
+                      />
                       <button
-                        onClick={() => { setTaskDetailShowAtividade(false); setTaskDetailAtividadeTexto(''); }}
+                        onClick={() => taskDetailFileInputRef.current?.click()}
+                        className="w-9 shrink-0 flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Anexar imagem ou PDF"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => { setTaskDetailShowAtividade(false); setTaskDetailAtividadeTexto(''); setTaskDetailAnexos([]); }}
                         disabled={taskDetailSaving}
                         className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer disabled:opacity-50"
                       >
@@ -10507,14 +10610,14 @@ function App() {
                       </button>
                       <button
                         onClick={() => handleConcluirTarefaComAtividade(task)}
-                        disabled={taskDetailSaving || !taskDetailAtividadeTexto.trim()}
+                        disabled={taskDetailSaving || taskDetailAnexos.some(a => a.status === 'uploading') || (!taskDetailAtividadeTexto.trim() && !taskDetailAnexos.some(a => a.status === 'done'))}
                         className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                          taskDetailSaving || !taskDetailAtividadeTexto.trim()
+                          taskDetailSaving || taskDetailAnexos.some(a => a.status === 'uploading') || (!taskDetailAtividadeTexto.trim() && !taskDetailAnexos.some(a => a.status === 'done'))
                             ? 'bg-slate-200 dark:bg-slate-600 text-slate-400 dark:text-slate-500 cursor-not-allowed'
                             : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
                         }`}
                       >
-                        {taskDetailSaving ? 'Salvando...' : 'Confirmar'}
+                        {taskDetailSaving ? 'Salvando...' : taskDetailAnexos.some(a => a.status === 'uploading') ? 'Enviando...' : 'Confirmar'}
                       </button>
                     </div>
                   </div>
@@ -11598,30 +11701,50 @@ function App() {
                             const typeEmoji = matchedType ? matchedType.emoji : '📋';
 
                             return (
-                              <div key={task.id} className={`flex items-start justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border shadow-xs hover:shadow-sm transition-all ${isOverdue ? 'border-l-4 border-l-rose-400 border-slate-200 dark:border-slate-700' : isDone ? 'border-l-4 border-l-emerald-400 border-slate-200 dark:border-slate-700' : 'border-l-4 border-l-indigo-300 border-slate-200 dark:border-slate-700'}`}>
+                              <div
+                                key={task.id}
+                                onClick={() => openTaskDetail(task)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTaskDetail(task); } }}
+                                role="button"
+                                tabIndex={0}
+                                title="Ver detalhes da tarefa"
+                                className={`flex items-start justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border shadow-xs hover:shadow-sm hover:border-indigo-200 dark:hover:border-indigo-800/60 transition-all cursor-pointer ${isOverdue ? 'border-l-4 border-l-rose-400 border-slate-200 dark:border-slate-700' : isDone ? 'border-l-4 border-l-emerald-400 border-slate-200 dark:border-slate-700' : 'border-l-4 border-l-indigo-300 border-slate-200 dark:border-slate-700'}`}
+                              >
                                 <div className="flex items-start space-x-2.5">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={isDone}
-                                    onChange={() => toggleTaskStatus(task)}
-                                    className="w-3.5 h-3.5 rounded border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 cursor-pointer mt-0.5"
-                                  />
+                                  {/* stopPropagation no wrapper (não no input): preserva o
+                                      atalho de concluir direto sem abrir o resumo. */}
+                                  <div className="mt-0.5" onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isDone}
+                                      onChange={() => toggleTaskStatus(task)}
+                                      className="w-3.5 h-3.5 rounded border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                  </div>
                                   <div>
                                     <p className={`text-xs font-semibold ${isDone ? 'line-through text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
                                       {typeEmoji} {task.titulo}
                                     </p>
                                     <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                                      Vence em: {new Date(task.data_vencimento).toLocaleString('pt-BR')} 
+                                      Vence em: {new Date(task.data_vencimento).toLocaleString('pt-BR')}
                                       {isOverdue && <span className="text-red-400 font-bold ml-1.5">⚠️ Atrasada</span>}
                                     </p>
                                   </div>
                                 </div>
-                                <div className="flex items-center space-x-2">
-                                  <button onClick={() => handleEditTaskClick(task)} className="p-1 text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" title="Editar Tarefa">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    onClick={() => handleEditTaskClick(task)}
+                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
+                                    title="Editar tarefa"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                                   </button>
-                                  <button onClick={() => handleDeleteTask(task.id)} className="p-1 text-slate-500 dark:text-slate-400 hover:text-red-500 transition-colors" title="Excluir Tarefa">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                                  <button
+                                    onClick={() => handleDeleteTask(task.id)}
+                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
+                                    title="Excluir tarefa"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
                                   </button>
                                 </div>
                               </div>
