@@ -353,6 +353,42 @@ const createAtividade = async ({ clickupNegocioId, texto, autorNome, autorClicku
   return res.json().catch(() => ({}));
 };
 
+// Sobe um arquivo (imagem, PDF, etc.) como anexo NATIVO da task do ClickUp
+// que representa o negócio — o arquivo em si nunca passa pelo nosso banco,
+// só o ponteiro (ver createAtividade `anexos`). Vai por /clickup-upload/,
+// um proxy nginx dedicado que — diferente de /clickup-api/ — não sobrescreve
+// o Content-Type (precisa preservar o boundary do multipart) e aceita corpo
+// maior (client_max_body_size 30m nessa location, só nela).
+const uploadAtividadeAnexo = async ({ clickupNegocioId, file }) => {
+  const idClean = String(clickupNegocioId || '').replace('#', '').trim();
+  if (!idClean) throw new Error('Negócio não identificado para anexar o arquivo.');
+  if (!file) throw new Error('Nenhum arquivo selecionado.');
+
+  const formData = new FormData();
+  formData.append('attachment', file, file.name);
+
+  const res = await fetch(`/clickup-upload/task/${idClean}/attachment`, {
+    method: 'POST',
+    // Sem Content-Type aqui de propósito: o navegador define
+    // "multipart/form-data; boundary=..." sozinho a partir do FormData —
+    // declarar um Content-Type manual quebraria o boundary.
+    headers: { ...getSupabaseHeaders() },
+    body: formData
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Erro ao enviar anexo ao ClickUp (${res.status}).${errText ? ' ' + errText.slice(0, 200) : ''}`);
+  }
+  const data = await res.json();
+  return {
+    clickup_attachment_id: data.id || null,
+    title: data.title || data.name || file.name,
+    url: data.url || data.url_w_query || null,
+    mimetype: file.type || 'application/octet-stream',
+    size: file.size || null
+  };
+};
+
 // ─────────────────────────────────────────────────────────────────────────
 // PILHA DE CAMADAS MODAIS (Fase 2 do upgrade de navegação por teclado).
 // Antes disso, ESC dependia de uma cadeia if/else escrita à mão que tinha
@@ -2073,6 +2109,10 @@ function App() {
   const [savingAtividade, setSavingAtividade] = useState(false);
   const [atividadeBuscaAberta, setAtividadeBuscaAberta] = useState(false);
   const [atividadeBuscaQuery, setAtividadeBuscaQuery] = useState('');
+  // Anexos da nova atividade: [{ id, file, status: 'uploading'|'done'|'error', result, error }]
+  const [novaAtividadeAnexos, setNovaAtividadeAnexos] = useState([]);
+  const novaAtividadeFileInputRef = React.useRef(null);
+  const [lightboxAnexoUrl, setLightboxAnexoUrl] = useState(null);
   const [searchProposalQuery, setSearchProposalQuery] = useState('');
   const [proposalSearchResults, setProposalSearchResults] = useState([]);
   const [showProposalDropdown, setShowProposalDropdown] = useState(false);
@@ -3686,19 +3726,57 @@ function App() {
     }
   };
 
+  // Adiciona arquivos à lista de anexos pendentes e já dispara o upload de
+  // cada um pro ClickUp em paralelo — cada item atualiza seu próprio status
+  // conforme termina, sem travar os outros.
+  const handleAdicionarAnexosAtividade = (fileList) => {
+    const arquivos = Array.from(fileList || []);
+    if (arquivos.length === 0) return;
+    if (!clickupTaskId) {
+      showToast('Abra um negócio antes de anexar arquivos.', 'error');
+      return;
+    }
+    const novos = arquivos.map(file => ({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      file, status: 'uploading', result: null, error: null
+    }));
+    setNovaAtividadeAnexos(prev => [...prev, ...novos]);
+    novos.forEach(async (item) => {
+      try {
+        const result = await uploadAtividadeAnexo({ clickupNegocioId: clickupTaskId, file: item.file });
+        setNovaAtividadeAnexos(prev => prev.map(a => a.id === item.id ? { ...a, status: 'done', result } : a));
+      } catch (err) {
+        console.error('[ATIVIDADES] Erro ao enviar anexo:', err);
+        setNovaAtividadeAnexos(prev => prev.map(a => a.id === item.id ? { ...a, status: 'error', error: err?.message } : a));
+      }
+    });
+  };
+
+  const handleRemoverAnexoAtividade = (id) => {
+    setNovaAtividadeAnexos(prev => prev.filter(a => a.id !== id));
+  };
+
   const handleCreateAtividade = async () => {
-    if (!novaAtividade.trim() || !clickupTaskId) return;
+    const anexosProntos = novaAtividadeAnexos.filter(a => a.status === 'done').map(a => a.result);
+    const textoFinal = novaAtividade.trim() || (anexosProntos.length > 0 ? `📎 ${anexosProntos.length} anexo${anexosProntos.length > 1 ? 's' : ''}` : '');
+    if (!textoFinal || !clickupTaskId) return;
+    if (novaAtividadeAnexos.some(a => a.status === 'uploading')) {
+      showToast('Aguarde o envio dos anexos terminar.', 'error');
+      return;
+    }
     setSavingAtividade(true);
     try {
       await createAtividade({
         clickupNegocioId: clickupTaskId,
-        texto: novaAtividade,
+        texto: textoFinal,
         autorNome: userProfile?.username || userProfile?.email || null,
         autorClickupId: userProfile?.id ? String(userProfile.id) : null,
-        origem: 'manual'
+        origem: 'manual',
+        anexos: anexosProntos
       });
       showToast('Atividade registrada com sucesso!', 'success');
       setNovaAtividade('');
+      setNovaAtividadeAnexos([]);
       fetchAtividades(clickupTaskId);
     } catch (err) {
       console.error('[ATIVIDADES] Erro ao criar atividade:', err);
@@ -7810,6 +7888,9 @@ function App() {
     panelRef: drawerModalRef
   });
 
+  const lightboxModalRef = React.useRef(null);
+  const lightboxModalLayer = useModalLayer({ open: !!lightboxAnexoUrl, onClose: () => setLightboxAnexoUrl(null), panelRef: lightboxModalRef });
+
   if (!session) {
     return (
       <LoginScreen 
@@ -10485,6 +10566,37 @@ function App() {
         );
       })()}
 
+      {/* Lightbox de anexo (imagem) — Fase 4. z-[120]: acima de tudo,
+          inclusive do drawer (que abre por baixo dele). */}
+      {lightboxAnexoUrl && (
+        <div
+          ref={lightboxModalRef}
+          onKeyDown={lightboxModalLayer.onKeyDown}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Visualizar anexo"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/85 backdrop-blur-sm p-6"
+          onClick={() => setLightboxAnexoUrl(null)}
+        >
+          <img
+            src={lightboxAnexoUrl}
+            alt="Anexo"
+            className="max-w-full max-h-full rounded-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setLightboxAnexoUrl(null)}
+            className="absolute top-5 right-5 w-9 h-9 flex items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
+            title="Fechar (ESC)"
+            data-autofocus
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* 6.5 Modal de Criar Nova Tarefa Comercial (Salesforce Style) */}
       {showNewTaskModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
@@ -11522,8 +11634,30 @@ function App() {
                     {/* === ABA: STATUS DO PROJETO === */}
                     {drawerSection === 'status' && (
                       <div className="px-1 space-y-5">
-                        {/* Formulário de Nova Atividade */}
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm shadow-slate-200/50">
+                        {/* Formulário de Nova Atividade — aceita anexo por
+                            botão, arrastar-e-soltar ou colar (Ctrl+V) um
+                            print direto na caixa. onPaste/onDrop no
+                            wrapper (não no textarea): os dois eventos
+                            borbulham do filho focado, então funcionam sem
+                            precisar tocar no MentionTextarea. */}
+                        <div
+                          className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm shadow-slate-200/50"
+                          onPaste={(e) => {
+                            const arquivos = Array.from(e.clipboardData?.files || []);
+                            if (arquivos.length > 0) {
+                              e.preventDefault();
+                              handleAdicionarAnexosAtividade(arquivos);
+                            }
+                          }}
+                          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) e.preventDefault(); }}
+                          onDrop={(e) => {
+                            const arquivos = e.dataTransfer?.files;
+                            if (arquivos && arquivos.length > 0) {
+                              e.preventDefault();
+                              handleAdicionarAnexosAtividade(arquivos);
+                            }
+                          }}
+                        >
                           <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-2.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                             Registrar Atividade
@@ -11532,20 +11666,64 @@ function App() {
                             value={novaAtividade}
                             onChange={setNovaAtividade}
                             membros={vendedores}
-                            placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega."
+                            placeholder="Descreva o resultado da ação, retorno do cliente, próximos passos... Use @ para marcar um colega, ou cole/arraste um print."
                             rows={3}
                           />
-                          <button
-                            onClick={handleCreateAtividade}
-                            disabled={savingAtividade || !novaAtividade.trim()}
-                            className={`mt-2.5 w-full py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                              savingAtividade || !novaAtividade.trim()
-                                ? 'bg-slate-200 dark:bg-slate-600 text-slate-400 dark:text-slate-500 cursor-not-allowed'
-                                : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
-                            }`}
-                          >
-                            {savingAtividade ? 'Salvando...' : '💬 Registrar Atividade'}
-                          </button>
+
+                          {novaAtividadeAnexos.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {novaAtividadeAnexos.map(a => (
+                                <div
+                                  key={a.id}
+                                  className={`inline-flex items-center gap-1.5 text-[10px] font-semibold pl-2 pr-1 py-1 rounded-lg border ${
+                                    a.status === 'error'
+                                      ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                                  }`}
+                                  title={a.status === 'error' ? a.error : a.file.name}
+                                >
+                                  {a.status === 'uploading' && <span className="w-2.5 h-2.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0"></span>}
+                                  {a.status === 'done' && <span>📎</span>}
+                                  {a.status === 'error' && <span>⚠️</span>}
+                                  <span className="max-w-[140px] truncate">{a.file.name}</span>
+                                  <button onClick={() => handleRemoverAnexoAtividade(a.id)} className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer px-0.5" title="Remover">
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2 mt-2.5">
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*,.pdf,application/pdf"
+                              ref={novaAtividadeFileInputRef}
+                              onChange={(e) => { handleAdicionarAnexosAtividade(e.target.files); e.target.value = ''; }}
+                              className="hidden"
+                            />
+                            <button
+                              onClick={() => novaAtividadeFileInputRef.current?.click()}
+                              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Anexar imagem ou PDF"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={handleCreateAtividade}
+                              disabled={savingAtividade || novaAtividadeAnexos.some(a => a.status === 'uploading') || (!novaAtividade.trim() && !novaAtividadeAnexos.some(a => a.status === 'done'))}
+                              className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                savingAtividade || novaAtividadeAnexos.some(a => a.status === 'uploading') || (!novaAtividade.trim() && !novaAtividadeAnexos.some(a => a.status === 'done'))
+                                  ? 'bg-slate-200 dark:bg-slate-600 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                                  : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
+                              }`}
+                            >
+                              {savingAtividade ? 'Salvando...' : novaAtividadeAnexos.some(a => a.status === 'uploading') ? 'Enviando anexo...' : '💬 Registrar Atividade'}
+                            </button>
+                          </div>
                         </div>
 
                         {/* Lista de Atividades Registradas */}
@@ -11729,17 +11907,32 @@ function App() {
                                             </p>
                                             {parsed.anexos.length > 0 && (
                                               <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-9">
-                                                {parsed.anexos.map((anexo, i) => (
-                                                  <a
-                                                    key={anexo.clickup_attachment_id || i}
-                                                    href={anexo.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                                                  >
-                                                    📎 {anexo.title || 'Anexo'}
-                                                  </a>
-                                                ))}
+                                                {parsed.anexos.map((anexo, i) => {
+                                                  const isImagem = String(anexo.mimetype || '').startsWith('image/');
+                                                  if (isImagem) {
+                                                    return (
+                                                      <button
+                                                        key={anexo.clickup_attachment_id || i}
+                                                        onClick={() => setLightboxAnexoUrl(anexo.url)}
+                                                        title={anexo.title || 'Imagem'}
+                                                        className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 hover:opacity-80 transition-opacity cursor-pointer"
+                                                      >
+                                                        <img src={anexo.url} alt={anexo.title || 'Anexo'} className="w-full h-full object-cover" />
+                                                      </button>
+                                                    );
+                                                  }
+                                                  return (
+                                                    <a
+                                                      key={anexo.clickup_attachment_id || i}
+                                                      href={anexo.url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                                                    >
+                                                      📎 {anexo.title || 'Anexo'}
+                                                    </a>
+                                                  );
+                                                })}
                                               </div>
                                             )}
                                           </div>
