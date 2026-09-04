@@ -343,6 +343,111 @@ const createAtividade = async ({ clickupNegocioId, texto }) => {
 const buildAtividadeTextoDaTarefa = (task, texto) =>
   `✅ [${task?.tipo || 'Tarefa'}] ${task?.titulo || 'Tarefa'} — ${String(texto || '').trim()}`;
 
+// ─────────────────────────────────────────────────────────────────────────
+// PILHA DE CAMADAS MODAIS (Fase 2 do upgrade de navegação por teclado).
+// Antes disso, ESC dependia de uma cadeia if/else escrita à mão que tinha
+// que ser mantida manualmente em sincronia com quais modais existiam — o
+// modal de Editar Oportunidade nunca entrou nela e por isso ESC não o
+// fechava. Agora cada modal aberto se registra aqui (via useModalLayer) com
+// sua própria função de fechar, e o listener global de ESC só chama o topo
+// da pilha, na ordem real de abertura — sem precisar de uma lista hard-coded.
+// Array de módulo (não estado React): o registro precisa ser síncrono com a
+// montagem/desmontagem do modal, e nenhum componente precisa re-renderizar
+// só porque outro modal abriu/fechou.
+// ─────────────────────────────────────────────────────────────────────────
+let modalLayerSeq = 0;
+const modalLayers = [];
+
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Hook: registra um modal na pilha enquanto `open` for true. Cuida de foco
+// inicial (data-autofocus > primeiro focável > o próprio painel), devolve o
+// foco pra quem abriu ao fechar, e devolve um onKeyDown pra grudar no painel
+// que faz o focus trap (Tab/Shift+Tab não escapam do modal).
+const useModalLayer = ({ open, onClose, panelRef }) => {
+  const idRef = React.useRef(null);
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  React.useEffect(() => {
+    if (!open) return;
+    const id = ++modalLayerSeq;
+    idRef.current = id;
+    modalLayers.push({ id, close: () => onCloseRef.current && onCloseRef.current() });
+
+    const previouslyFocused = document.activeElement;
+    const focusTimer = setTimeout(() => {
+      const panel = panelRef && panelRef.current;
+      if (!panel) return;
+      const target = panel.querySelector('[data-autofocus]') || panel.querySelector(FOCUSABLE_SELECTOR) || panel;
+      if (target && typeof target.focus === 'function') target.focus();
+    }, 0);
+
+    return () => {
+      clearTimeout(focusTimer);
+      const idx = modalLayers.findIndex(l => l.id === id);
+      if (idx !== -1) modalLayers.splice(idx, 1);
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function' && document.body.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const onKeyDown = React.useCallback((e) => {
+    if (e.key !== 'Tab') return;
+    const panel = panelRef && panelRef.current;
+    if (!panel) return;
+    // Só faz o trap se esta camada for a do topo da pilha — evita capturar
+    // Tab de um modal que ficou por baixo caso dois coexistam por um instante.
+    const top = modalLayers[modalLayers.length - 1];
+    if (top && top.id !== idRef.current) return;
+    const focusables = Array.from(panel.querySelectorAll(FOCUSABLE_SELECTOR))
+      .filter(el => el.offsetParent !== null || el === document.activeElement);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first || !panel.contains(document.activeElement)) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
+  return { onKeyDown };
+};
+
+// Navegação por setas dentro de um grupo marcado com data-arrow-group: os
+// filhos com data-arrow-item viram uma "roving tabindex" informal — Home/End
+// pulam pras pontas. Usado nas abas do drawer, nas abas de Configurações e
+// no rodapé de ações do modal de resumo da tarefa.
+const handleArrowNav = (e) => {
+  if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  const group = e.currentTarget;
+  // Ignora itens desabilitados — .focus() neles é um no-op no navegador, e
+  // sem filtrar a navegação "trava" quando calha de cair num deles.
+  const items = Array.from(group.querySelectorAll('[data-arrow-item]')).filter(el => !el.disabled);
+  if (items.length === 0) return;
+  const currentIndex = items.indexOf(document.activeElement);
+  let nextIndex = currentIndex;
+  if (e.key === 'Home') nextIndex = 0;
+  else if (e.key === 'End') nextIndex = items.length - 1;
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % items.length;
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') nextIndex = currentIndex === -1 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
+  if (nextIndex !== currentIndex) {
+    e.preventDefault();
+    const nextItem = items[nextIndex];
+    nextItem.focus();
+    // Abas (data-arrow-activate): padrão de "ativação automática" — a seta
+    // já troca de aba, sem precisar de Enter/Espaço depois.
+    if (nextItem.hasAttribute('data-arrow-activate')) nextItem.click();
+  }
+};
+
 // Sincroniza o token pessoal e perfil do ClickUp de forma segura (criptografado com AES-GCM)
 // com as Edge Functions do Supabase para que as ações em background possam agir em nome do vendedor.
 const syncUserClickUpCredentialsToEdge = async (token, userObj, client = null, cfg = null) => {
@@ -2118,53 +2223,27 @@ function App() {
     }
   }, [showSettingsModal, settingsActiveTab, supabaseClient]);
 
-  // Listener global de teclado para tecla ESC (executado após a inicialização de todos os estados)
+  // Listener global de teclado para tecla ESC. Fase 2: em vez de uma cadeia
+  // if/else escrita à mão (que tinha que ser mantida em sincronia manual com
+  // quais modais existiam — o de Editar Oportunidade nunca entrou nela),
+  // fecha a camada do TOPO da pilha (`modalLayers`, populada por
+  // useModalLayer em cada modal). O menu de 3 pontinhos é a única exceção:
+  // é um dropdown em portal, não um modal registrado na pilha, mas fica
+  // visualmente por cima de tudo — por isso é conferido primeiro.
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (showSettingsModal) {
-          setShowSettingsModal(false);
-          return;
-        }
-        if (showNewTaskModal) {
-          setShowNewTaskModal(false);
-          setSelectedProposalForTask(null);
-          setSearchProposalQuery('');
-          setProposalSearchResults([]);
-          return;
-        }
-        // Depois do modal de edição: o de resumo é o mais superficial dos
-        // dois, então só fecha quando a edição não estiver por cima.
-        if (taskDetailId) {
-          closeTaskDetail();
-          return;
-        }
-        if (openMenuVersionId !== null) {
-          setOpenMenuVersionId(null);
-          return;
-        }
-        if (showCloseModal) {
-          setShowCloseModal(false);
-          return;
-        }
-        if (showProductModal) {
-          setShowProductModal(false);
-          return;
-        }
-        if (showDrawer) {
-          if (drawerTab === 'budget') {
-            setDrawerTab('details');
-          } else {
-            setShowDrawer(false);
-            setClickupTaskId('');
-          }
-        }
+      if (e.key !== 'Escape') return;
+      if (openMenuVersionId !== null) {
+        setOpenMenuVersionId(null);
+        return;
       }
+      const top = modalLayers[modalLayers.length - 1];
+      if (top) top.close();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showSettingsModal, showNewTaskModal, taskDetailId, openMenuVersionId, showCloseModal, showProductModal, showDrawer, drawerTab]);
+  }, [openMenuVersionId]);
 
   // Listener para fechar o menu dos 3 pontinhos ao rolar a página ou container
   useEffect(() => {
@@ -3552,8 +3631,11 @@ function App() {
   };
 
   const handleDeleteTask = async (taskId) => {
-    if (!confirm("Deseja realmente excluir esta tarefa comercial?")) return;
-    
+    // Retorna true/false pra quem chama saber se a exclusão foi confirmada —
+    // o modal de resumo da tarefa usa isso pra só fechar quando de fato
+    // excluiu, sem sumir da tela se o usuário cancelar o confirm().
+    if (!confirm("Deseja realmente excluir esta tarefa comercial?")) return false;
+
     console.log('[DEBUG] Lixeira clicada para excluir a tarefa:', taskId);
     const targetTask = commercialTasks.find(t => t.id === taskId);
     setCommercialTasks(prev => prev.filter(t => t.id !== taskId));
@@ -3584,12 +3666,14 @@ function App() {
       }
       
       showToast("Tarefa comercial excluída com sucesso!", "success");
+      return true;
     } catch (err) {
       console.error("[ERROR] Falha ao excluir tarefa:", err);
       showToast("Erro ao excluir tarefa comercial.", "error");
       if (supabaseClient) {
         fetchCommercialTasks(supabaseClient);
       }
+      return false;
     }
   };
 
@@ -7494,6 +7578,57 @@ function App() {
     );
   };
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Registro das camadas modais (Fase 2 — navegação por teclado). Chamado
+  // incondicionalmente a cada render, ANTES do "if (!session)" abaixo —
+  // todo hook do componente precisa vir antes desse primeiro return
+  // condicional. useModalLayer por dentro só empilha/faz algo enquanto o
+  // respectivo `open` for true; fechado, é um no-op barato.
+  // ─────────────────────────────────────────────────────────────────────
+  const settingsModalRef = React.useRef(null);
+  const settingsModalLayer = useModalLayer({ open: showSettingsModal, onClose: () => setShowSettingsModal(false), panelRef: settingsModalRef });
+
+  const productModalRef = React.useRef(null);
+  const productModalLayer = useModalLayer({ open: showProductModal, onClose: () => setShowProductModal(false), panelRef: productModalRef });
+
+  const closeModalRef = React.useRef(null);
+  const closeModalLayer = useModalLayer({ open: !!showCloseModal, onClose: () => setShowCloseModal(false), panelRef: closeModalRef });
+
+  const taskDetailModalRef = React.useRef(null);
+  const taskDetailModalLayer = useModalLayer({ open: !!taskDetailId, onClose: closeTaskDetail, panelRef: taskDetailModalRef });
+
+  const newTaskModalRef = React.useRef(null);
+  const newTaskModalLayer = useModalLayer({
+    open: showNewTaskModal,
+    onClose: () => {
+      setShowNewTaskModal(false);
+      setSelectedProposalForTask(null);
+      setSearchProposalQuery('');
+      setProposalSearchResults([]);
+    },
+    panelRef: newTaskModalRef
+  });
+
+  const editNegocioModalRef = React.useRef(null);
+  const editNegocioModalLayer = useModalLayer({ open: showEditNegocioDrawerModal, onClose: () => setShowEditNegocioDrawerModal(false), panelRef: editNegocioModalRef });
+
+  const drawerModalRef = React.useRef(null);
+  const drawerModalLayer = useModalLayer({
+    open: showDrawer,
+    onClose: () => {
+      // ESC no drawer com a proposta em tela cheia ('budget') volta pra
+      // aba de detalhes antes de fechar de vez — preserva o comportamento
+      // de navegação que já existia na cadeia antiga.
+      if (drawerTab === 'budget') {
+        setDrawerTab('details');
+      } else {
+        setShowDrawer(false);
+        setClickupTaskId('');
+      }
+    },
+    panelRef: drawerModalRef
+  });
+
   if (!session) {
     return (
       <LoginScreen 
@@ -8857,11 +8992,13 @@ function App() {
 
                         {/* Ações — stopPropagation no container cobre editar e
                             excluir de uma vez, pra não abrir o modal de
-                            detalhes junto. */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                            detalhes junto. Chips sempre visíveis (sem
+                            opacity-0 no hover): antes o card parecia inerte
+                            até passar o mouse, principalmente no dark mode. */}
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => handleEditTaskClick(task)}
-                            className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
                             title="Editar"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -8870,7 +9007,7 @@ function App() {
                           </button>
                           <button
                             onClick={() => handleDeleteTask(task.id)}
-                            className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
                             title="Excluir"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -9128,8 +9265,14 @@ function App() {
               aba, mudando de altura toda vez que trocava. Com altura fixa,
               o tamanho fica padronizado e a área de conteúdo (já com
               overflow-y-auto) rola sozinha quando uma aba tem mais coisa. */}
-          <div className="w-full max-w-5xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl flex flex-col h-[85vh] overflow-hidden relative">
-            <button 
+          <div
+            ref={settingsModalRef}
+            onKeyDown={settingsModalLayer.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-modal-title"
+            className="w-full max-w-5xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl flex flex-col h-[85vh] overflow-hidden relative">
+            <button
               type="button"
               onClick={() => setShowSettingsModal(false)}
               className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors z-10 cursor-pointer"
@@ -9142,7 +9285,7 @@ function App() {
 
             {/* Cabeçalho do Modal */}
             <div className="border-b border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/80 dark:bg-slate-900/80">
-              <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <h3 id="settings-modal-title" className="text-base font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <div className="w-7 h-7 bg-indigo-500 text-white rounded-lg flex items-center justify-center shadow-xs">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -9154,9 +9297,17 @@ function App() {
 
             {/* Corpo do Modal com Abas Laterais */}
             <div className="flex-1 flex overflow-hidden">
-              {/* Menu Lateral de Abas */}
-              <aside className="w-1/4 border-r border-slate-200/80 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-1.5 flex flex-col">
+              {/* Menu Lateral de Abas — ARIA tablist vertical: setas ↑/↓
+                  movem e já trocam de aba (data-arrow-activate). */}
+              <aside role="tablist" aria-orientation="vertical" onKeyDown={handleArrowNav} className="w-1/4 border-r border-slate-200/80 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-1.5 flex flex-col">
                 <button
+                  data-arrow-item
+                  data-arrow-activate
+                  role="tab"
+                  id="settings-tab-products"
+                  aria-selected={settingsActiveTab === 'products'}
+                  aria-controls="settings-tabpanel"
+                  tabIndex={settingsActiveTab === 'products' ? 0 : -1}
                   onClick={() => setSettingsActiveTab('products')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'products'
@@ -9167,6 +9318,13 @@ function App() {
                   Catálogo de Produtos
                 </button>
                 <button
+                  data-arrow-item
+                  data-arrow-activate
+                  role="tab"
+                  id="settings-tab-distributors"
+                  aria-selected={settingsActiveTab === 'distributors'}
+                  aria-controls="settings-tabpanel"
+                  tabIndex={settingsActiveTab === 'distributors' ? 0 : -1}
                   onClick={() => setSettingsActiveTab('distributors')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'distributors'
@@ -9177,6 +9335,13 @@ function App() {
                   Distribuidores
                 </button>
                 <button
+                  data-arrow-item
+                  data-arrow-activate
+                  role="tab"
+                  id="settings-tab-venders"
+                  aria-selected={settingsActiveTab === 'venders'}
+                  aria-controls="settings-tabpanel"
+                  tabIndex={settingsActiveTab === 'venders' ? 0 : -1}
                   onClick={() => setSettingsActiveTab('venders')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'venders'
@@ -9187,6 +9352,13 @@ function App() {
                   Vendedores
                 </button>
                 <button
+                  data-arrow-item
+                  data-arrow-activate
+                  role="tab"
+                  id="settings-tab-taskTypes"
+                  aria-selected={settingsActiveTab === 'taskTypes'}
+                  aria-controls="settings-tabpanel"
+                  tabIndex={settingsActiveTab === 'taskTypes' ? 0 : -1}
                   onClick={() => setSettingsActiveTab('taskTypes')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'taskTypes'
@@ -9197,6 +9369,13 @@ function App() {
                   Tipos de Tarefas
                 </button>
                 <button
+                  data-arrow-item
+                  data-arrow-activate
+                  role="tab"
+                  id="settings-tab-numeracao"
+                  aria-selected={settingsActiveTab === 'numeracao'}
+                  aria-controls="settings-tabpanel"
+                  tabIndex={settingsActiveTab === 'numeracao' ? 0 : -1}
                   onClick={() => setSettingsActiveTab('numeracao')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'numeracao'
@@ -9207,6 +9386,13 @@ function App() {
                   Numeração de Propostas
                 </button>
                 <button
+                  data-arrow-item
+                  data-arrow-activate
+                  role="tab"
+                  id="settings-tab-segmentos"
+                  aria-selected={settingsActiveTab === 'segmentos'}
+                  aria-controls="settings-tabpanel"
+                  tabIndex={settingsActiveTab === 'segmentos' ? 0 : -1}
                   onClick={() => setSettingsActiveTab('segmentos')}
                   className={`w-full px-4 py-2.5 rounded-xl text-left text-xs font-bold transition-all cursor-pointer ${
                     settingsActiveTab === 'segmentos'
@@ -9219,7 +9405,7 @@ function App() {
               </aside>
 
               {/* Área de Conteúdo da Aba Ativa */}
-              <main className="flex-1 p-6 overflow-y-auto bg-slate-50/30 dark:bg-slate-900/30">
+              <main role="tabpanel" id="settings-tabpanel" aria-labelledby={`settings-tab-${settingsActiveTab}`} className="flex-1 p-6 overflow-y-auto bg-slate-50/30 dark:bg-slate-900/30">
                 {/* 2. ABA PRODUTOS */}
                 {settingsActiveTab === 'products' && (
                   <div className="space-y-6">
@@ -9754,8 +9940,14 @@ function App() {
       {/* 5. Modal de Adicionar Novo Item no Catálogo */}
       {showProductModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl p-6 relative">
-            <button 
+          <div
+            ref={productModalRef}
+            onKeyDown={productModalLayer.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="product-modal-title"
+            className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl p-6 relative">
+            <button
               type="button"
               onClick={() => setShowProductModal(false)}
               className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
@@ -9766,7 +9958,7 @@ function App() {
               </svg>
             </button>
 
-            <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100 mb-1">Adicionar Novo Produto</h3>
+            <h3 id="product-modal-title" className="text-base font-extrabold text-slate-900 dark:text-slate-100 mb-1">Adicionar Novo Produto</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-5">Adicione um novo produto ou licença ao catálogo do sistema.</p>
 
             <form onSubmit={handleCreateProduct} className="space-y-4">
@@ -9826,17 +10018,24 @@ function App() {
       {/* 6. Modal de Fechamento (Ganho ou Perdido) */}
       {showCloseModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-          <div className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6 relative">
-            <button 
+          <div
+            ref={closeModalRef}
+            onKeyDown={closeModalLayer.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="close-modal-title"
+            className="w-full max-w-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-6 relative">
+            <button
               onClick={() => setShowCloseModal(false)}
-              className="absolute top-4 right-4 text-slate-500 dark:text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 text-slate-500 dark:text-slate-400 hover:text-white cursor-pointer"
+              title="Fechar (ESC)"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
 
-            <h3 className="text-lg font-bold text-white mb-2">
+            <h3 id="close-modal-title" className="text-lg font-bold text-white mb-2">
               {showCloseModal === 'win' ? '🏆 Fechamento - Proposta Ganha' : '😞 Fechamento - Proposta Perdida'}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">
@@ -9917,21 +10116,26 @@ function App() {
         return (
           <div className="fixed inset-0 z-[105] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4" onClick={closeTaskDetail}>
             <div
+              ref={taskDetailModalRef}
+              onKeyDown={taskDetailModalLayer.onKeyDown}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="task-detail-modal-title"
               className="w-full max-w-lg bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden relative animate-in fade-in zoom-in-95 duration-150"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Cabeçalho: tipo + ações (lápis e fechar) */}
               <div className="border-b border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/80 dark:bg-slate-900/80 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2 min-w-0">
+                <h3 id="task-detail-modal-title" className="text-sm font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2 min-w-0">
                   <span className={`w-7 h-7 rounded-lg flex items-center justify-center shadow-sm text-sm ${tc.bg} ${tc.text} border ${tc.border}`}>
                     {emoji}
                   </span>
                   <span className="truncate">Detalhes da Tarefa</span>
                 </h3>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => { const t = task; closeTaskDetail(); handleEditTaskClick(t); }}
-                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
                     title="Editar tarefa"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -9939,8 +10143,17 @@ function App() {
                     </svg>
                   </button>
                   <button
+                    onClick={async () => { const t = task; const excluiu = await handleDeleteTask(t.id); if (excluiu) closeTaskDetail(); }}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
+                    title="Excluir tarefa"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                  <button
                     onClick={closeTaskDetail}
-                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 dark:bg-slate-700/50 dark:text-slate-300 dark:border-slate-600/50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                     title="Fechar (ESC)"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -10046,11 +10259,13 @@ function App() {
                 )}
               </div>
 
-              {/* Rodapé: ações de conclusão */}
+              {/* Rodapé: ações de conclusão. data-arrow-group + data-arrow-item:
+                  setas ←/→ alternam entre os botões, sem depender só do Tab. */}
               {!taskDetailShowAtividade && (
-                <div className="border-t border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/60 dark:bg-slate-900/60 flex gap-2.5">
+                <div className="border-t border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/60 dark:bg-slate-900/60 flex gap-2.5" onKeyDown={handleArrowNav}>
                   {isDone ? (
                     <button
+                      data-arrow-item
                       onClick={() => handleConcluirTarefa(task)}
                       className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
                     >
@@ -10059,21 +10274,23 @@ function App() {
                   ) : (
                     <React.Fragment>
                       <button
+                        data-arrow-item
                         onClick={() => handleConcluirTarefa(task)}
                         className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                       >
                         ✅ Concluir
                       </button>
                       <button
+                        data-arrow-item
                         onClick={() => setTaskDetailShowAtividade(true)}
                         disabled={!negocioId}
                         title={negocioId
                           ? 'Concluir e registrar o resultado no histórico do negócio'
                           : 'Vincule um negócio a esta tarefa (lápis) para registrar atividade'}
-                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           negocioId
-                            ? 'border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
-                            : 'border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                            ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/20'
+                            : 'border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
                         }`}
                       >
                         📝 Concluir e registrar
@@ -10090,10 +10307,16 @@ function App() {
       {/* 6.5 Modal de Criar Nova Tarefa Comercial (Salesforce Style) */}
       {showNewTaskModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden relative animate-in fade-in zoom-in-95 duration-150">
+          <div
+            ref={newTaskModalRef}
+            onKeyDown={newTaskModalLayer.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-task-modal-title"
+            className="w-full max-w-lg bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden relative animate-in fade-in zoom-in-95 duration-150">
             {/* Cabeçalho do Modal */}
             <div className="border-b border-slate-200/80 dark:border-slate-700/80 px-6 py-4 bg-slate-50/80 dark:bg-slate-900/80 flex items-center justify-between">
-              <h3 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+              <h3 id="new-task-modal-title" className="text-sm font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
                 <span className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg flex items-center justify-center shadow-sm">
                   {typeof IconDocument !== 'undefined' ? <IconDocument size={14} /> : null}
                 </span>
@@ -10253,9 +10476,10 @@ function App() {
                 <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                   Assunto / Título da Tarefa
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
+                  data-autofocus
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   placeholder="Ex: Ligar para alinhar proposta comercial"
@@ -10379,7 +10603,13 @@ function App() {
       {/* Modal de Edição de Oportunidade / Negócio */}
       {showEditNegocioDrawerModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={() => setShowEditNegocioDrawerModal(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
+          <div
+            ref={editNegocioModalRef}
+            onKeyDown={editNegocioModalLayer.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-negocio-modal-title"
+            className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
@@ -10388,7 +10618,7 @@ function App() {
                   </svg>
                 </div>
                 <div>
-                  <h3 className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">Editar Oportunidade</h3>
+                  <h3 id="edit-negocio-modal-title" className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">Editar Oportunidade</h3>
                   {selectedTask?.numero_proposta_oficial && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg mt-0.5">
                       Nº da Oportunidade: {selectedTask.numero_proposta_oficial}
@@ -10396,7 +10626,7 @@ function App() {
                   )}
                 </div>
               </div>
-              <button onClick={() => setShowEditNegocioDrawerModal(false)} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar">
+              <button onClick={() => setShowEditNegocioDrawerModal(false)} className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer" title="Fechar (ESC)">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -10518,6 +10748,11 @@ function App() {
             }}
           ></div>
           <div
+            ref={drawerModalRef}
+            onKeyDown={drawerModalLayer.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Detalhes da Oportunidade"
             className={`drawer-content h-full flex flex-col ${showDrawer ? 'active' : ''} ${
               drawerTab === 'budget' ? 'w-[94vw] max-w-7xl' : 'w-full max-w-4xl md:max-w-5xl'
             }`}
@@ -10885,10 +11120,19 @@ function App() {
                 </div>
 
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Barra de Abas com Ícones + Rótulos */}
-                  <div className="flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 mb-0 px-1 bg-white dark:bg-slate-800 rounded-t-2xl pt-1.5">
+                  {/* Barra de Abas com Ícones + Rótulos — padrão ARIA tabs:
+                      role="tablist" + setas movem e já trocam de aba
+                      (data-arrow-activate), só a aba ativa fica no Tab. */}
+                  <div role="tablist" onKeyDown={handleArrowNav} className="flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 mb-0 px-1 bg-white dark:bg-slate-800 rounded-t-2xl pt-1.5">
                     {/* Aba Propostas */}
                     <button
+                      data-arrow-item
+                      data-arrow-activate
+                      role="tab"
+                      id="drawer-tab-propostas"
+                      aria-selected={drawerSection === 'propostas'}
+                      aria-controls="drawer-tabpanel"
+                      tabIndex={drawerSection === 'propostas' ? 0 : -1}
                       onClick={() => { setDrawerSection('propostas'); }}
                       title="Propostas"
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
@@ -10908,6 +11152,13 @@ function App() {
 
                     {/* Aba Tarefas */}
                     <button
+                      data-arrow-item
+                      data-arrow-activate
+                      role="tab"
+                      id="drawer-tab-tarefas"
+                      aria-selected={drawerSection === 'tarefas'}
+                      aria-controls="drawer-tabpanel"
+                      tabIndex={drawerSection === 'tarefas' ? 0 : -1}
                       onClick={() => { setDrawerSection('tarefas'); }}
                       title="Tarefas"
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
@@ -10939,6 +11190,13 @@ function App() {
 
                     {/* Aba Status do Projeto */}
                     <button
+                      data-arrow-item
+                      data-arrow-activate
+                      role="tab"
+                      id="drawer-tab-status"
+                      aria-selected={drawerSection === 'status'}
+                      aria-controls="drawer-tabpanel"
+                      tabIndex={drawerSection === 'status' ? 0 : -1}
                       onClick={() => { setDrawerSection('status'); fetchAtividades(clickupTaskId); }}
                       title="Status do Projeto"
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
@@ -10958,6 +11216,13 @@ function App() {
 
                     {/* Aba Empresa */}
                     <button
+                      data-arrow-item
+                      data-arrow-activate
+                      role="tab"
+                      id="drawer-tab-empresa"
+                      aria-selected={drawerSection === 'empresa'}
+                      aria-controls="drawer-tabpanel"
+                      tabIndex={drawerSection === 'empresa' ? 0 : -1}
                       onClick={() => { setDrawerSection('empresa'); }}
                       title="Empresa"
                       className={`relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
@@ -10977,7 +11242,11 @@ function App() {
                   </div>
 
                   {/* Conteúdo da Aba Selecionada */}
-                  <div className="flex-1 overflow-y-auto pr-1 pt-4 px-1 bg-white dark:bg-slate-800 rounded-b-2xl shadow-sm shadow-slate-200/40 border border-t-0 border-slate-200 dark:border-slate-700">
+                  <div
+                    role="tabpanel"
+                    id="drawer-tabpanel"
+                    aria-labelledby={`drawer-tab-${drawerSection}`}
+                    className="flex-1 overflow-y-auto pr-1 pt-4 px-1 bg-white dark:bg-slate-800 rounded-b-2xl shadow-sm shadow-slate-200/40 border border-t-0 border-slate-200 dark:border-slate-700">
 
                     {/* === ABA: PROPOSTAS === */}
                     {drawerSection === 'propostas' && (

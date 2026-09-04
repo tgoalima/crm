@@ -25,6 +25,21 @@
   color-scheme: dark;
 }
 
+/* Anel de foco visível (Fase 2 — navegação por teclado). Antes disso não
+   havia NENHUM estilo de :focus-visible no app inteiro — Tab funcionava,
+   mas ninguém enxergava onde o foco estava. :focus-visible (em vez de
+   :focus puro) evita o anel aparecer em cliques de mouse, só em navegação
+   por teclado. Não mexe em .glass-input:focus (mais abaixo), que já tem
+   o próprio anel via box-shadow. */
+*:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+:where(.dark) *:focus-visible {
+  outline-color: #818cf8;
+}
+
 /* Custom Styles for Commercial Proposal Generator */
 
 body {
