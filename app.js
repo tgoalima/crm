@@ -288,6 +288,23 @@ const readStoredTheme = (uid) => {
 const getSystemTheme = () =>
   (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
 
+// Filtros da aba Tarefas escopados por usuário (mesmo padrão do tema): cada
+// vendedor tem seus próprios filtros preferidos (ex.: "só minhas tarefas"),
+// e trocar de conta no mesmo navegador não deve herdar o que a outra pessoa
+// deixou marcado.
+const tasksFiltersKeyFor = (uid) => `crm_tasks_filters:${uid || 'anon'}`;
+
+const readTasksFilters = (uid) => {
+  try {
+    const raw = safeStorage.getItem(tasksFiltersKeyFor(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+};
+
 // Migração one-shot da chave global antiga (crm_theme) para a chave escopada,
 // preservando a preferência de quem já usava o CRM. O removeItem é a parte
 // essencial: se a chave global sobreviver, o index.html continua caindo nela
@@ -2058,11 +2075,15 @@ function App() {
   // carregamento cheio toda vez que se voltava para a aba, mesmo já tendo carregado antes.
   const hasLoadedTasksOnceRef = useRef(false);
   const [editingTask, setEditingTask] = useState(null);
-  const [tasksFilterAssignee, setTasksFilterAssignee] = useState('all');
-  const [tasksPeriodFilter, setTasksPeriodFilter] = useState('all');
-  const [tasksCustomStartDate, setTasksCustomStartDate] = useState('');
-  const [tasksCustomEndDate, setTasksCustomEndDate] = useState('');
-  const [tasksShowCompleted, setTasksShowCompleted] = useState(false);
+  // Inicializados a partir do que a própria pessoa deixou salvo da última
+  // vez (crm_tasks_filters:<uid>) — mesma fonte síncrona usada pelo tema
+  // (crm_user_profile no localStorage), então já chegam certos no 1º
+  // render, sem precisar de um efeito de "adoção" rodando depois.
+  const [tasksFilterAssignee, setTasksFilterAssignee] = useState(() => readTasksFilters(readProfileIdFromStorage())?.assignee || 'all');
+  const [tasksPeriodFilter, setTasksPeriodFilter] = useState(() => readTasksFilters(readProfileIdFromStorage())?.period || 'all');
+  const [tasksCustomStartDate, setTasksCustomStartDate] = useState(() => readTasksFilters(readProfileIdFromStorage())?.customStart || '');
+  const [tasksCustomEndDate, setTasksCustomEndDate] = useState(() => readTasksFilters(readProfileIdFromStorage())?.customEnd || '');
+  const [tasksShowCompleted, setTasksShowCompleted] = useState(() => readTasksFilters(readProfileIdFromStorage())?.showCompleted || false);
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
   // Modal de RESUMO da tarefa (read-only, aberto ao clicar no card).
   // Guarda o ID, nunca o objeto: toggleTaskStatus recria os objetos de
@@ -2168,6 +2189,36 @@ function App() {
   }, [theme, userProfile?.id]);
 
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+
+  // Persiste os filtros da aba Tarefas por usuário — mesmo cuidado do tema:
+  // um único efeito, pra "adotar os filtros de quem acabou de logar" não
+  // correr contra "gravar os filtros" e salvar os da pessoa ANTERIOR na
+  // chave da nova.
+  const prevTasksFiltersUidRef = useRef(userProfile?.id ? String(userProfile.id) : null);
+  useEffect(() => {
+    const uid = userProfile?.id ? String(userProfile.id) : null;
+
+    if (prevTasksFiltersUidRef.current !== uid) {
+      prevTasksFiltersUidRef.current = uid;
+      const saved = readTasksFilters(uid) || {};
+      setTasksFilterAssignee(saved.assignee || 'all');
+      setTasksPeriodFilter(saved.period || 'all');
+      setTasksCustomStartDate(saved.customStart || '');
+      setTasksCustomEndDate(saved.customEnd || '');
+      setTasksShowCompleted(saved.showCompleted || false);
+      return;
+    }
+
+    try {
+      safeStorage.setItem(tasksFiltersKeyFor(uid), JSON.stringify({
+        assignee: tasksFilterAssignee,
+        period: tasksPeriodFilter,
+        customStart: tasksCustomStartDate,
+        customEnd: tasksCustomEndDate,
+        showCompleted: tasksShowCompleted
+      }));
+    } catch (e) {}
+  }, [tasksFilterAssignee, tasksPeriodFilter, tasksCustomStartDate, tasksCustomEndDate, tasksShowCompleted, userProfile?.id]);
 
   const validateAndSaveToken = async (tokenToTest) => {
     const cleanToken = tokenToTest ? tokenToTest.trim() : '';
@@ -4473,6 +4524,137 @@ function App() {
     setSearchProposalQuery(cleanBusinessName);
     
     setShowNewTaskModal(true);
+  };
+
+  // TaskCard — componente de linha da tarefa (badge de tipo, vencimento,
+  // avatar do responsável, ações). Vive no corpo do componente (não mais
+  // dentro da IIFE da aba Tarefas) porque é reaproveitado em dois lugares:
+  // a lista geral de Tarefas e a lista "Tarefas Associadas" dentro do
+  // drawer do negócio — o pedido era esses dois lugares ficarem idênticos,
+  // e a garantia mais forte disso é serem literalmente o mesmo componente,
+  // não duas cópias que podem divergir de novo no futuro.
+  const TaskCard = ({ task }) => {
+    const isDone = task.status === 'concluida';
+    const tc = getTaskTypeConfig(task.tipo);
+    const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
+    const assigneeName = matchedUser ? matchedUser.nome : '—';
+    const negocio = getTaskNegocio(task);
+    const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento);
+    const uc = TASK_URGENCY_CONFIG[urgent] || TASK_URGENCY_CONFIG.normal;
+
+    return (
+      <div
+        onClick={() => openTaskDetail(task)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTaskDetail(task); } }}
+        role="button"
+        tabIndex={0}
+        title="Ver detalhes da tarefa"
+        className={`group relative bg-white dark:bg-slate-800 rounded-xl border transition-all duration-200 hover:shadow-md cursor-pointer ${isDone ? 'opacity-60 border-slate-200 dark:border-slate-700' : 'border-slate-200/80 dark:border-slate-700/80 hover:border-indigo-200/80'}`}
+      >
+        {/* Barra lateral de urgência */}
+        {!isDone && (
+          <div className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full ${
+            urgent === 'overdue' ? 'bg-rose-500' : urgent === 'today' ? 'bg-amber-400' : urgent === 'soon' ? 'bg-sky-400' : 'bg-slate-200 dark:bg-slate-600'
+          }`} />
+        )}
+
+        <div className="flex items-center gap-3 p-4 pl-5">
+          {/* Checkbox — stopPropagation no wrapper (e não no input) pra
+              não interferir na ordem de eventos do onChange: preserva o
+              atalho de concluir direto sem abrir o modal de detalhes. */}
+          <div className="flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={isDone}
+              onChange={() => toggleTaskStatus(task)}
+              className="w-4.5 h-4.5 rounded-full border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+            />
+          </div>
+
+          {/* Conteúdo Principal */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {/* Título */}
+                <p className={`text-sm font-bold leading-snug truncate ${isDone ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'}`}>
+                  {task.titulo}
+                </p>
+                {/* Negócio associado */}
+                {negocio && negocio !== 'Sem Projeto' && (
+                  <p className="text-[11px] text-slate-400 dark:text-slate-400 font-medium mt-0.5 truncate flex items-center gap-1">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                    {negocio}
+                  </p>
+                )}
+              </div>
+
+              {/* Lado direito: metadados + ações */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Badge de tipo */}
+                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${tc.bg} ${tc.text} ${tc.border}`}>
+                  {tc.Icon && <tc.Icon size={10} />}
+                  <span>{task.tipo}</span>
+                </span>
+
+                {/* Data de vencimento */}
+                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${uc.bg} ${uc.text}`}>
+                  {urgent === 'overdue' && (
+                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  {urgent === 'today' && (
+                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                  {dateLabel}
+                </span>
+
+                {/* Avatar do responsável — mesmo componente colorido por pessoa usado no Kanban/Empresas */}
+                <div className="flex items-center gap-1.5" title={assigneeName}>
+                  {typeof AvatarInicial !== 'undefined' ? (
+                    <AvatarInicial nome={assigneeName !== '—' ? assigneeName : ''} size="xs" />
+                  ) : (
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0 shadow-sm">
+                      {assigneeName !== '—' ? assigneeName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Ações — stopPropagation no container cobre editar e
+                    excluir de uma vez, pra não abrir o modal de
+                    detalhes junto. Chips sempre visíveis (sem
+                    opacity-0 no hover): antes o card parecia inerte
+                    até passar o mouse, principalmente no dark mode. */}
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => handleEditTaskClick(task)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
+                    title="Editar"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTask(task.id)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
+                    title="Excluir"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -9194,138 +9376,10 @@ function App() {
           const pendingItems = filtered.filter(t => t.status !== 'concluida');
           const doneItems = filtered.filter(t => t.status === 'concluida');
 
-          // getTaskNegocio agora vive no corpo do componente (depende de
-          // `propostas`/`kanbanTasks`) — compartilhado com o modal de resumo.
-
-          // getTaskTypeConfig, TASK_URGENCY_CONFIG e formatTaskDate agora vivem
-          // no escopo de módulo (topo do arquivo) — são compartilhados com o
-          // modal de resumo da tarefa, que fica fora deste bloco.
-
-          const TaskCard = ({ task }) => {
-            const isDone = task.status === 'concluida';
-            const tc = getTaskTypeConfig(task.tipo);
-            const matchedUser = vendedores.find(v => String(v.id) === String(task.responsavel_clickup_id));
-            const assigneeName = matchedUser ? matchedUser.nome : '—';
-            const negocio = getTaskNegocio(task);
-            // `now` explícito: mantém todos os cards da lista referenciados ao
-            // mesmo instante, como era quando a função fechava sobre ele.
-            const { label: dateLabel, urgent } = formatTaskDate(task.data_vencimento, now);
-            const uc = TASK_URGENCY_CONFIG[urgent] || TASK_URGENCY_CONFIG.normal;
-
-            return (
-              <div
-                onClick={() => openTaskDetail(task)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTaskDetail(task); } }}
-                role="button"
-                tabIndex={0}
-                title="Ver detalhes da tarefa"
-                className={`group relative bg-white dark:bg-slate-800 rounded-xl border transition-all duration-200 hover:shadow-md cursor-pointer ${isDone ? 'opacity-60 border-slate-200 dark:border-slate-700' : 'border-slate-200/80 dark:border-slate-700/80 hover:border-indigo-200/80'}`}
-              >
-                {/* Barra lateral de urgência */}
-                {!isDone && (
-                  <div className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full ${
-                    urgent === 'overdue' ? 'bg-rose-500' : urgent === 'today' ? 'bg-amber-400' : urgent === 'soon' ? 'bg-sky-400' : 'bg-slate-200 dark:bg-slate-600'
-                  }`} />
-                )}
-
-                <div className="flex items-center gap-3 p-4 pl-5">
-                  {/* Checkbox — stopPropagation no wrapper (e não no input) pra
-                      não interferir na ordem de eventos do onChange: preserva o
-                      atalho de concluir direto sem abrir o modal de detalhes. */}
-                  <div className="flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={isDone}
-                      onChange={() => toggleTaskStatus(task)}
-                      className="w-4.5 h-4.5 rounded-full border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
-                    />
-                  </div>
-
-                  {/* Conteúdo Principal */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        {/* Título */}
-                        <p className={`text-sm font-bold leading-snug truncate ${isDone ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'}`}>
-                          {task.titulo}
-                        </p>
-                        {/* Negócio associado */}
-                        {negocio && negocio !== 'Sem Projeto' && (
-                          <p className="text-[11px] text-slate-400 dark:text-slate-400 font-medium mt-0.5 truncate flex items-center gap-1">
-                            <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                            </svg>
-                            {negocio}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Lado direito: metadados + ações */}
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {/* Badge de tipo */}
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${tc.bg} ${tc.text} ${tc.border}`}>
-                          {tc.Icon && <tc.Icon size={10} />}
-                          <span>{task.tipo}</span>
-                        </span>
-
-                        {/* Data de vencimento */}
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${uc.bg} ${uc.text}`}>
-                          {urgent === 'overdue' && (
-                            <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                          {urgent === 'today' && (
-                            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          )}
-                          {dateLabel}
-                        </span>
-
-                        {/* Avatar do responsável — mesmo componente colorido por pessoa usado no Kanban/Empresas */}
-                        <div className="flex items-center gap-1.5" title={assigneeName}>
-                          {typeof AvatarInicial !== 'undefined' ? (
-                            <AvatarInicial nome={assigneeName !== '—' ? assigneeName : ''} size="xs" />
-                          ) : (
-                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0 shadow-sm">
-                              {assigneeName !== '—' ? assigneeName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '?'}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Ações — stopPropagation no container cobre editar e
-                            excluir de uma vez, pra não abrir o modal de
-                            detalhes junto. Chips sempre visíveis (sem
-                            opacity-0 no hover): antes o card parecia inerte
-                            até passar o mouse, principalmente no dark mode. */}
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => handleEditTaskClick(task)}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
-                            title="Editar"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteTask(task.id)}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
-                            title="Excluir"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          };
+          // TaskCard agora vive no corpo do componente principal (perto de
+          // handleEditTaskClick) — é reaproveitado também na lista "Tarefas
+          // Associadas" do drawer do negócio, então as duas listas usam
+          // literalmente o mesmo componente e não podem mais divergir.
 
           return (
             <div className="flex-1 flex flex-col bg-slate-50/80 dark:bg-slate-900/80 overflow-hidden">
@@ -11694,62 +11748,10 @@ function App() {
                             );
                           }
 
-                          return dealTasks.map(task => {
-                            const isOverdue = task.status === 'pendente' && new Date(task.data_vencimento) < new Date();
-                            const isDone = task.status === 'concluida';
-                            const matchedType = taskTypes.find(t => t.nome === task.tipo);
-                            const typeEmoji = matchedType ? matchedType.emoji : '📋';
-
-                            return (
-                              <div
-                                key={task.id}
-                                onClick={() => openTaskDetail(task)}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTaskDetail(task); } }}
-                                role="button"
-                                tabIndex={0}
-                                title="Ver detalhes da tarefa"
-                                className={`flex items-start justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border shadow-xs hover:shadow-sm hover:border-indigo-200 dark:hover:border-indigo-800/60 transition-all cursor-pointer ${isOverdue ? 'border-l-4 border-l-rose-400 border-slate-200 dark:border-slate-700' : isDone ? 'border-l-4 border-l-emerald-400 border-slate-200 dark:border-slate-700' : 'border-l-4 border-l-indigo-300 border-slate-200 dark:border-slate-700'}`}
-                              >
-                                <div className="flex items-start space-x-2.5">
-                                  {/* stopPropagation no wrapper (não no input): preserva o
-                                      atalho de concluir direto sem abrir o resumo. */}
-                                  <div className="mt-0.5" onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      checked={isDone}
-                                      onChange={() => toggleTaskStatus(task)}
-                                      className="w-3.5 h-3.5 rounded border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 cursor-pointer"
-                                    />
-                                  </div>
-                                  <div>
-                                    <p className={`text-xs font-semibold ${isDone ? 'line-through text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                                      {typeEmoji} {task.titulo}
-                                    </p>
-                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                                      Vence em: {new Date(task.data_vencimento).toLocaleString('pt-BR')}
-                                      {isOverdue && <span className="text-red-400 font-bold ml-1.5">⚠️ Atrasada</span>}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    onClick={() => handleEditTaskClick(task)}
-                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
-                                    title="Editar tarefa"
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteTask(task.id)}
-                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
-                                    title="Excluir tarefa"
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          });
+                          // Mesmo TaskCard da aba Tarefas geral (badge de tipo,
+                          // vencimento, avatar, ações) — literalmente o mesmo
+                          // componente, não uma cópia à parte.
+                          return dealTasks.map(task => <TaskCard key={task.id} task={task} />);
                         })()}
                       </div>
                     )}
