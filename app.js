@@ -319,7 +319,13 @@ const getSupabaseHeaders = () => {
 // tarefa registrando atividade" chama isso de fora do negócio, passando o id
 // que veio da própria tarefa. Lança em caso de erro — quem chama decide como
 // avisar o usuário.
-const createAtividade = async ({ clickupNegocioId, texto }) => {
+//
+// `texto` é só o corpo digitado pela pessoa (sem prefixo/colchetes) — a
+// referência à tarefa de origem vai em campos estruturados (origem/
+// tarefaTipo/tarefaTitulo), não mais embutida na string. O comentário
+// espelhado no ClickUp continua legível: a Edge Function monta a frase de
+// contexto lá, a partir desses mesmos campos.
+const createAtividade = async ({ clickupNegocioId, texto, autorNome, autorClickupId, origem, tarefaId, tarefaTipo, tarefaTitulo, anexos }) => {
   const idClean = String(clickupNegocioId || '').replace('#', '').trim();
   if (!idClean) throw new Error('Negócio não identificado para registrar a atividade.');
   const conteudo = String(texto || '').trim();
@@ -328,7 +334,17 @@ const createAtividade = async ({ clickupNegocioId, texto }) => {
   const res = await fetch('/api/atividades', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getSupabaseHeaders() },
-    body: JSON.stringify({ clickup_negocio_id: idClean, texto: conteudo })
+    body: JSON.stringify({
+      clickup_negocio_id: idClean,
+      texto: conteudo,
+      autor_nome: autorNome || undefined,
+      autor_clickup_id: autorClickupId || undefined,
+      origem: origem || undefined,
+      tarefa_id: tarefaId || undefined,
+      tarefa_tipo: tarefaTipo || undefined,
+      tarefa_titulo: tarefaTitulo || undefined,
+      anexos: anexos || undefined
+    })
   });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
@@ -336,12 +352,6 @@ const createAtividade = async ({ clickupNegocioId, texto }) => {
   }
   return res.json().catch(() => ({}));
 };
-
-// Texto da atividade gerada ao concluir uma tarefa: leva o tipo e o título
-// junto, pra dar pra rastrear de qual tarefa veio o registro — tanto aqui
-// quanto no comentário espelhado no ClickUp.
-const buildAtividadeTextoDaTarefa = (task, texto) =>
-  `✅ [${task?.tipo || 'Tarefa'}] ${task?.titulo || 'Tarefa'} — ${String(texto || '').trim()}`;
 
 // ─────────────────────────────────────────────────────────────────────────
 // PILHA DE CAMADAS MODAIS (Fase 2 do upgrade de navegação por teclado).
@@ -538,12 +548,149 @@ const getNextVersionLetter = (currentVersao) => {
 };
 
 // ─────────────────────────────────────────────
+// ABA ATIVIDADES REPAGINADA — helpers puros (Fase 3).
+// ─────────────────────────────────────────────
+
+// Normaliza acento/caixa pra busca: "genetica" acha "genética" e vice-versa.
+const normalizeForSearch = (s) =>
+  String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// Marca as ocorrências de `query` num texto PURO (sem marcador de menção) em
+// <mark>. Usado tanto pela busca do histórico quanto embutido dentro de
+// renderTextoComMencoes — nunca aplicado sobre o `@[Nome](id)` cru, só sobre
+// os pedaços de texto normal que ficam entre as menções.
+const highlightMatches = (texto, query, keyPrefix = 'hl') => {
+  const str = String(texto || '');
+  const q = String(query || '').trim();
+  if (!q) return [str];
+  const normStr = normalizeForSearch(str);
+  const normQ = normalizeForSearch(q);
+  if (!normQ) return [str];
+  const parts = [];
+  let cursor = 0;
+  let idx;
+  let key = 0;
+  while ((idx = normStr.indexOf(normQ, cursor)) !== -1) {
+    if (idx > cursor) parts.push(str.slice(cursor, idx));
+    parts.push(
+      <mark key={`${keyPrefix}-${key++}`} className="bg-amber-200 dark:bg-amber-500/40 text-inherit rounded-sm px-0.5">
+        {str.slice(idx, idx + q.length)}
+      </mark>
+    );
+    cursor = idx + normQ.length;
+  }
+  if (cursor < str.length) parts.push(str.slice(cursor));
+  return parts.length ? parts : [str];
+};
+
+// Resolve a redundância "[Follow Up] Follow": quando um contém o outro (sem
+// acento/hífen/caixa), devolve só o mais longo dos dois. Senão, "Tipo · Título".
+const tarefaSeloLabel = (tipo, titulo) => {
+  const t = String(tipo || '').trim();
+  const ti = String(titulo || '').trim();
+  if (!t) return ti || '';
+  if (!ti) return t;
+  const norm = (s) => normalizeForSearch(s).replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+  const nt = norm(t);
+  const nti = norm(ti);
+  if (nt === nti || nt.includes(nti) || nti.includes(nt)) {
+    return nt.length >= nti.length ? t : ti;
+  }
+  return `${t} · ${ti}`;
+};
+
+// "agora" / "há N min" / "há Nh" / "ontem" / "há N dias" / data absoluta
+// (7+ dias). `now` por parâmetro pra dar pra testar com um instante fixo.
+const formatRelativeTime = (iso, now = new Date()) => {
+  if (!iso) return { relative: '—', absolute: '—' };
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return { relative: '—', absolute: '—' };
+  const absolute = date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const diffMin = Math.floor((now.getTime() - date.getTime()) / 60000);
+  const diffHours = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  let relative;
+  if (diffMin < 1) relative = 'agora';
+  else if (diffMin < 60) relative = `há ${diffMin} min`;
+  else if (diffHours < 24) relative = `há ${diffHours}h`;
+  else if (diffDays === 1) relative = 'ontem';
+  else if (diffDays <= 6) relative = `há ${diffDays} dias`;
+  else relative = absolute;
+  return { relative, absolute };
+};
+
+// Lê uma linha de atividade num formato único, cobrindo tanto as colunas
+// novas (autor_nome/origem/tarefa_tipo/tarefa_titulo — ver migração
+// 20260904) quanto o histórico anterior a elas, cujo `texto` carrega tudo
+// misturado num de dois formatos manuscritos.
+const parseAtividade = (ativ) => {
+  const base = {
+    autorNome: ativ?.autor_nome || null,
+    autorId: ativ?.autor_clickup_id || null,
+    quando: ativ?.data_execucao || ativ?.created_at || null,
+    origem: ativ?.origem || 'manual',
+    tarefaTipo: ativ?.tarefa_tipo || null,
+    tarefaTitulo: ativ?.tarefa_titulo || null,
+    corpo: String(ativ?.texto || ''),
+    anexos: Array.isArray(ativ?.anexos) ? ativ.anexos : [],
+    clickupSynced: !!ativ?.clickup_comment_id
+  };
+
+  // Colunas novas presentes → leitura direta, sem tocar no texto. Não basta
+  // checar `ativ.origem`: a coluna tem DEFAULT 'manual' e por isso toda
+  // linha antiga também ganhou esse valor na migração — o sinal real de
+  // "isso já é registro novo" é ter autor ou referência de tarefa.
+  if (base.autorNome || base.tarefaTipo || base.tarefaTitulo) {
+    return base;
+  }
+
+  const texto = String(ativ?.texto || '');
+
+  // Formato criado ontem: "✅ [Tipo] Título — corpo"
+  let m = texto.match(/^✅ \[([^\]]+)\]\s*(.+?)\s+—\s+([\s\S]*)$/);
+  if (m) {
+    return { ...base, origem: 'tarefa', tarefaTipo: m[1].trim(), tarefaTitulo: m[2].trim(), corpo: m[3].trim() };
+  }
+
+  // Formato antigo digitado à mão: "[dd/mm/aaaa, hh:mm:ss] Nome: corpo"
+  m = texto.match(/^\[(\d{2}\/\d{2}\/\d{4}[^\]]*)\]\s*([^:\n]{1,60}):\s*([\s\S]*)$/);
+  if (m) {
+    return { ...base, autorNome: m[2].trim(), corpo: m[3].trim() };
+  }
+
+  return base;
+};
+
+// Busca sem acento/caixa sobre corpo + autor + referência de tarefa.
+const matchAtividade = (parsed, query) => {
+  const q = normalizeForSearch(query);
+  if (!q) return true;
+  const haystack = normalizeForSearch(
+    [parsed.corpo, parsed.autorNome, parsed.tarefaTipo, parsed.tarefaTitulo].filter(Boolean).join(' ')
+  );
+  return haystack.includes(q);
+};
+
+// Cabeçalho de agrupamento por dia do feed: "Hoje" / "Ontem" / "01 de setembro".
+const atividadeDiaLabel = (iso, now = new Date()) => {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return '';
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (diffDays === 0) return 'Hoje';
+  if (diffDays === 1) return 'Ontem';
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+};
+
+// ─────────────────────────────────────────────
 // @MENÇÕES (Registrar Atividade) — marcador "@[Nome](clickupUserId)" no
 // texto bruto. Preserva o id numérico do ClickUp pra virar uma menção real
 // (clicável, notifica a pessoa) quando o comentário é sincronizado lá —
-// ver handle_create_atividade em server.py.
+// ver handle_create_atividade em server.py. `query` opcional (Fase 3): marca
+// ocorrências de busca nos trechos de texto puro, sem tocar nas menções.
 // ─────────────────────────────────────────────
-const renderTextoComMencoes = (texto) => {
+const renderTextoComMencoes = (texto, query = '') => {
   if (!texto) return null;
   const re = /@\[([^\]]+)\]\((\d+)\)/g;
   const parts = [];
@@ -551,13 +698,17 @@ const renderTextoComMencoes = (texto) => {
   let match;
   let key = 0;
   while ((match = re.exec(texto)) !== null) {
-    if (match.index > lastIndex) parts.push(texto.slice(lastIndex, match.index));
+    if (match.index > lastIndex) {
+      parts.push(...highlightMatches(texto.slice(lastIndex, match.index), query, `hl${key}`));
+    }
     parts.push(
       <span key={`mencao-${key++}`} className="inline-block font-bold text-indigo-700 bg-indigo-50 px-1 rounded">@{match[1]}</span>
     );
     lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < texto.length) parts.push(texto.slice(lastIndex));
+  if (lastIndex < texto.length) {
+    parts.push(...highlightMatches(texto.slice(lastIndex), query, 'hlEnd'));
+  }
   return parts;
 };
 
@@ -1920,6 +2071,8 @@ function App() {
   const [editingAtividade, setEditingAtividade] = useState(null);
   const [editingAtividadeTexto, setEditingAtividadeTexto] = useState('');
   const [savingAtividade, setSavingAtividade] = useState(false);
+  const [atividadeBuscaAberta, setAtividadeBuscaAberta] = useState(false);
+  const [atividadeBuscaQuery, setAtividadeBuscaQuery] = useState('');
   const [searchProposalQuery, setSearchProposalQuery] = useState('');
   const [proposalSearchResults, setProposalSearchResults] = useState([]);
   const [showProposalDropdown, setShowProposalDropdown] = useState(false);
@@ -3496,18 +3649,31 @@ function App() {
       } catch (err) {}
 
       if (data === null) {
-        // Fallback: busca comentários da tarefa direto na API do ClickUp via proxy
+        // Fallback: busca comentários da tarefa direto na API do ClickUp via
+        // proxy, pro caso da Edge Function estar fora do ar. `data_execucao`
+        // (não `created_at`): é o campo que o JSX de fato lê pra exibir a
+        // data — usar outro nome aqui fazia essa data renderizar "Invalid
+        // Date" sempre que esse fallback disparava.
         const cuRes = await fetch(`/clickup-api/task/${idClean}/comment`, {
           headers: { ...getSupabaseHeaders() }
         });
         if (cuRes.ok) {
           const cuData = await cuRes.json();
-          data = (cuData.comments || []).map(c => ({
-            id: c.id,
-            texto: c.comment_text || (c.comment ? c.comment.map(seg => seg.text).join('') : ''),
-            created_at: c.date ? new Date(parseInt(c.date)).toISOString() : new Date().toISOString(),
-            autor: c.user?.username || c.user?.email || 'ClickUp'
-          }));
+          data = (cuData.comments || []).map(c => {
+            const iso = c.date ? new Date(parseInt(c.date)).toISOString() : new Date().toISOString();
+            return {
+              id: `cu_${c.id}`,
+              clickup_comment_id: c.id,
+              texto: (c.comment_text || (c.comment ? c.comment.map(seg => seg.text).join('') : '')).replace('[SPA Gestão Comercial] ', '').trim(),
+              data_execucao: iso,
+              created_at: iso,
+              updated_at: iso,
+              origem: 'clickup',
+              autor_nome: c.user?.username || c.user?.email || null,
+              autor_clickup_id: c.user?.id != null ? String(c.user.id) : null,
+              anexos: []
+            };
+          });
         }
       }
 
@@ -3524,7 +3690,13 @@ function App() {
     if (!novaAtividade.trim() || !clickupTaskId) return;
     setSavingAtividade(true);
     try {
-      await createAtividade({ clickupNegocioId: clickupTaskId, texto: novaAtividade });
+      await createAtividade({
+        clickupNegocioId: clickupTaskId,
+        texto: novaAtividade,
+        autorNome: userProfile?.username || userProfile?.email || null,
+        autorClickupId: userProfile?.id ? String(userProfile.id) : null,
+        origem: 'manual'
+      });
       showToast('Atividade registrada com sucesso!', 'success');
       setNovaAtividade('');
       fetchAtividades(clickupTaskId);
@@ -4103,9 +4275,18 @@ function App() {
 
     setTaskDetailSaving(true);
     try {
+      // `texto` é só o corpo digitado — a referência à tarefa vai nos
+      // campos estruturados (origem/tarefaTipo/tarefaTitulo), não mais
+      // embutida na string como no formato de ontem.
       await createAtividade({
         clickupNegocioId: negocioId,
-        texto: buildAtividadeTextoDaTarefa(task, texto)
+        texto,
+        autorNome: userProfile?.username || userProfile?.email || null,
+        autorClickupId: userProfile?.id ? String(userProfile.id) : null,
+        origem: 'tarefa',
+        tarefaId: task.id || null,
+        tarefaTipo: task.tipo || null,
+        tarefaTitulo: task.titulo || null
       });
 
       // Se o negócio já estiver aberto no drawer, atualiza a lista de
@@ -10233,7 +10414,7 @@ function App() {
                       rows={3}
                     />
                     <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 truncate">
-                      Será registrado como: ✅ [{task.tipo || 'Tarefa'}] {task.titulo} — ...
+                      Será registrado no histórico com a referência: ✅ Tarefa concluída ({task.tipo || 'Tarefa'}: {task.titulo})
                     </p>
                     <div className="flex gap-2 mt-2.5">
                       <button
@@ -10830,6 +11011,10 @@ function App() {
                   </div>
                 </div>
 
+                {/* Cards + Pipeline somem por completo na aba Atividades — o
+                    espaço que liberam vai direto pro histórico, que é
+                    flex-1 e absorve sozinho o que sobra. */}
+                {drawerSection !== 'status' && (
                 <div className="space-y-4 mb-6">
                   {/* Cards de Responsável, Valor e Previsão de Fechamento */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -11118,6 +11303,7 @@ function App() {
                     })()}
                   </div>
                 </div>
+                )}
 
                 <div className="flex-1 flex flex-col overflow-hidden">
                   {/* Barra de Abas com Ícones + Rótulos — padrão ARIA tabs:
@@ -11364,10 +11550,58 @@ function App() {
 
                         {/* Lista de Atividades Registradas */}
                         <div>
-                          <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-3">
-                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                            Histórico de Atividades
-                          </span>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                              Histórico de Atividades
+                            </span>
+                            <button
+                              onClick={() => { setAtividadeBuscaAberta(v => !v); if (atividadeBuscaAberta) setAtividadeBuscaQuery(''); }}
+                              className={`w-7 h-7 flex items-center justify-center rounded-lg border transition-colors cursor-pointer ${
+                                atividadeBuscaAberta
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600'
+                              }`}
+                              title="Buscar no histórico"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                              </svg>
+                            </button>
+                          </div>
+
+                          {atividadeBuscaAberta && (
+                            <div className="relative mb-3">
+                              <input
+                                type="text"
+                                autoFocus
+                                value={atividadeBuscaQuery}
+                                onChange={(e) => setAtividadeBuscaQuery(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key !== 'Escape') return;
+                                  e.stopPropagation(); // não deixa o ESC borbulhar e fechar o drawer inteiro
+                                  if (atividadeBuscaQuery) setAtividadeBuscaQuery('');
+                                  else setAtividadeBuscaAberta(false);
+                                }}
+                                placeholder="Buscar por palavra, pessoa ou assunto..."
+                                className="w-full rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 pl-9 pr-8 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800"
+                              />
+                              <svg className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                              </svg>
+                              {atividadeBuscaQuery && (
+                                <button
+                                  onClick={() => setAtividadeBuscaQuery('')}
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                                  title="Limpar busca"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          )}
 
                           {loadingAtividades ? (
                             <div className="flex items-center justify-center py-6">
@@ -11383,72 +11617,140 @@ function App() {
                               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Nenhuma atividade registrada.</p>
                               <p className="text-[10px] text-slate-400 dark:text-slate-500">Registre ações, retornos e próximos passos.</p>
                             </div>
-                          ) : (
-                            <div className="space-y-3">
-                              {atividades.map(ativ => (
-                                <div key={ativ.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-3.5 hover:border-indigo-200 hover:shadow-sm transition-all shadow-xs">
-                                  {editingAtividade === ativ.id ? (
-                                    <div className="space-y-2">
-                                      <MentionTextarea
-                                        value={editingAtividadeTexto}
-                                        onChange={setEditingAtividadeTexto}
-                                        membros={vendedores}
-                                        rows={3}
-                                      />
-                                      <div className="flex items-center space-x-2">
-                                        <button
-                                          onClick={() => handleEditAtividade(ativ.id)}
-                                          disabled={savingAtividade}
-                                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                                        >
-                                          {savingAtividade ? 'Salvando...' : 'Salvar'}
-                                        </button>
-                                        <button
-                                          onClick={() => { setEditingAtividade(null); setEditingAtividadeTexto(''); }}
-                                          className="px-3 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                                        >
-                                          Cancelar
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <div className="flex items-start justify-between">
-                                        <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed flex-1 pr-2 whitespace-pre-wrap">{renderTextoComMencoes(ativ.texto)}</p>
-                                        <div className="flex items-center space-x-1 flex-shrink-0">
-                                          {/* Botão Editar (Lápis) */}
-                                          <button
-                                            onClick={() => { setEditingAtividade(ativ.id); setEditingAtividadeTexto(ativ.texto); }}
-                                            className="p-1 text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-colors"
-                                            title="Editar atividade"
-                                          >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-                                          </button>
-                                          {/* Botão Excluir (Lixeira) */}
-                                          <button
-                                            onClick={() => handleDeleteAtividade(ativ.id)}
-                                            className="p-1 text-slate-400 dark:text-slate-500 hover:text-red-500 transition-colors"
-                                            title="Excluir atividade"
-                                          >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                                          </button>
-                                        </div>
-                                      </div>
-                                      <div className="flex items-center mt-2 space-x-2">
-                                        <svg className="w-3 h-3 text-slate-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-                                          {new Date(ativ.data_execucao).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                        </span>
-                                        {ativ.clickup_comment_id && (
-                                          <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-semibold">✓ ClickUp</span>
+                          ) : (() => {
+                            const agora = new Date();
+                            const parsedList = atividades.map(ativ => ({ ativ, parsed: parseAtividade(ativ) }));
+                            const query = atividadeBuscaAberta ? atividadeBuscaQuery : '';
+                            const filtrada = query ? parsedList.filter(({ parsed }) => matchAtividade(parsed, query)) : parsedList;
+
+                            if (query && filtrada.length === 0) {
+                              return (
+                                <div className="flex flex-col items-center justify-center py-8 text-center space-y-1.5 bg-slate-50/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-600 rounded-2xl">
+                                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Nenhum resultado para "{query}".</p>
+                                  <button onClick={() => setAtividadeBuscaQuery('')} className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer">Limpar busca</button>
+                                </div>
+                              );
+                            }
+
+                            let ultimoDia = null;
+
+                            return (
+                              <div className="space-y-3">
+                                {query && (
+                                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold px-0.5">
+                                    {filtrada.length} de {atividades.length} atividades
+                                  </p>
+                                )}
+                                {filtrada.map(({ ativ, parsed }) => {
+                                  const dia = atividadeDiaLabel(parsed.quando, agora);
+                                  const mostrarCabecalhoDia = dia && dia !== ultimoDia;
+                                  ultimoDia = dia || ultimoDia;
+                                  const { relative, absolute } = formatRelativeTime(parsed.quando, agora);
+                                  const autorNome = parsed.autorNome || 'Usuário';
+                                  const selo = parsed.origem === 'tarefa' ? tarefaSeloLabel(parsed.tarefaTipo, parsed.tarefaTitulo) : null;
+
+                                  return (
+                                    <React.Fragment key={ativ.id}>
+                                      {mostrarCabecalhoDia && (
+                                        <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-0.5 pt-1 first:pt-0">
+                                          {dia}
+                                        </p>
+                                      )}
+                                      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-3.5 hover:border-indigo-200 dark:hover:border-indigo-800/60 hover:shadow-sm transition-all shadow-xs">
+                                        {editingAtividade === ativ.id ? (
+                                          <div className="space-y-2">
+                                            <MentionTextarea
+                                              value={editingAtividadeTexto}
+                                              onChange={setEditingAtividadeTexto}
+                                              membros={vendedores}
+                                              rows={3}
+                                            />
+                                            <div className="flex items-center space-x-2">
+                                              <button
+                                                onClick={() => handleEditAtividade(ativ.id)}
+                                                disabled={savingAtividade}
+                                                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
+                                              >
+                                                {savingAtividade ? 'Salvando...' : 'Salvar'}
+                                              </button>
+                                              <button
+                                                onClick={() => { setEditingAtividade(null); setEditingAtividadeTexto(''); }}
+                                                className="px-3 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
+                                              >
+                                                Cancelar
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div>
+                                            <div className="flex items-start justify-between gap-2">
+                                              <div className="flex items-center gap-2 min-w-0">
+                                                {typeof AvatarInicial !== 'undefined' ? (
+                                                  <AvatarInicial nome={autorNome} size="sm" />
+                                                ) : (
+                                                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-[10px] font-extrabold flex-shrink-0 shadow-sm">
+                                                    {autorNome.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                                  </div>
+                                                )}
+                                                <div className="min-w-0">
+                                                  <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{autorNome}</p>
+                                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium" title={absolute}>{relative}</span>
+                                                    {selo && (
+                                                      <span className="text-[9px] bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-bold">
+                                                        ✅ {selo}
+                                                      </span>
+                                                    )}
+                                                    {parsed.clickupSynced && (
+                                                      <span className="text-[9px] bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-semibold">✓ ClickUp</span>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                              <div className="flex items-center gap-1 flex-shrink-0">
+                                                <button
+                                                  onClick={() => { setEditingAtividade(ativ.id); setEditingAtividadeTexto(parsed.corpo); }}
+                                                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 dark:hover:bg-indigo-500/25 transition-colors cursor-pointer"
+                                                  title="Editar atividade"
+                                                >
+                                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                                </button>
+                                                <button
+                                                  onClick={() => handleDeleteAtividade(ativ.id)}
+                                                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25 transition-colors cursor-pointer"
+                                                  title="Excluir atividade"
+                                                >
+                                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                                                </button>
+                                              </div>
+                                            </div>
+                                            <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap mt-2 pl-9">
+                                              {renderTextoComMencoes(parsed.corpo, query)}
+                                            </p>
+                                            {parsed.anexos.length > 0 && (
+                                              <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-9">
+                                                {parsed.anexos.map((anexo, i) => (
+                                                  <a
+                                                    key={anexo.clickup_attachment_id || i}
+                                                    href={anexo.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                                                  >
+                                                    📎 {anexo.title || 'Anexo'}
+                                                  </a>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
                                         )}
                                       </div>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     )}

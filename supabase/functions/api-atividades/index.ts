@@ -134,6 +134,13 @@ Deno.serve(async (req) => {
                 data_execucao: dateIso,
                 created_at: dateIso,
                 updated_at: dateIso,
+                // Comentário nativo do ClickUp, sem linha própria no
+                // Supabase: a resposta do ClickUp já traz o autor, que
+                // antes era descartado — agora vai pro feed também.
+                origem: "clickup",
+                autor_nome: c.user?.username || c.user?.email || null,
+                autor_clickup_id: c.user?.id != null ? String(c.user.id) : null,
+                anexos: [],
               });
             }
           }
@@ -160,10 +167,32 @@ Deno.serve(async (req) => {
       const idClean = String(clickupNegocioId).replace("#", "");
       const nowIso = new Date().toISOString();
 
+      // Metadados novos (aba Atividades repaginada) — todos opcionais, pra
+      // não quebrar nenhum chamador antigo que só manda clickup_negocio_id
+      // e texto. `anexos` são só ponteiros pro ClickUp (ver migração
+      // 20260904), nunca bytes de arquivo.
+      const autorNome = typeof data.autor_nome === "string" ? data.autor_nome.trim() || null : null;
+      const autorClickupId = data.autor_clickup_id != null ? String(data.autor_clickup_id) : null;
+      const origem = ["manual", "tarefa", "clickup"].includes(data.origem) ? data.origem : "manual";
+      const tarefaId = typeof data.tarefa_id === "string" ? data.tarefa_id : null;
+      const tarefaTipo = typeof data.tarefa_tipo === "string" ? data.tarefa_tipo : null;
+      const tarefaTitulo = typeof data.tarefa_titulo === "string" ? data.tarefa_titulo : null;
+      const anexos = Array.isArray(data.anexos) ? data.anexos : [];
+
+      // O texto gravado no nosso banco é só o corpo puro (a referência à
+      // tarefa vira colunas estruturadas, não mais um prefixo colado na
+      // string). O comentário no ClickUp, por outro lado, não tem como
+      // exibir essas colunas — recebe o contexto embutido no próprio texto.
+      let clickupTexto = texto;
+      if (origem === "tarefa" && (tarefaTipo || tarefaTitulo)) {
+        const selo = tarefaTipo && tarefaTitulo ? `${tarefaTipo}: ${tarefaTitulo}` : (tarefaTipo || tarefaTitulo);
+        clickupTexto = `✅ Tarefa concluída (${selo}) — ${texto}`;
+      }
+
       let clickupCommentId: string | null = null;
       try {
         const commentPayload = {
-          comment: buildClickUpCommentSegments(`[SPA Gestão Comercial] ${texto}`),
+          comment: buildClickUpCommentSegments(`[SPA Gestão Comercial] ${clickupTexto}`),
           notify_all: false,
         };
         const cuRes = await clickupFetch(`task/${idClean}/comment`, "POST", clickupToken, commentPayload);
@@ -184,6 +213,13 @@ Deno.serve(async (req) => {
         data_execucao: nowIso,
         created_at: nowIso,
         updated_at: nowIso,
+        autor_nome: autorNome,
+        autor_clickup_id: autorClickupId,
+        origem,
+        tarefa_id: tarefaId,
+        tarefa_tipo: tarefaTipo,
+        tarefa_titulo: tarefaTitulo,
+        anexos,
       };
 
       let sbResData: unknown[] = [supabasePayload];
@@ -205,17 +241,37 @@ Deno.serve(async (req) => {
 
       const nowIso = new Date().toISOString();
       let clickupCommentId: string | null = null;
+      let existingOrigem: string | null = null;
+      let existingTarefaTipo: string | null = null;
+      let existingTarefaTitulo: string | null = null;
 
       if (atividadeId.startsWith("cu_")) {
         clickupCommentId = atividadeId.replace("cu_", "");
       } else {
-        const { data: existing } = await supabase.from("atividades_negocio").select("clickup_comment_id").eq("id", atividadeId).maybeSingle();
+        const { data: existing } = await supabase
+          .from("atividades_negocio")
+          .select("clickup_comment_id, origem, tarefa_tipo, tarefa_titulo")
+          .eq("id", atividadeId)
+          .maybeSingle();
         if (existing?.clickup_comment_id) clickupCommentId = existing.clickup_comment_id;
+        existingOrigem = existing?.origem || null;
+        existingTarefaTipo = existing?.tarefa_tipo || null;
+        existingTarefaTitulo = existing?.tarefa_titulo || null;
+      }
+
+      // Reaplica o mesmo contexto de tarefa do POST original, senão editar
+      // o texto apagaria a referência no comentário do ClickUp.
+      let clickupTexto = texto;
+      if (existingOrigem === "tarefa" && (existingTarefaTipo || existingTarefaTitulo)) {
+        const selo = existingTarefaTipo && existingTarefaTitulo
+          ? `${existingTarefaTipo}: ${existingTarefaTitulo}`
+          : (existingTarefaTipo || existingTarefaTitulo);
+        clickupTexto = `✅ Tarefa concluída (${selo}) — ${texto}`;
       }
 
       if (clickupCommentId) {
         try {
-          const commentPayload = { comment: buildClickUpCommentSegments(`[SPA Gestão Comercial] ${texto}`) };
+          const commentPayload = { comment: buildClickUpCommentSegments(`[SPA Gestão Comercial] ${clickupTexto}`) };
           const cuRes = await clickupFetch(`comment/${clickupCommentId}`, "PUT", clickupToken, commentPayload);
           console.log(`[api-atividades] Comentário ${clickupCommentId} atualizado no ClickUp (status: ${cuRes.status})`);
         } catch (cuErr) {
