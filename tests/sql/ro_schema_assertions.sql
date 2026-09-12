@@ -139,11 +139,38 @@ BEGIN
         ro_rpc.id, DATE '2026-11-20', '[]'::jsonb, NULL,
         '11111111-1111-4111-8111-111111111103', '90848927', 'Thiago Lima'
     );
+    -- Resposta versionada da renovação com versao_esperada
+    SELECT versao INTO ro_rpc.versao FROM public.registros_oportunidade WHERE id = ro_rpc.id;
     SELECT * INTO renovacao_rpc FROM public.ro_responder_renovacao(
         ro_rpc.id, renovacao_rpc.ciclo, 'Aprovada', DATE '2026-11-25',
-        DATE '2027-03-11', NULL, '[]'::jsonb,
+        DATE '2027-03-11', NULL, '[]'::jsonb, ro_rpc.versao,
         '11111111-1111-4111-8111-111111111104', '90848927', 'Thiago Lima'
     );
+
+    -- Idempotência: retry com o mesmo request_id retorna o resultado mesmo após incremento da versão da R.O.
+    SELECT * INTO renovacao_rpc FROM public.ro_responder_renovacao(
+        ro_rpc.id, renovacao_rpc.ciclo, 'Aprovada', DATE '2026-11-25',
+        DATE '2027-03-11', NULL, '[]'::jsonb, ro_rpc.versao - 1,
+        '11111111-1111-4111-8111-111111111104', '90848927', 'Thiago Lima'
+    );
+    IF renovacao_rpc.situacao <> 'Aprovada' THEN
+        RAISE EXCEPTION 'Retry idempotente de responder renovação falhou';
+    END IF;
+
+    -- Conflito de versão ao tentar responder ciclo com versão defasada e novo request_id
+    BEGIN
+        PERFORM public.ro_responder_renovacao(
+            ro_rpc.id, renovacao_rpc.ciclo, 'Aprovada', DATE '2026-11-26',
+            DATE '2027-04-11', NULL, '[]'::jsonb, ro_rpc.versao - 1,
+            '11111111-1111-4111-8111-111111111104b', '90848927', 'Thiago Lima'
+        );
+        RAISE EXCEPTION 'Conflito de versão na resposta de renovação não foi detectado';
+    EXCEPTION
+        WHEN raise_exception THEN
+            IF SQLSTATE <> 'P0001' AND SQLERRM NOT ILIKE '%conflito de versão%' THEN
+                RAISE;
+            END IF;
+    END;
     IF (SELECT count(*) FROM public.eventos_ro WHERE registro_oportunidade_id = ro_rpc.id) <> 5 THEN
         RAISE EXCEPTION 'Fluxo RPC não registrou todos os eventos esperados';
     END IF;

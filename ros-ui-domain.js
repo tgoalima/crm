@@ -348,6 +348,7 @@
             data_resposta: dataResposta,
             novo_vencimento: novoVencimento,
             evidencias: Array.isArray(dados.evidencias) ? dados.evidencias : [],
+            versao_esperada: versaoEsperada,
             request_id: requestId,
           },
         };
@@ -362,6 +363,7 @@
             data_resposta: dataResposta,
             motivo,
             evidencias: Array.isArray(dados.evidencias) ? dados.evidencias : [],
+            versao_esperada: versaoEsperada,
             request_id: requestId,
           },
         };

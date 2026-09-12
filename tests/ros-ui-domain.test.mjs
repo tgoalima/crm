@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
 const caminhoDominio = new URL('../ros-ui-domain.js', import.meta.url).pathname;
+const lerArquivo = (relativo) => fs.readFileSync(new URL('../' + relativo, import.meta.url), 'utf8');
 
 function carregarDominioRos({ fetchImpl } = {}) {
   const contexto = { URLSearchParams, fetch: fetchImpl };
@@ -982,4 +983,164 @@ test('fetchRegistroOportunidade busca R.O. individual para recarregamento em cas
   assert.equal(ro.id, 'ro-recarregar-123');
   assert.equal(ro.versao, 3);
   assert.equal(ro.numero_ro, 'RO-ATUALIZADA-9');
+});
+
+test('validarPayloadAcaoRo inclui versao_esperada nos payloads de aprovar e negar renovacao', () => {
+  const { validarPayloadAcaoRo } = carregarDominioRos();
+
+  // 1. Aprovar renovação com versão esperada explícita e herdada do contexto
+  const aprovacao = validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'aprovar',
+    data_resposta: '2026-11-25',
+    novo_vencimento: '2027-03-11',
+    versao_esperada: 5,
+    request_id: 'req-renov-aprov-1',
+  }, { data_vencimento: '2026-12-11', ciclo: 2, versao: 3 });
+
+  assert.equal(aprovacao.rota, 'renovacoes/2/aprovar');
+  assert.equal(aprovacao.payload.versao_esperada, 5);
+  assert.equal(aprovacao.payload.novo_vencimento, '2027-03-11');
+  assert.equal(aprovacao.payload.request_id, 'req-renov-aprov-1');
+
+  // 2. Negar renovação com versão herdada do contexto
+  const negativa = validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'negar',
+    data_resposta: '2026-11-26',
+    motivo: 'Fabricante não concede novo prazo',
+    request_id: 'req-renov-negar-1',
+  }, { ciclo: 3, versao: 4 });
+
+  assert.equal(negativa.rota, 'renovacoes/3/negar');
+  assert.equal(negativa.payload.versao_esperada, 4);
+  assert.equal(negativa.payload.motivo, 'Fabricante não concede novo prazo');
+  assert.equal(negativa.payload.novo_vencimento, undefined);
+  assert.equal(negativa.payload.request_id, 'req-renov-negar-1');
+});
+
+test('executarAcaoRo traduz conflito de versao em 409 ao responder renovacao e preserva status', async () => {
+  const mockFetch = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: 'Conflito de versão da R.O. (esperada: 2, atual: 3)' }),
+  });
+
+  const { executarAcaoRo } = carregarDominioRos({ fetchImpl: mockFetch });
+
+  await assert.rejects(
+    () => executarAcaoRo('ro-conflito-1', 'renovacoes/1/aprovar', {
+      data_resposta: '2026-11-25',
+      novo_vencimento: '2027-03-11',
+      versao_esperada: 2,
+    }),
+    (err) => {
+      assert.equal(err.status, 409);
+      assert.match(err.message, /conflito/i);
+      return true;
+    }
+  );
+});
+
+test('fluxo de revisao real apos 409 atualiza R.O. no drawer via callback e preserva campos preenchidos', async () => {
+  const { fetchRegistroOportunidade, executarAcaoRo } = carregarDominioRos();
+
+  // Simulação dos campos digitados no modal pelo usuário
+  const camposDigitados = {
+    tipoResposta: 'aprovar',
+    dataResposta: '2026-11-25',
+    novoVencimento: '2027-04-15',
+    motivo: '',
+  };
+
+  let roNoDrawer = {
+    id: 'ro-409-test',
+    numero_ro: 'RO-ORIGINAL',
+    versao: 1,
+    situacao: 'Aprovada',
+    data_vencimento: '2026-12-11',
+  };
+
+  let roRecebidaNoCallback = null;
+  const onConflitoRoAtualizada = (roFresca) => {
+    roRecebidaNoCallback = roFresca;
+    roNoDrawer = roFresca;
+  };
+
+  // 1. Simula envio que retorna 409
+  const mockFetch409 = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: 'Conflito de versão da R.O. (esperada: 1, atual: 2)' }),
+  });
+  const { executarAcaoRo: acaoComConflito } = carregarDominioRos({ fetchImpl: mockFetch409 });
+
+  let erroCapturado = null;
+  try {
+    await acaoComConflito('ro-409-test', 'renovacoes/1/aprovar', {
+      data_resposta: camposDigitados.dataResposta,
+      novo_vencimento: camposDigitados.novoVencimento,
+      versao_esperada: roNoDrawer.versao,
+    });
+  } catch (err) {
+    erroCapturado = err;
+  }
+  assert.equal(erroCapturado?.status, 409);
+
+  // 2. Em 409, busca a R.O. fresca
+  const mockFetchFresca = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      data: [{
+        id: 'ro-409-test',
+        numero_ro: 'RO-ATUALIZADA-POR-OUTRO',
+        versao: 2,
+        situacao: 'Aprovada',
+        data_vencimento: '2026-12-11',
+        eventos_ro: [{ tipo: 'Enviada ao fabricante' }],
+      }],
+      total: 1,
+    }),
+  });
+  const { fetchRegistroOportunidade: buscarFresca } = carregarDominioRos({ fetchImpl: mockFetchFresca });
+  const roFresca = await buscarFresca('ro-409-test');
+
+  // 3. Aplica callback no drawer e atualiza versaoEsperada
+  onConflitoRoAtualizada(roFresca);
+  let versaoEsperadaAtualizada = roFresca.versao;
+
+  // Asserções:
+  // - Callback do drawer foi executada com a R.O. fresca
+  assert.equal(roRecebidaNoCallback?.numero_ro, 'RO-ATUALIZADA-POR-OUTRO');
+  assert.equal(roNoDrawer.versao, 2);
+  assert.equal(versaoEsperadaAtualizada, 2);
+
+  // - Campos digitados pelo usuário NÃO foram apagados
+  assert.equal(camposDigitados.tipoResposta, 'aprovar');
+  assert.equal(camposDigitados.dataResposta, '2026-11-25');
+  assert.equal(camposDigitados.novoVencimento, '2027-04-15');
+
+  // 4. Nova confirmação pelo usuário usa a versão esperada atualizada (2) e tem sucesso
+  const mockFetchSucesso = async (url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.versao_esperada, 2);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { id: 'ro-409-test', situacao: 'Aprovada', versao: 3 } }),
+    };
+  };
+  const { executarAcaoRo: acaoComSucesso } = carregarDominioRos({ fetchImpl: mockFetchSucesso });
+  const sucesso = await acaoComSucesso('ro-409-test', 'renovacoes/1/aprovar', {
+    data_resposta: camposDigitados.dataResposta,
+    novo_vencimento: camposDigitados.novoVencimento,
+    versao_esperada: versaoEsperadaAtualizada,
+  });
+  assert.equal(sucesso.versao, 3);
+});
+
+test('app.js conecta onConflitoRoAtualizada entre RegistroOportunidadeDrawer e RoActionModal', () => {
+  const appJs = lerArquivo('app.js');
+  assert.ok(appJs.includes('onConflitoRoAtualizada={handleConflitoRoAtualizada}'));
+  assert.ok(appJs.includes('const handleConflitoRoAtualizada = useCallback((roFresca) => {'));
+  assert.ok(appJs.includes('setRo(roFresca)'));
 });

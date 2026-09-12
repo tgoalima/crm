@@ -227,7 +227,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
   }
   match = rota.match(new RegExp(`^(${UUID_PATTERN})/renovacoes/(\\d+)/(aprovar|negar)$`, 'i'));
   if (match) {
-    somente(corpo, ['data_resposta', 'novo_vencimento', 'motivo', 'evidencias', 'request_id']);
+    somente(corpo, ['data_resposta', 'novo_vencimento', 'motivo', 'evidencias', 'versao_esperada', 'request_id']);
     const aprovar = match[3].toLowerCase() === 'aprovar';
     return { rpc: 'ro_responder_renovacao', params: {
       p_id: match[1], p_ciclo: Number(match[2]), p_situacao: aprovar ? 'Aprovada' : 'Negada',
@@ -235,6 +235,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
       p_novo_vencimento: aprovar ? data(corpo.novo_vencimento, 'O novo vencimento') : null,
       p_motivo: aprovar ? null : texto(corpo.motivo, 'O motivo', true),
       p_evidencias: corpo.evidencias ?? [],
+      p_versao_esperada: versaoEsperada(corpo.versao_esperada),
       p_request_id: texto(corpo.request_id, 'O request_id'),
     } };
   }

@@ -2000,6 +2000,7 @@ function RoActionModal({
   onClose,
   onSuccess,
   getSupabaseHeaders = null,
+  onConflitoRoAtualizada = null,
 }) {
   const modalRef = React.useRef(null);
   const modalLayer = useModalLayer({ open: aberto, onClose, panelRef: modalRef });
@@ -2114,12 +2115,21 @@ function RoActionModal({
       if (onSuccess) onSuccess(res, msg);
     } catch (err) {
       if (err.status === 409) {
-        // Conflito de versão: manter dados do formulário, recarregar R.O., atualizar versão esperada
+        // Conflito de versão (409):
+        // - Manter todos os campos do formulário preenchidos;
+        // - Buscar a R.O. atualizada;
+        // - Atualizar o estado do RegistroOportunidadeDrawer via callback explícita;
+        // - Manter o ActionModal aberto;
+        // - Atualizar apenas a versaoEsperada para a nova confirmação;
+        // - Exibir aviso claro para revisão dos dados novos no painel antes de confirmar novamente.
         try {
           if (fetchRegistroOportunidade) {
-            const roAtualizada = await fetchRegistroOportunidade(ro.id, { getSupabaseHeaders });
-            if (roAtualizada && roAtualizada.versao) {
-              setVersaoEsperada(roAtualizada.versao);
+            const roFresca = await fetchRegistroOportunidade(ro.id, { getSupabaseHeaders });
+            if (roFresca && roFresca.versao) {
+              setVersaoEsperada(roFresca.versao);
+              if (typeof onConflitoRoAtualizada === 'function') {
+                onConflitoRoAtualizada(roFresca);
+              }
             }
           }
         } catch (reloadErr) {
@@ -2509,6 +2519,13 @@ function RegistroOportunidadeDrawer({
   const cliente = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || '—';
   const vigencia = calcularVigenciaRo ? calcularVigenciaRo(ro.data_vencimento) : 'Sem prazo';
 
+  const handleConflitoRoAtualizada = useCallback((roFresca) => {
+    if (roFresca && roFresca.id) {
+      setRo(roFresca);
+      if (onRoAtualizada) onRoAtualizada(roFresca);
+    }
+  }, [onRoAtualizada]);
+
   const recarregarRoCompleta = async () => {
     if (fetchRegistroOportunidade && ro?.id) {
       try {
@@ -2640,6 +2657,7 @@ function RegistroOportunidadeDrawer({
           onClose={() => setAcaoAtiva(null)}
           onSuccess={handleSucessoAcao}
           getSupabaseHeaders={getSupabaseHeaders}
+          onConflitoRoAtualizada={handleConflitoRoAtualizada}
         />
       )}
     </>

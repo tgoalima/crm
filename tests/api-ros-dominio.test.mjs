@@ -310,3 +310,59 @@ test('teste SQL do fluxo de R.O. inclui asserção transacional para ro_registra
   assert.match(testeSql, /Aguardando aprovação/);
   assert.match(testeSql, /ROLLBACK;\s*$/);
 });
+
+test('rota de responder renovação aceita versao_esperada e mapeia para a nova RPC', () => {
+  const aprovacao = interpretarComando('POST', `${uuid}/renovacoes/1/aprovar`, {
+    data_resposta: '2026-11-25',
+    novo_vencimento: '2027-03-11',
+    versao_esperada: 3,
+    request_id: 'req-ren-1',
+  });
+  assert.equal(aprovacao.rpc, 'ro_responder_renovacao');
+  assert.equal(aprovacao.params.p_id, uuid);
+  assert.equal(aprovacao.params.p_ciclo, 1);
+  assert.equal(aprovacao.params.p_situacao, 'Aprovada');
+  assert.equal(aprovacao.params.p_data_resposta, '2026-11-25');
+  assert.equal(aprovacao.params.p_novo_vencimento, '2027-03-11');
+  assert.equal(aprovacao.params.p_versao_esperada, 3);
+  assert.equal(aprovacao.params.p_request_id, 'req-ren-1');
+
+  const negativa = interpretarComando('POST', `${uuid}/renovacoes/2/negar`, {
+    data_resposta: '2026-11-26',
+    motivo: 'Fabricante negou extensão de prazo',
+    versao_esperada: 4,
+    request_id: 'req-ren-2',
+  });
+  assert.equal(negativa.rpc, 'ro_responder_renovacao');
+  assert.equal(negativa.params.p_id, uuid);
+  assert.equal(negativa.params.p_ciclo, 2);
+  assert.equal(negativa.params.p_situacao, 'Negada');
+  assert.equal(negativa.params.p_data_resposta, '2026-11-26');
+  assert.equal(negativa.params.p_motivo, 'Fabricante negou extensão de prazo');
+  assert.equal(negativa.params.p_novo_vencimento, null);
+  assert.equal(negativa.params.p_versao_esperada, 4);
+  assert.equal(negativa.params.p_request_id, 'req-ren-2');
+
+  assert.throws(() => interpretarComando('POST', `${uuid}/renovacoes/1/aprovar`, {
+    data_resposta: '2026-11-25',
+    novo_vencimento: '2027-03-11',
+    versao_esperada: -1,
+  }), /versão/i);
+});
+
+test('migration de renovação versionada não expõe função SECURITY DEFINER ao público e revoga execute', () => {
+  const migration = lerArquivo('supabase/migrations/20260912e_ro_responder_renovacao_versao.sql');
+  assert.match(migration, /SECURITY INVOKER/);
+  assert.doesNotMatch(migration, /SECURITY DEFINER/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.ro_responder_renovacao[\s\S]*FROM PUBLIC, anon, authenticated;/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.ro_responder_renovacao[\s\S]*TO service_role;/);
+  assert.match(migration, /p_versao_esperada integer DEFAULT NULL/);
+});
+
+test('teste SQL do fluxo de R.O. inclui validação de versão e retry idempotente em renovação', () => {
+  const testeSql = lerArquivo('tests/sql/ro_schema_assertions.sql').trim();
+  assert.match(testeSql, /ro_responder_renovacao/);
+  assert.match(testeSql, /Retry idempotente de responder renovação/);
+  assert.match(testeSql, /Conflito de versão na resposta de renovação/);
+  assert.match(testeSql, /P0001/);
+});
