@@ -407,6 +407,104 @@ const uploadAtividadeAnexo = async ({ clickupNegocioId, file }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
+// CLIENTE HTTP E HELPERS PARA REGISTROS DE OPORTUNIDADE (R.O.)
+// ─────────────────────────────────────────────────────────────────────────
+const montarQueryRos = (filters = {}, page = 1, limit = 50) => {
+  const params = new URLSearchParams();
+  params.set('pagina', String(Math.max(1, Number(page) || 1)));
+  params.set('limite', String(Math.max(1, Math.min(200, Number(limit) || 50))));
+
+  const chavesPermitidas = ['negocio_id', 'fabricante_id', 'situacao', 'responsavel', 'vence_ate'];
+  for (const chave of chavesPermitidas) {
+    const valor = filters[chave];
+    if (valor !== undefined && valor !== null) {
+      const str = String(valor).trim();
+      if (str) {
+        params.set(chave, str);
+      }
+    }
+  }
+  return params;
+};
+
+const traduzirErroApiRos = (status, responseData, fallback) => {
+  if (status === 401) {
+    return 'Sessão expirada ou não autenticada. Faça login novamente no CRM.';
+  }
+  if (status === 403) {
+    return 'Acesso negado: seu usuário não possui autorização registrada no CRM.';
+  }
+  if (status === 409) {
+    return (
+      responseData?.error ||
+      'Conflito de versão ou duplicidade: o registro foi alterado por outro usuário.'
+    );
+  }
+  if (status === 422) {
+    return responseData?.error || 'Dados da solicitação inválidos para esta operação de R.O.';
+  }
+  if (status === 500) {
+    return (
+      responseData?.error ||
+      'Erro inesperado na comunicação com o servidor ao consultar R.Os.'
+    );
+  }
+  if (responseData?.error && typeof responseData.error === 'string') {
+    return responseData.error;
+  }
+  if (fallback && typeof fallback === 'string') {
+    return fallback;
+  }
+  return 'Erro inesperado na comunicação com o servidor ao consultar R.Os.';
+};
+
+const fetchRegistrosOportunidade = async (filters = {}, page = 1, limit = 50, options = {}) => {
+  const fetchFn = options.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+  if (!fetchFn) {
+    throw new Error('Ambiente sem suporte a fetch disponível.');
+  }
+
+  const query = montarQueryRos(filters, page, limit);
+  const baseUrl = options.baseUrl || '/api/ros';
+  const queryString = query.toString();
+  const url = queryString ? `${baseUrl}?${queryString}` : baseUrl;
+
+  const headers = {
+    ...getSupabaseHeaders(),
+    ...(options.headers || (typeof options.getHeaders === 'function' ? options.getHeaders() : {}))
+  };
+
+  let res;
+  try {
+    res = await fetchFn(url, {
+      method: 'GET',
+      headers
+    });
+  } catch (err) {
+    throw new Error(`Falha de rede ao consultar R.Os: ${err?.message || err}`);
+  }
+
+  let payload = null;
+  try {
+    payload = await res.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!res.ok) {
+    const msg = traduzirErroApiRos(res.status, payload, 'Erro ao carregar lista de R.Os.');
+    throw new Error(msg);
+  }
+
+  return {
+    data: Array.isArray(payload?.data) ? payload.data : [],
+    total: typeof payload?.total === 'number' ? payload.total : (payload?.data?.length || 0),
+    pagina: typeof payload?.pagina === 'number' ? payload.pagina : page,
+    limite: typeof payload?.limite === 'number' ? payload.limite : limit,
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────
 // PILHA DE CAMADAS MODAIS (Fase 2 do upgrade de navegação por teclado).
 // Antes disso, ESC dependia de uma cadeia if/else escrita à mão que tinha
 // que ser mantida manualmente em sincronia com quais modais existiam — o
@@ -2004,7 +2102,7 @@ function App() {
   // Função para obter a aba inicial com base na Hash URL (SPA Hash Routing)
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '').trim();
-    if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
+    if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas', 'ros'].includes(hash)) {
       return hash;
     }
     return safeStorage.getItem('crm_active_view') || 'kanban';
@@ -2039,7 +2137,7 @@ function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').trim();
-      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas'].includes(hash)) {
+      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas', 'ros'].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -2143,7 +2241,19 @@ function App() {
   const [proposalSearchResults, setProposalSearchResults] = useState([]);
   const [showProposalDropdown, setShowProposalDropdown] = useState(false);
   const [selectedProposalForTask, setSelectedProposalForTask] = useState(null);
-  
+
+  // Estado exclusivo da rota de Registros de Oportunidade (Task 2)
+  const [rosState, setRosState] = useState({
+    rows: [],
+    filters: {},
+    page: 1,
+    total: 0,
+    loading: false,
+    error: null,
+    selectedId: null,
+  });
+  const rosFetchIdRef = useRef(0);
+
   // Autenticação e Token do Usuário no ClickUp
   const [userClickUpToken, setUserClickUpToken] = useState(() => localStorage.getItem('crm_user_clickup_token') || '');
   const [userProfile, setUserProfile] = useState(() => {
@@ -3822,7 +3932,7 @@ function App() {
     }
     setSavingAtividade(true);
     try {
-      await createAtividade({
+      const atividadeSalva = await createAtividade({
         clickupNegocioId: clickupTaskId,
         texto: textoFinal,
         autorNome: userProfile?.username || userProfile?.email || null,
@@ -3830,7 +3940,8 @@ function App() {
         origem: 'manual',
         anexos: anexosProntos
       });
-      showToast('Atividade registrada com sucesso!', 'success');
+      const syncPendente = atividadeSalva?.[0]?.sincronizacao && atividadeSalva[0].sincronizacao !== 'sincronizado';
+      showToast(syncPendente ? 'Atividade salva no CRM. O envio ao ClickUp precisa de verificação; não é necessário cadastrar novamente.' : 'Atividade registrada com sucesso!', syncPendente ? 'warning' : 'success');
       setNovaAtividade('');
       setNovaAtividadeAnexos([]);
       fetchAtividades(clickupTaskId);
@@ -4448,7 +4559,7 @@ function App() {
       // `texto` é só o corpo digitado — a referência à tarefa vai nos
       // campos estruturados (origem/tarefaTipo/tarefaTitulo), não mais
       // embutida na string como no formato de ontem.
-      await createAtividade({
+      const atividadeSalva = await createAtividade({
         clickupNegocioId: negocioId,
         texto,
         autorNome: userProfile?.username || userProfile?.email || null,
@@ -4473,7 +4584,8 @@ function App() {
       if (task.status !== 'concluida') {
         await toggleTaskStatus(task);
       }
-      showToast('Tarefa concluída e atividade registrada no negócio!', 'success');
+      const syncPendente = atividadeSalva?.[0]?.sincronizacao && atividadeSalva[0].sincronizacao !== 'sincronizado';
+      showToast(syncPendente ? 'Atividade salva no CRM. O envio ao ClickUp precisa de verificação; não é necessário cadastrar novamente.' : 'Tarefa concluída e atividade registrada no negócio!', syncPendente ? 'warning' : 'success');
       closeTaskDetail();
     } catch (err) {
       console.error('[TAREFAS] Erro ao concluir com atividade:', err);
@@ -4673,6 +4785,34 @@ function App() {
       });
     }
   }, [activeTab, supabaseClient]);
+
+  // R.O. (Task 2) - Carrega a lista somente quando activeTab for 'ros', protegendo contra respostas obsoletas
+  useEffect(() => {
+    if (activeTab !== 'ros') return;
+
+    const fetchId = ++rosFetchIdRef.current;
+    setRosState((prev) => ({ ...prev, loading: true, error: null }));
+
+    fetchRegistrosOportunidade(rosState.filters, rosState.page)
+      .then((resultado) => {
+        if (fetchId !== rosFetchIdRef.current) return;
+        setRosState((prev) => ({
+          ...prev,
+          rows: resultado.data,
+          total: resultado.total,
+          loading: false,
+          error: null,
+        }));
+      })
+      .catch((err) => {
+        if (fetchId !== rosFetchIdRef.current) return;
+        setRosState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err?.message || 'Erro ao carregar Registros de Oportunidade.',
+        }));
+      });
+  }, [activeTab, rosState.filters, rosState.page]);
 
   // Armazenamento em memória para filtros instantâneos sem atraso
   const rawProposalsRef = useRef([]);
@@ -10722,6 +10862,23 @@ function App() {
           </div>
         );
       })()}
+
+      {/* 5. Aba de Registros de Oportunidade (Task 2 - Container Shell de estado) */}
+      {activeTab === 'ros' && (
+        <div className="flex-1 flex flex-col min-h-0 p-6 overflow-auto">
+          {rosState.loading && (
+            <div className="flex items-center justify-center p-12 text-slate-500 dark:text-slate-400 text-sm">
+              <span className="inline-block w-4 h-4 mr-2 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+              <span>Carregando Registros de Oportunidade...</span>
+            </div>
+          )}
+          {rosState.error && (
+            <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-red-700 dark:text-red-300 text-sm">
+              {rosState.error}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Lightbox de anexo (imagem) — Fase 4. z-[120]: acima de tudo,
           inclusive do drawer (que abre por baixo dele). */}
