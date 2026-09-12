@@ -1095,9 +1095,12 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
 
           {/* SEÇÃO 5: REGISTROS DE OPORTUNIDADE (R.O.) */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
-            <SectionTitle>Registros de Oportunidade (R.O.)</SectionTitle>
+            <SectionTitle>Registros de Oportunidade (R.O.) — Dados legados</SectionTitle>
+            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/60 mt-2 mb-3">
+              Estes campos são legados e mantidos apenas para histórico. Novas R.Os devem ser criadas pela seção estruturada vinculada à oportunidade.
+            </p>
             <div className="space-y-2.5 mt-2">
-              <CRMInput label="R.O: Infraestrutura" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
+              <CRMInput label="R.O: Infraestrutura (legado)" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <CRMInput label="R.O: Software 1" name="roSw1" value={form.roSw1} onChange={handleChange} placeholder="Ex: Veeam RO #98765" />
                 <CRMInput label="R.O: Software 2" name="roSw2" value={form.roSw2} onChange={handleChange} placeholder="Ex: Fortinet RO #54321" />
@@ -1347,9 +1350,12 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
 
           {/* SEÇÃO 5: REGISTROS DE OPORTUNIDADE (R.O.) */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
-            <SectionTitle>Registros de Oportunidade (R.O.)</SectionTitle>
+            <SectionTitle>Registros de Oportunidade (R.O.) — Dados legados</SectionTitle>
+            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/60 mt-2 mb-3">
+              Estes campos são legados e mantidos apenas para histórico. Novas R.Os devem ser criadas pela seção estruturada vinculada à oportunidade.
+            </p>
             <div className="space-y-2.5 mt-2">
-              <CRMInput label="R.O: Infraestrutura" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
+              <CRMInput label="R.O: Infraestrutura (legado)" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <CRMInput label="R.O: Software 1" name="roSw1" value={form.roSw1} onChange={handleChange} placeholder="Ex: Veeam RO #98765" />
                 <CRMInput label="R.O: Software 2" name="roSw2" value={form.roSw2} onChange={handleChange} placeholder="Ex: Fortinet RO #54321" />
@@ -1375,8 +1381,87 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
 // ─────────────────────────────────────────────
 // DRAWER FICHA 360º v3.2
 // ─────────────────────────────────────────────
-const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, onClose, onOpenNegocio, onNovaOportunidade, onNovoContato, onEditarEmpresa, onEditarContato, onExcluirContato, onExcluirEmpresa, onEditarNegocio, onExcluirNegocio, isModalAberto, abaInicial = 'visao_geral' }) => {
+const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, onClose, onOpenNegocio, onNovaOportunidade, onNovoContato, onEditarEmpresa, onEditarContato, onExcluirContato, onExcluirEmpresa, onEditarNegocio, onExcluirNegocio, isModalAberto, abaInicial = 'visao_geral', onNovaRo, onNavegarParaRos }) => {
   const [aba, setAba] = React.useState(abaInicial);
+
+  // R.Os Estruturadas da Conta (Task 8 / Ficha 360º)
+  const [rosData, setRosData] = React.useState({
+    loading: false,
+    error: null,
+    rows: [],
+    total: null,
+    limite: 200,
+  });
+
+  const carregarRosConta = React.useCallback(async () => {
+    if (!conta?.id) return;
+    setRosData((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const headers = getEmpresasClickUpHeaders();
+      const resp = await fetch(`/api/ros?conta_id=${encodeURIComponent(conta.id)}&limite=200`, {
+        method: 'GET',
+        headers,
+      });
+      if (!resp.ok) {
+        let msg = `Erro ao carregar R.Os da empresa (${resp.status})`;
+        try {
+          const body = await resp.json();
+          if (body?.error) msg = body.error;
+        } catch (_) {}
+        setRosData((prev) => ({ ...prev, loading: false, error: msg }));
+        return;
+      }
+      const jsonResp = await resp.json();
+      setRosData({
+        loading: false,
+        error: null,
+        rows: Array.isArray(jsonResp.data) ? jsonResp.data : [],
+        total: jsonResp.total ?? (Array.isArray(jsonResp.data) ? jsonResp.data.length : 0),
+        limite: jsonResp.limite || 200,
+      });
+    } catch (err) {
+      setRosData((prev) => ({
+        ...prev,
+        loading: false,
+        error: err instanceof Error ? err.message : 'Falha de conexão ao consultar R.Os estruturadas.',
+      }));
+    }
+  }, [conta?.id]);
+
+  React.useEffect(() => {
+    carregarRosConta();
+  }, [carregarRosConta]);
+
+  React.useEffect(() => {
+    const onRoCriada = () => { carregarRosConta(); };
+    window.addEventListener('ro-criada', onRoCriada);
+    return () => window.removeEventListener('ro-criada', onRoCriada);
+  }, [carregarRosConta]);
+
+  const handleNovaRoOportunidade = React.useCallback((negocio) => {
+    if (onNovaRo) {
+      onNovaRo(negocio);
+    } else {
+      window.dispatchEvent(new CustomEvent('abrir-nova-ro', {
+        detail: { negocio, oportunidade: negocio, negocio_id: negocio?.id },
+      }));
+    }
+  }, [onNovaRo]);
+
+  const handleAbrirTelaGeralRos = React.useCallback((filtrosAdicionais = {}) => {
+    const filtros = { conta_id: conta?.id, ...filtrosAdicionais };
+    if (onNavegarParaRos) {
+      onNavegarParaRos(filtros);
+      if (onClose) onClose();
+    } else {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(filtros)) {
+        if (v) params.set(k, String(v));
+      }
+      window.location.hash = `#ros?${params.toString()}`;
+      if (onClose) onClose();
+    }
+  }, [conta?.id, onNavegarParaRos, onClose]);
   const [filtroEstagio, setFiltroEstagio] = React.useState('todos');
 
   React.useEffect(() => {
@@ -1530,7 +1615,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
 
           {/* ABAS */}
           <div className="flex items-center gap-1.5 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1 pt-1.5">
-            {[['visao_geral','Visão Geral'],['contatos',`Contatos (${contatos.length})`],['oportunidades',`Oportunidades (${negocios.length})`]].map(([id,label]) => (
+            {[['visao_geral','Visão Geral'],['contatos',`Contatos (${contatos.length})`],['oportunidades',`Oportunidades (${negocios.length})`],['ros', `R.Os (${rosData.loading ? '...' : rosData.total !== null ? rosData.total : 0})`]].map(([id,label]) => (
               <button key={id} onClick={() => setAba(id)} className={`relative px-3.5 py-2.5 rounded-t-xl text-xs font-bold transition-all duration-200 cursor-pointer ${aba===id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'}`}>
                 {label}
                 {aba===id && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full"></span>}
@@ -1697,7 +1782,14 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className={`text-base font-black ${isGanho ? 'text-emerald-600' : isPerdido ? 'text-rose-600' : isCongelado ? 'text-blue-600' : 'text-slate-900 dark:text-slate-100'}`}>{valor > 0 ? formatCurrency(valor) : '—'}</span>
-                          <div className="flex items-center gap-0.5 ml-1" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1.5 ml-1" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => handleNovaRoOportunidade(n)}
+                              title="Criar nova R.O. estruturada para esta oportunidade"
+                              className="flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60 border border-indigo-200/80 dark:border-indigo-800 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer shrink-0"
+                            >
+                              + Nova R.O.
+                            </button>
                             <button onClick={() => onEditarNegocio && onEditarNegocio(n)} title="Editar oportunidade" className="w-7 h-7 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"><IconEdit size={13} /></button>
                             <button onClick={() => onExcluirNegocio && onExcluirNegocio(n)} title="Excluir oportunidade" className="w-7 h-7 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"><IconTrash size={13} /></button>
                           </div>
@@ -1711,6 +1803,250 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
               </div>
             </div>
           )}
+
+          {/* ABA R.OS ESTRUTURADAS (Task 8 / Ficha 360º) */}
+          {aba === 'ros' && (
+            <div className="p-5 space-y-4">
+              {/* Header da Seção de R.Os */}
+              <div className="flex items-center justify-between gap-3 pb-1 border-b border-slate-200/80 dark:border-slate-700/80">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <IconDocument size={14} className="text-indigo-500" />
+                    <span>Registros de Oportunidade (R.O.) Estruturados</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                    Registros oficiais emitidos por fabricantes vinculados às oportunidades desta empresa.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => carregarRosConta()}
+                    disabled={rosData.loading}
+                    title="Atualizar lista de R.Os"
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <IconRefresh size={13} className={rosData.loading ? 'animate-spin' : ''} />
+                  </button>
+                  <button
+                    onClick={() => handleAbrirTelaGeralRos()}
+                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    Ver na tela de R.Os ↗
+                  </button>
+                </div>
+              </div>
+
+              {/* Banner de Limite / Paginação Parcial */}
+              {rosData.total !== null && rosData.total > 200 && (
+                <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-xl flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-indigo-800 dark:text-indigo-200">
+                    <span className="text-base">ℹ️</span>
+                    <span>
+                      Exibindo <strong>{rosData.rows.length}</strong> de <strong>{rosData.total}</strong> R.Os (listagem parcial da conta).
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleAbrirTelaGeralRos()}
+                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs transition-colors shrink-0 cursor-pointer shadow-2xs"
+                  >
+                    Ver todas na tela geral
+                  </button>
+                </div>
+              )}
+
+              {/* Estado de Carregamento (Loading) */}
+              {rosData.loading && (
+                <div className="py-12 text-center bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs space-y-3">
+                  <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Carregando R.Os estruturadas da empresa...
+                  </p>
+                </div>
+              )}
+
+              {/* Estado de Erro (NUNCA exibe 'nenhuma R.O.' durante falha) */}
+              {!rosData.loading && rosData.error && (
+                <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-2xl shadow-2xs space-y-2.5">
+                  <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300 text-xs font-bold">
+                    <span>⚠️</span>
+                    <span>Não foi possível consultar as R.Os desta conta</span>
+                  </div>
+                  <p className="text-xs text-rose-600 dark:text-rose-400 font-mono">
+                    {rosData.error}
+                  </p>
+                  <button
+                    onClick={() => carregarRosConta()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
+                  >
+                    <IconRefresh size={12} />
+                    <span>Tentar novamente</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Estado Vazio (somente se não houver erro nem loading) */}
+              {!rosData.loading && !rosData.error && rosData.rows.length === 0 && (
+                <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6 space-y-2">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center mx-auto mb-2 text-indigo-500">
+                    <IconDocument size={22} />
+                  </div>
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                    Nenhuma R.O. estruturada encontrada
+                  </p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mx-auto">
+                    Esta conta ainda não possui Registros de Oportunidade cadastrados. Para criar um novo registro, acesse a aba Oportunidades e clique em "+ Nova R.O.".
+                  </p>
+                  {negocios.length > 0 && (
+                    <button
+                      onClick={() => setAba('oportunidades')}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      Ir para Oportunidades ({negocios.length}) →
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Lista de R.Os Estruturadas agrupadas por Oportunidade */}
+              {!rosData.loading && !rosData.error && rosData.rows.length > 0 && (
+                <div className="space-y-4">
+                  {(() => {
+                    // Agrupar R.Os por negócio/oportunidade de origem
+                    const grupos = new Map();
+                    for (const ro of rosData.rows) {
+                      const oppNome = ro.negocios?.nome || ro.negocio?.nome || 'Oportunidade de origem';
+                      const oppId = ro.negocio_id || ro.negocios?.id || oppNome;
+                      if (!grupos.has(oppId)) {
+                        grupos.set(oppId, {
+                          id: oppId,
+                          nome: oppNome,
+                          clickupId: ro.negocios?.clickup_negocio_id,
+                          negocioObj: negocios.find(n => n.id === oppId),
+                          itens: [],
+                        });
+                      }
+                      grupos.get(oppId).itens.push(ro);
+                    }
+
+                    return Array.from(grupos.values()).map(grupo => (
+                      <div
+                        key={grupo.id}
+                        className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden"
+                      >
+                        {/* Cabeçalho da Oportunidade */}
+                        <div className="px-4 py-3 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md">
+                                Oportunidade
+                              </span>
+                              <h5 className="font-extrabold text-xs text-slate-800 dark:text-slate-200 truncate">
+                                {grupo.nome}
+                              </h5>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {grupo.clickupId && (
+                              <a
+                                href={`https://app.clickup.com/t/${String(grupo.clickupId).replace('#', '').trim()}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-indigo-600 transition-colors"
+                                title="Abrir oportunidade no ClickUp"
+                              >
+                                <span>ClickUp</span>
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            )}
+                            <button
+                              onClick={() => handleNovaRoOportunidade(grupo.negocioObj || { id: grupo.id, nome: grupo.nome })}
+                              className="inline-flex items-center gap-1 px-2 py-1 bg-white dark:bg-slate-800 hover:bg-slate-50 text-indigo-600 border border-indigo-200 dark:border-indigo-800 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                              title="Adicionar mais uma R.O. a esta oportunidade"
+                            >
+                              + Nova R.O.
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Itens de R.O. daquela oportunidade */}
+                        <div className="divide-y divide-slate-100 dark:divide-slate-700/80">
+                          {grupo.itens.map(ro => {
+                            const fabricanteNome = ro.fabricantes_ro?.nome || ro.fabricante || 'Fabricante';
+                            const situacao = ro.situacao || 'Backoffice';
+                            const ciclo = ro.renovacoes_ro?.ciclo || (Array.isArray(ro.renovacoes_ro) && ro.renovacoes_ro.length > 0 ? Math.max(...ro.renovacoes_ro.map(r => r.ciclo || 1)) : 1);
+                            const vigenciaTexto = globalThis?.RosUiDomain?.calcularVigenciaRo
+                              ? globalThis.RosUiDomain.calcularVigenciaRo(ro.data_vencimento)
+                              : (ro.data_vencimento ? 'Vigente' : 'Sem prazo');
+                            const mapaClassesVigencia = {
+                              'Vencida': 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800',
+                              'Vence hoje': 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border border-amber-400 dark:border-amber-700 animate-pulse',
+                              'A vencer': 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800',
+                              'Vence em breve': 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800',
+                              'Vigente': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800',
+                              'Sem prazo': 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700',
+                            };
+                            const vigenciaClasseBadge = mapaClassesVigencia[vigenciaTexto] || 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700';
+                            const rotuloSit = globalThis?.RosUiDomain?.obterRotuloSituacao
+                              ? globalThis.RosUiDomain.obterRotuloSituacao(situacao)
+                              : { rotulo: situacao, classeBadge: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' };
+                            const dataVencFormatada = globalThis?.RosUiDomain?.formatarDataCivil ? globalThis.RosUiDomain.formatarDataCivil(ro.data_vencimento) : (ro.data_vencimento || '—');
+
+                            return (
+                              <div
+                                key={ro.id}
+                                className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-750/50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                              >
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
+                                      {fabricanteNome}
+                                    </span>
+                                    <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                                      {ro.numero_ro || 'Aguardando número'}
+                                    </span>
+                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${rotuloSit.classeBadge || 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
+                                      {rotuloSit.rotulo || situacao}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/80 px-2 py-0.5 rounded-full">
+                                      Ciclo {ciclo}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
+                                    <span>
+                                      Vencimento: <strong>{dataVencFormatada}</strong>
+                                    </span>
+                                    <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${vigenciaClasseBadge}`}>
+                                      {vigenciaTexto}
+                                    </span>
+                                    {ro.categoria && (
+                                      <span>Categoria: {ro.categoria}</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                  <button
+                                    onClick={() => handleAbrirTelaGeralRos({ negocio_id: ro.negocio_id, numero_ro: ro.numero_ro || undefined })}
+                                    className="px-2.5 py-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-lg transition-colors border border-indigo-200 dark:border-indigo-800/80 cursor-pointer shadow-2xs"
+                                    title="Abrir este registro na tela geral de R.Os"
+                                  >
+                                    Ver detalhes ↗
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1720,7 +2056,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
 // ─────────────────────────────────────────────
 // ABA PRINCIPAL — EMPRESAS v3.2
 // ─────────────────────────────────────────────
-const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [], contaParaAbrir = null, abaParaAbrir = 'visao_geral', onContaAberta }) => {
+const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [], contaParaAbrir = null, abaParaAbrir = 'visao_geral', onContaAberta, onNovaRo, onNavegarParaRos }) => {
   const [contas, setContas] = React.useState([]);
   const [negocios, setNegocios] = React.useState([]);
   const [propostasPorNegocio, setPropostasPorNegocio] = React.useState(new Map());
@@ -2020,7 +2356,7 @@ const EmpresasTab = ({ supabaseClient, onOpenNegocio, vendedores = [], contaPara
 
       {/* DRAWER */}
       {contaSelecionada && (
-        <FichaEmpresaDrawer key={contaSelecionada.id} conta={contaSelecionada} negocios={negocios.filter(n => n.conta_id === contaSelecionada.id)} contatos={contatos.filter(c => c.conta_id === contaSelecionada.id)} propostasPorNegocio={propostasPorNegocio} isModalAberto={isModalAberto} abaInicial={abaParaAbrir} onClose={() => setContaSelecionada(null)} onOpenNegocio={onOpenNegocio} onNovaOportunidade={() => setShowNovaOportunidade(true)} onNovoContato={() => { setContatoParaEditar(null); setShowNovoContato(true); }} onEditarEmpresa={(c) => { setEmpresaParaEditar(c); setShowEmpresaModal(true); }} onEditarContato={(ct) => { setContatoParaEditar(ct); setShowNovoContato(true); }} onExcluirContato={handleExcluirContato} onExcluirEmpresa={handleExcluirEmpresa} onEditarNegocio={(n) => { setNegocioParaEditar(n); setShowEditarNegocio(true); }} onExcluirNegocio={handleExcluirNegocio} />
+        <FichaEmpresaDrawer key={contaSelecionada.id} conta={contaSelecionada} negocios={negocios.filter(n => n.conta_id === contaSelecionada.id)} contatos={contatos.filter(c => c.conta_id === contaSelecionada.id)} propostasPorNegocio={propostasPorNegocio} isModalAberto={isModalAberto} abaInicial={abaParaAbrir} onClose={() => setContaSelecionada(null)} onOpenNegocio={onOpenNegocio} onNovaOportunidade={() => setShowNovaOportunidade(true)} onNovoContato={() => { setContatoParaEditar(null); setShowNovoContato(true); }} onEditarEmpresa={(c) => { setEmpresaParaEditar(c); setShowEmpresaModal(true); }} onEditarContato={(ct) => { setContatoParaEditar(ct); setShowNovoContato(true); }} onExcluirContato={handleExcluirContato} onExcluirEmpresa={handleExcluirEmpresa} onEditarNegocio={(n) => { setNegocioParaEditar(n); setShowEditarNegocio(true); }} onExcluirNegocio={handleExcluirNegocio} onNovaRo={onNovaRo} onNavegarParaRos={onNavegarParaRos} />
       )}
       {showEmpresaModal && (<EmpresaFormModal supabaseClient={supabaseClient} conta={empresaParaEditar} onClose={() => setShowEmpresaModal(false)} onSalvo={() => { setShowEmpresaModal(false); carregarDados(); }} />)}
       {showNovoContato && contaSelecionada && (<ContatoFormModal supabaseClient={supabaseClient} conta={contaSelecionada} contas={contas} todosContatos={contatos} contato={contatoParaEditar} onClose={() => setShowNovoContato(false)} onSalvo={() => { setShowNovoContato(false); carregarDados(); }} />)}

@@ -417,6 +417,21 @@ const {
   calcularVigenciaRo,
   obterRotuloSituacao,
   calcularPaginacao,
+  ordenarEventosRo,
+  resumirCiclosRo,
+  obterAcoesPermitidasRo,
+  validarPayloadCriacaoRo,
+  validarPayloadAcaoRo,
+  executarAcaoRo,
+  fetchRegistroOportunidade,
+  gerarRequestIdRo,
+  desambiguarOportunidade,
+  criarRegistroOportunidade,
+  resolverNegocioCrmParaRo,
+  obterPeriodoMesCivilAtual,
+  validarPeriodoEvidencias,
+  fetchEvidenciasRos,
+  formatarRelatorioAtualizacaoFabricante,
 } = window.RosUiDomain || {};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1978,21 +1993,1682 @@ const SegmentosSettings = ({ client }) => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// MODAL REUTILIZÁVEL DE AÇÕES DE R.O. (Task 6)
+// ─────────────────────────────────────────────────────────────────────────
+function RoActionModal({
+  aberto,
+  acao,
+  ro,
+  cicloPendente = null,
+  onClose,
+  onSuccess,
+  getSupabaseHeaders = null,
+  onConflitoRoAtualizada = null,
+}) {
+  const modalRef = React.useRef(null);
+  const modalLayer = useModalLayer({ open: aberto, onClose, panelRef: modalRef });
+
+  const [requestId, setRequestId] = useState(() => (gerarRequestIdRo ? gerarRequestIdRo() : `req-${Date.now()}`));
+  const [versaoEsperada, setVersaoEsperada] = useState(ro?.versao || 1);
+
+  // Campos do formulário
+  const [dataSolicitacao, setDataSolicitacao] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+  const [observacao, setObservacao] = useState('');
+  const [numeroRo, setNumeroRo] = useState(ro?.numero_ro || '');
+  const [dataAprovacao, setDataAprovacao] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+  const [dataVencimento, setDataVencimento] = useState(ro?.data_vencimento || '');
+  const [tipoResposta, setTipoResposta] = useState('aprovar');
+  const [dataResposta, setDataResposta] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+  const [novoVencimento, setNovoVencimento] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [situacaoFinal, setSituacaoFinal] = useState('Encerrada');
+  const [dataEncerramento, setDataEncerramento] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState(null);
+  const [avisoConflito, setAvisoConflito] = useState(null);
+
+  useEffect(() => {
+    if (aberto) {
+      setRequestId(gerarRequestIdRo ? gerarRequestIdRo() : `req-${Date.now()}`);
+      setVersaoEsperada(ro?.versao || 1);
+      setErro(null);
+      setAvisoConflito(null);
+      setObservacao('');
+      setMotivo('');
+      setTipoResposta('aprovar');
+      setNovoVencimento('');
+      if (acao === 'enviar') {
+        setDataSolicitacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'aprovar') {
+        setNumeroRo(ro?.numero_ro || '');
+        setDataAprovacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+        setDataVencimento(ro?.data_vencimento || '');
+      } else if (acao === 'solicitar_renovacao') {
+        setDataSolicitacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'responder_renovacao') {
+        setDataResposta(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'substituir') {
+        // Substituição não exige campos adicionais;
+        // a R.O. sucessora nasce em Backoffice sem número/vencimento.
+      } else if (acao === 'encerrar') {
+        setSituacaoFinal('Encerrada');
+        setDataEncerramento(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      }
+    }
+  }, [aberto, acao, ro?.id]);
+
+  if (!aberto || !acao) return null;
+
+  const handleSubmeter = async (e) => {
+    if (e) e.preventDefault();
+    setErro(null);
+    setAvisoConflito(null);
+
+    const dadosAcao = {
+      data_solicitacao: dataSolicitacao,
+      observacao,
+      numero_ro: numeroRo,
+      data_aprovacao: dataAprovacao,
+      data_vencimento: dataVencimento,
+      tipo_resposta: tipoResposta,
+      data_resposta: dataResposta,
+      novo_vencimento: novoVencimento,
+      motivo,
+      situacao: situacaoFinal,
+      data_encerramento: dataEncerramento,
+      ciclo: cicloPendente?.ciclo || 1,
+      vencimento_anterior: ro?.data_vencimento,
+      versao_esperada: versaoEsperada,
+      request_id: requestId,
+    };
+
+    const contexto = {
+      versao: versaoEsperada,
+      data_vencimento: ro?.data_vencimento,
+      ciclo: cicloPendente?.ciclo || 1,
+    };
+
+    let validacao;
+    try {
+      if (!validarPayloadAcaoRo) throw new Error('Módulo de validação indisponível.');
+      validacao = validarPayloadAcaoRo(acao, dadosAcao, contexto);
+    } catch (err) {
+      setErro(err.message || 'Dados inválidos.');
+      return;
+    }
+
+    setSalvando(true);
+    try {
+      if (!executarAcaoRo) throw new Error('Cliente de execução indisponível.');
+      const res = await executarAcaoRo(
+        ro.id,
+        validacao.rota,
+        validacao.payload,
+        { getSupabaseHeaders, requestId }
+      );
+
+      let msg = 'Ação executada com sucesso!';
+      if (acao === 'enviar') msg = 'Envio ao fabricante registrado com sucesso!';
+      else if (acao === 'aprovar') msg = 'R.O. aprovada com sucesso!';
+      else if (acao === 'solicitar_renovacao') msg = 'Renovação solicitada com sucesso!';
+      else if (acao === 'responder_renovacao') {
+        msg = tipoResposta === 'aprovar' ? 'Renovação aprovada com sucesso!' : 'Negativa de renovação registrada.';
+      } else if (acao === 'substituir') {
+        msg = 'Substituição iniciada! A R.O. sucessora foi criada em Backoffice.';
+      } else if (acao === 'encerrar') {
+        msg = situacaoFinal === 'Reprovada' ? 'R.O. reprovada com sucesso.' : 'R.O. encerrada com sucesso.';
+      }
+
+      if (onSuccess) onSuccess(res, msg);
+    } catch (err) {
+      if (err.status === 409) {
+        // Conflito de versão (409):
+        // - Manter todos os campos do formulário preenchidos;
+        // - Buscar a R.O. atualizada;
+        // - Atualizar o estado do RegistroOportunidadeDrawer via callback explícita;
+        // - Manter o ActionModal aberto;
+        // - Atualizar apenas a versaoEsperada para a nova confirmação;
+        // - Exibir aviso claro para revisão dos dados novos no painel antes de confirmar novamente.
+        try {
+          if (fetchRegistroOportunidade) {
+            const roFresca = await fetchRegistroOportunidade(ro.id, { getSupabaseHeaders });
+            if (roFresca && roFresca.versao) {
+              setVersaoEsperada(roFresca.versao);
+              if (typeof onConflitoRoAtualizada === 'function') {
+                onConflitoRoAtualizada(roFresca);
+              }
+            }
+          }
+        } catch (reloadErr) {
+          console.warn('[RoActionModal] Falha ao recarregar R.O. em 409:', reloadErr);
+        }
+        setAvisoConflito('Esta R.O. foi alterada por outra pessoa. Revise os dados atualizados antes de confirmar novamente.');
+        setErro(null);
+      } else {
+        setErro(err.message || 'Erro ao processar operação.');
+      }
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  let titulo = 'Ação na R.O.';
+  let subtitulo = '';
+  let labelBotaoConfirmar = 'Confirmar';
+
+  if (acao === 'enviar') {
+    titulo = 'Registrar envio ao fabricante';
+    subtitulo = 'A R.O. passará para Aguardando aprovação. O número e vencimento continuam vazios até a resposta do fabricante.';
+    labelBotaoConfirmar = 'Confirmar envio';
+  } else if (acao === 'aprovar') {
+    titulo = 'Aprovar R.O.';
+    subtitulo = 'Aprovação oficial da R.O. pelo fabricante. A aprovação pode ocorrer diretamente mesmo sem envio prévio registrado.';
+    labelBotaoConfirmar = 'Confirmar aprovação';
+  } else if (acao === 'solicitar_renovacao') {
+    titulo = 'Solicitar renovação de R.O.';
+    subtitulo = 'Abre um novo ciclo de renovação em análise com o fabricante. A situação "Aprovada" e o vencimento atual permanecem inalterados.';
+    labelBotaoConfirmar = 'Solicitar renovação';
+  } else if (acao === 'responder_renovacao') {
+    const numCiclo = cicloPendente?.ciclo || 1;
+    titulo = `Responder renovação (Ciclo ${numCiclo})`;
+    subtitulo = 'Registre o retorno oficial do fabricante quanto à solicitação de renovação desta R.O.';
+    labelBotaoConfirmar = 'Confirmar resposta';
+  } else if (acao === 'substituir') {
+    titulo = 'Iniciar substituição de R.O.';
+    subtitulo = 'Cria uma nova R.O. em Backoffice para substituir esta, com mesmo fabricante e oportunidade. A R.O. atual permanece válida até a aprovação da sucessora.';
+    labelBotaoConfirmar = 'Confirmar substituição';
+  } else if (acao === 'encerrar') {
+    titulo = 'Encerrar ou reprovar R.O.';
+    subtitulo = 'Finaliza o ciclo comercial ativo desta R.O. Não altera o estágio nem dados da oportunidade no CRM.';
+    labelBotaoConfirmar = 'Finalizar R.O.';
+  }
+
+  const prazoSugeridoFabricante = ro?.fabricantes_ro?.prazo_inicial_sugerido_dias;
+
+  return (
+    <div
+      ref={modalRef}
+      onKeyDown={modalLayer.onKeyDown}
+      role="dialog"
+      aria-modal="true"
+      aria-label={titulo}
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !salvando) onClose(); }}
+    >
+      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">{titulo}</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{subtitulo}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={salvando}
+            className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Fechar"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmeter} className="p-5 space-y-4 overflow-y-auto flex-1">
+          {avisoConflito && (
+            <div className="rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 p-3.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+              <span className="text-base">⚠️</span>
+              <div>
+                <p className="font-bold">Aviso de concorrência</p>
+                <p className="mt-0.5 leading-relaxed">{avisoConflito}</p>
+              </div>
+            </div>
+          )}
+
+          {erro && (
+            <div className="rounded-xl border border-rose-300 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-950/40 p-3.5 text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+              <span className="text-base">⚠️</span>
+              <div>
+                <p className="font-bold">Não foi possível concluir</p>
+                <p className="mt-0.5 leading-relaxed">{erro}</p>
+              </div>
+            </div>
+          )}
+
+          {/* A) ENVIAR AO FABRICANTE */}
+          {acao === 'enviar' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data do envio / solicitação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataSolicitacao}
+                  onChange={(e) => setDataSolicitacao(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Observação <span className="text-slate-400 font-normal">(opcional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={observacao}
+                  onChange={(e) => setObservacao(e.target.value)}
+                  placeholder="Ex: Enviado por e-mail para o gerente de contas do fabricante..."
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </>
+          )}
+
+          {/* B) APROVAR R.O. */}
+          {acao === 'aprovar' && (
+            <>
+              {prazoSugeridoFabricante && (
+                <div className="rounded-lg bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 p-2.5 text-xs text-indigo-800 dark:text-indigo-300">
+                  <span className="font-bold">Sugestão do fabricante:</span> {prazoSugeridoFabricante} dias de vigência a partir da aprovação (informação apenas sugestiva — preenchimento manual obrigatório abaixo).
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Número oficial da R.O. <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: RO-DELL-2026-0987"
+                  value={numeroRo}
+                  onChange={(e) => setNumeroRo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Data de aprovação <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={dataAprovacao}
+                    onChange={(e) => setDataAprovacao(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Data de vencimento <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={dataVencimento}
+                    onChange={(e) => setDataVencimento(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* C) SOLICITAR RENOVAÇÃO */}
+          {acao === 'solicitar_renovacao' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data da solicitação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataSolicitacao}
+                  onChange={(e) => setDataSolicitacao(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="rounded-lg bg-slate-100 dark:bg-slate-800/60 p-3 text-xs text-slate-600 dark:text-slate-400">
+                <p><span className="font-bold">Vencimento atual:</span> {formatarDataCivil ? formatarDataCivil(ro?.data_vencimento) : ro?.data_vencimento || '—'}</p>
+                <p className="mt-1">A R.O. continuará como Aprovada com seu vencimento preservado enquanto a renovação estiver em análise.</p>
+              </div>
+            </>
+          )}
+
+          {/* D) RESPONDER RENOVAÇÃO */}
+          {acao === 'responder_renovacao' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+                  Resposta do fabricante <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTipoResposta('aprovar')}
+                    className={`rounded-lg p-2.5 text-xs font-bold text-center border transition-all cursor-pointer ${
+                      tipoResposta === 'aprovar'
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 ring-2 ring-emerald-500/20'
+                        : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    ✓ Aprovar renovação
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipoResposta('negar')}
+                    className={`rounded-lg p-2.5 text-xs font-bold text-center border transition-all cursor-pointer ${
+                      tipoResposta === 'negar'
+                        ? 'border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300 ring-2 ring-rose-500/20'
+                        : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    ✕ Negar renovação
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data da resposta <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataResposta}
+                  onChange={(e) => setDataResposta(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {tipoResposta === 'aprovar' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Novo vencimento <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={novoVencimento}
+                      onChange={(e) => setNovoVencimento(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Vencimento atual: <span className="font-semibold">{formatarDataCivil ? formatarDataCivil(ro?.data_vencimento) : ro?.data_vencimento || '—'}</span>. O novo vencimento deve ser posterior a esta data.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Motivo da negativa <span className="text-rose-500">*</span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      required
+                      placeholder="Descreva o motivo apresentado pelo fabricante para não renovar a R.O..."
+                      value={motivo}
+                      onChange={(e) => setMotivo(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      O vencimento atual da R.O. ({formatarDataCivil ? formatarDataCivil(ro?.data_vencimento) : ro?.data_vencimento || '—'}) será preservado.
+                    </p>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* E) ENCERRAR OU REPROVAR */}
+          {acao === 'encerrar' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Situação final <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={situacaoFinal}
+                  onChange={(e) => setSituacaoFinal(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="Encerrada">Encerrada</option>
+                  <option value="Reprovada">Reprovada</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {situacaoFinal === 'Encerrada'
+                    ? 'Use para projetos concluídos, perdidos para concorrentes ou cancelados pelo cliente.'
+                    : 'Use quando o fabricante tiver recusado a oportunidade definitivamente.'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data do encerramento / reprovação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataEncerramento}
+                  onChange={(e) => setDataEncerramento(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Motivo <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Justifique o motivo do encerramento ou reprovação da R.O..."
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </>
+          )}
+
+          {acao === 'substituir' && (
+            <div className="rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20 p-4 space-y-2">
+              <p className="text-xs font-semibold text-purple-800 dark:text-purple-200">O que vai acontecer:</p>
+              <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-1 list-disc pl-4">
+                <li>Uma nova R.O. será criada em <strong>Backoffice</strong>, vinculada a esta R.O. atual.</li>
+                <li>O fabricante (<strong>{ro?.fabricantes_ro?.nome || '—'}</strong>) e a oportunidade serão mantidos automaticamente.</li>
+                <li>Esta R.O. permanece <strong>Aprovada</strong> e válida até que a nova seja oficialmente aprovada pelo fabricante.</li>
+                <li>Somente após a aprovação da nova R.O. é que esta será marcada como <strong>Substituída</strong>.</li>
+              </ul>
+            </div>
+          )}
+
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              disabled={salvando}
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={salvando}
+              className={`rounded-lg ${acao === 'substituir' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 px-4 py-2 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm`}
+            >
+              {salvando && (
+                <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              {labelBotaoConfirmar}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DRAWER DE DETALHES E AÇÕES DA R.O. (Task 6 e Task 7)
+// ─────────────────────────────────────────────────────────────────────────
+function RegistroOportunidadeDrawer({
+  ro: roInicial,
+  onClose,
+  supabaseClient = null,
+  getSupabaseHeaders = null,
+  showToast = null,
+  onRoAtualizada = null,
+  onSelecionarRo = null,
+}) {
+  const [ro, setRo] = useState(roInicial);
+  const [acaoAtiva, setAcaoAtiva] = useState(null);
+  const [sucessoraAtiva, setSucessoraAtiva] = useState(null);
+  const [roAnterior, setRoAnterior] = useState(null);
+  const [statusRelacoes, setStatusRelacoes] = useState(supabaseClient ? 'carregando' : 'indisponivel');
+  const [carregandoNavegacao, setCarregandoNavegacao] = useState(false);
+
+  useEffect(() => {
+    setRo(roInicial);
+  }, [roInicial]);
+
+  // Buscar sucessora ativa e R.O. anterior para cadeia de substituição usando apenas o prop supabaseClient
+  const buscarRelacoes = useCallback(async () => {
+    if (!ro?.id) return;
+    if (!supabaseClient) {
+      setStatusRelacoes('indisponivel');
+      setSucessoraAtiva(null);
+      setRoAnterior(null);
+      return;
+    }
+
+    setStatusRelacoes('carregando');
+    try {
+      // Buscar se existe uma R.O. que aponta para esta como ro_anterior_id
+      const { data: sucessoras, error: errSucessoras } = await supabaseClient
+        .from('registros_oportunidade')
+        .select('id, numero_ro, situacao, fabricantes_ro(nome)')
+        .eq('ro_anterior_id', ro.id)
+        .not('situacao', 'in', '("Reprovada","Encerrada")')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (errSucessoras) {
+        console.warn('[RegistroOportunidadeDrawer] Erro ao consultar sucessora:', errSucessoras);
+        setStatusRelacoes('erro');
+        return;
+      }
+
+      setSucessoraAtiva(sucessoras && sucessoras.length > 0 ? sucessoras[0] : null);
+
+      // Buscar a R.O. anterior se houver
+      if (ro.ro_anterior_id) {
+        const { data: anterior, error: errAnterior } = await supabaseClient
+          .from('registros_oportunidade')
+          .select('id, numero_ro, situacao, fabricantes_ro(nome)')
+          .eq('id', ro.ro_anterior_id)
+          .maybeSingle();
+
+        if (errAnterior) {
+          console.warn('[RegistroOportunidadeDrawer] Erro ao consultar anterior:', errAnterior);
+          setStatusRelacoes('erro');
+          return;
+        }
+        setRoAnterior(anterior || null);
+      } else {
+        setRoAnterior(null);
+      }
+
+      setStatusRelacoes('pronto');
+    } catch (err) {
+      console.warn('[RegistroOportunidadeDrawer] Falha ao buscar relações de substituição:', err);
+      setStatusRelacoes('erro');
+    }
+  }, [ro?.id, ro?.ro_anterior_id, supabaseClient]);
+
+  useEffect(() => {
+    buscarRelacoes();
+  }, [buscarRelacoes]);
+
+  // Navegar entre anterior e sucessora trocando o registro exibido no mesmo drawer
+  const handleNavegarParaRo = async (targetId) => {
+    if (!targetId || targetId === ro?.id) return;
+    setCarregandoNavegacao(true);
+    try {
+      let novaRo = null;
+      if (fetchRegistroOportunidade) {
+        try {
+          novaRo = await fetchRegistroOportunidade(targetId, { getSupabaseHeaders });
+        } catch (errApi) {
+          console.warn('[RegistroOportunidadeDrawer] Falha ao consultar R.O. na navegação via API:', errApi);
+        }
+      }
+      if (!novaRo && supabaseClient) {
+        try {
+          const { data: roData, error: errDb } = await supabaseClient
+            .from('registros_oportunidade')
+            .select()
+            .eq('id', targetId)
+            .maybeSingle();
+          if (roData && !errDb) {
+            novaRo = roData;
+          }
+        } catch (errDbCatch) {
+          console.warn('[RegistroOportunidadeDrawer] Falha ao consultar R.O. no supabaseClient:', errDbCatch);
+        }
+      }
+
+      if (novaRo) {
+        setRo(novaRo);
+        if (typeof onSelecionarRo === 'function') {
+          onSelecionarRo(novaRo.id, novaRo);
+        }
+      } else if (showToast) {
+        showToast('Não foi possível carregar os detalhes da R.O. selecionada.', 'error');
+      }
+    } finally {
+      setCarregandoNavegacao(false);
+    }
+  };
+
+  useEffect(() => {
+    const aoTeclar = (evento) => { if (evento.key === 'Escape' && !acaoAtiva) onClose(); };
+    window.addEventListener('keydown', aoTeclar);
+    return () => window.removeEventListener('keydown', aoTeclar);
+  }, [onClose, acaoAtiva]);
+
+  const eventos = ordenarEventosRo ? ordenarEventosRo(ro.eventos_ro) : [];
+  const ciclos = resumirCiclosRo ? resumirCiclosRo(ro.renovacoes_ro) : { aprovados: 0, pendente: null };
+  const acoes = obterAcoesPermitidasRo
+    ? obterAcoesPermitidasRo(ro.situacao, !!ciclos.pendente, { temSucessoraAtiva: !!sucessoraAtiva })
+    : [];
+  const cliente = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || '—';
+  const vigencia = calcularVigenciaRo ? calcularVigenciaRo(ro.data_vencimento) : 'Sem prazo';
+
+  const handleConflitoRoAtualizada = useCallback((roFresca) => {
+    if (roFresca && roFresca.id) {
+      setRo(roFresca);
+      if (onRoAtualizada) onRoAtualizada(roFresca);
+    }
+  }, [onRoAtualizada]);
+
+  const recarregarRoCompleta = async () => {
+    if (fetchRegistroOportunidade && ro?.id) {
+      try {
+        const roFresca = await fetchRegistroOportunidade(ro.id, { getSupabaseHeaders });
+        if (roFresca) {
+          setRo(roFresca);
+          if (onRoAtualizada) onRoAtualizada(roFresca);
+        }
+      } catch (err) {
+        console.warn('[RegistroOportunidadeDrawer] Falha ao recarregar R.O.:', err);
+      }
+    }
+  };
+
+  const handleSucessoAcao = async (resultado, mensagemToast) => {
+    setAcaoAtiva(null);
+    if (showToast) {
+      showToast(mensagemToast || 'Operação realizada com sucesso!', 'success');
+    }
+    await recarregarRoCompleta();
+    await buscarRelacoes();
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <aside role="dialog" aria-modal="true" aria-label="Detalhe da R.O." className="h-full w-full max-w-xl overflow-y-auto bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-200 dark:border-slate-700 flex flex-col">
+          <header className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Registro de oportunidade</p>
+              <h2 className="mt-1 text-lg font-extrabold text-slate-900 dark:text-white">{ro.numero_ro || 'Aguardando número'}</h2>
+              <p className="text-xs text-slate-500 mt-1">{ro.fabricantes_ro?.nome || 'Fabricante não informado'} · {ro.situacao}</p>
+            </div>
+            <button type="button" autoFocus onClick={onClose} className="rounded-lg px-3 py-2 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-pointer">
+              Fechar ✕
+            </button>
+          </header>
+
+          <div className="p-5 space-y-5 text-sm flex-1">
+            <section className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-slate-500">Cliente</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{cliente}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Oportunidade</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{ro.negocios?.nome || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Vencimento</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{formatarDataCivil ? formatarDataCivil(ro.data_vencimento) : '—'} · {vigencia}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Categoria</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{formatarCategoriaRo ? formatarCategoriaRo(ro.categoria) : '—'}</p>
+              </div>
+            </section>
+
+            {acoes.length > 0 && (
+              <section className="rounded-xl border border-indigo-200 dark:border-indigo-900/60 p-4 bg-indigo-50/40 dark:bg-indigo-950/20">
+                <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-1">Ações operacionais</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Execute movimentações na R.O. sem alterar os dados da oportunidade no CRM.</p>
+                <div className="flex flex-wrap gap-2">
+                  {acoes.map((acaoId) => {
+                    const mapConfig = {
+                      enviar: { label: 'Registrar envio ao fabricante', classe: 'bg-blue-600 hover:bg-blue-700 text-white' },
+                      aprovar: { label: 'Aprovar R.O.', classe: 'bg-emerald-600 hover:bg-emerald-700 text-white' },
+                      solicitar_renovacao: { label: 'Solicitar renovação', classe: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+                      responder_renovacao: { label: 'Responder renovação pendente', classe: 'bg-amber-600 hover:bg-amber-700 text-white' },
+                      substituir: { label: 'Iniciar substituição', classe: 'bg-purple-600 hover:bg-purple-700 text-white' },
+                      encerrar: { label: 'Encerrar / Reprovar', classe: 'bg-rose-600 hover:bg-rose-700 text-white' },
+                    };
+                    const conf = mapConfig[acaoId] || { label: acaoId, classe: 'bg-slate-700 text-white' };
+                    return (
+                      <button
+                        key={acaoId}
+                        type="button"
+                        onClick={() => setAcaoAtiva(acaoId)}
+                        className={`rounded-lg px-3 py-2 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 ${conf.classe}`}
+                      >
+                        {conf.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Renovações</h3>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                {ciclos.aprovados} ciclo(s) aprovado(s){ciclos.pendente ? ` · Ciclo ${ciclos.pendente.ciclo || 1} em análise` : ''}
+              </p>
+            </section>
+
+            <section className="rounded-xl border border-purple-200 dark:border-purple-900/60 p-4 bg-purple-50/30 dark:bg-purple-950/10">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-slate-900 dark:text-white">Sucessão</h3>
+                {carregandoNavegacao && (
+                  <span className="text-xs text-purple-600 dark:text-purple-400 italic">Carregando registro...</span>
+                )}
+              </div>
+
+              {statusRelacoes === 'carregando' && (
+                <p className="text-xs text-slate-500 italic">Carregando relações de substituição...</p>
+              )}
+
+              {statusRelacoes === 'indisponivel' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">Informações de substituição indisponíveis (cliente não conectado).</p>
+              )}
+
+              {statusRelacoes === 'erro' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">Falha ao consultar relações de substituição.</p>
+              )}
+
+              {statusRelacoes === 'pronto' && !ro.ro_anterior_id && !sucessoraAtiva && (
+                <p className="text-xs text-slate-500">Sem substituição vinculada.</p>
+              )}
+
+              {statusRelacoes === 'pronto' && (roAnterior || sucessoraAtiva) && (
+                <div className="space-y-3">
+                  {roAnterior && (
+                    <div className="flex items-center justify-between gap-2 text-xs bg-white/70 dark:bg-slate-800/70 p-2.5 rounded-lg border border-purple-100 dark:border-purple-900/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-600 dark:text-purple-400 font-semibold">← Anterior:</span>
+                        <span className="text-slate-800 dark:text-slate-100 font-bold">{roAnterior.numero_ro || 'Sem número'}</span>
+                        <span className="text-slate-500">({roAnterior.situacao})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleNavegarParaRo(roAnterior.id)}
+                        disabled={carregandoNavegacao}
+                        className="px-2.5 py-1 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 hover:bg-purple-200 dark:hover:bg-purple-900/80 rounded transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Abrir anterior
+                      </button>
+                    </div>
+                  )}
+
+                  {sucessoraAtiva && (
+                    <div className="flex items-center justify-between gap-2 text-xs bg-white/70 dark:bg-slate-800/70 p-2.5 rounded-lg border border-purple-100 dark:border-purple-900/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-600 dark:text-purple-400 font-semibold">→ Sucessora:</span>
+                        <span className="text-slate-800 dark:text-slate-100 font-bold">{sucessoraAtiva.numero_ro || 'Aguardando número'}</span>
+                        <span className="text-slate-500">({sucessoraAtiva.situacao})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleNavegarParaRo(sucessoraAtiva.id)}
+                        disabled={carregandoNavegacao}
+                        className="px-2.5 py-1 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 hover:bg-purple-200 dark:hover:bg-purple-900/80 rounded transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Abrir sucessora
+                      </button>
+                    </div>
+                  )}
+
+                  {((sucessoraAtiva && ['Backoffice', 'Aguardando aprovação'].includes(sucessoraAtiva.situacao)) ||
+                    (roAnterior && ['Backoffice', 'Aguardando aprovação'].includes(ro.situacao))) && (
+                    <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-800 dark:text-amber-300">
+                      <p className="font-medium">A R.O. anterior permanece aprovada até a sucessora receber aprovação oficial.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Histórico da R.O.</h3>
+              <div className="mt-3 space-y-3">
+                {eventos.length ? eventos.map((evento, indice) => (
+                  <div key={`${evento.id || evento.created_at}-${indice}`} className="border-l-2 border-indigo-300 dark:border-indigo-600 pl-3">
+                    <p className="font-semibold text-xs text-slate-800 dark:text-slate-200">{evento.tipo || evento.evento || 'Movimentação'}</p>
+                    <p className="text-xs text-slate-500">{formatarDataCivil ? formatarDataCivil(evento.created_at) : evento.created_at || 'Data não informada'}</p>
+                  </div>
+                )) : (
+                  <p className="text-xs text-slate-500">Nenhum evento registrado ainda.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Sincronização e atualização humana</h3>
+              <p className="mt-1 text-xs text-slate-500">Evidências comerciais e sincronização com ClickUp serão incluídas na próxima etapa.</p>
+            </section>
+          </div>
+        </aside>
+      </div>
+
+      {acaoAtiva && (
+        <RoActionModal
+          aberto={!!acaoAtiva}
+          acao={acaoAtiva}
+          ro={ro}
+          cicloPendente={ciclos.pendente}
+          onClose={() => setAcaoAtiva(null)}
+          onSuccess={handleSucessoAcao}
+          getSupabaseHeaders={getSupabaseHeaders}
+          onConflitoRoAtualizada={handleConflitoRoAtualizada}
+        />
+      )}
+    </>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// MODAL DE CADASTRO DE NOVA R.O. (Task 5)
+// ─────────────────────────────────────────────────────────────────────────
+function NovaRoModal({
+  aberto,
+  onClose,
+  onSuccess,
+  fabricantes = [],
+  vendedores = [],
+  oportunidadeFixa = null,
+  supabaseClient = null,
+  getSupabaseHeaders = null,
+}) {
+  const modalRef = React.useRef(null);
+  const modalLayer = useModalLayer({ open: aberto, onClose, panelRef: modalRef });
+
+  const [oportunidadeSelecionada, setOportunidadeSelecionada] = useState(oportunidadeFixa);
+  const [buscaOportunidade, setBuscaOportunidade] = useState("");
+  const [sugestoesOportunidades, setSugestoesOportunidades] = useState([]);
+  const [buscandoOportunidades, setBuscandoOportunidades] = useState(false);
+  const [dropdownAberto, setDropdownAberto] = useState(false);
+
+  const [fabricanteId, setFabricanteId] = useState("");
+  const [categoria, setCategoria] = useState("");
+  const [titulo, setTitulo] = useState("");
+  const [cenario, setCenario] = useState("");
+  const [responsavelId, setResponsavelId] = useState("");
+
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState(null);
+
+  // request_id estável durante tentativas de reenvio da mesma criação (idempotência)
+  const requestIdRef = useRef(null);
+  if (!requestIdRef.current && gerarRequestIdRo) {
+    requestIdRef.current = gerarRequestIdRo();
+  }
+
+  // Sincroniza oportunidadeFixa
+  useEffect(() => {
+    if (oportunidadeFixa) {
+      if (oportunidadeFixa.contas) {
+        setOportunidadeSelecionada(oportunidadeFixa);
+      } else if (oportunidadeFixa.conta_id && supabaseClient) {
+        supabaseClient
+          .from("contas")
+          .select("id, nome, razao_social")
+          .eq("id", oportunidadeFixa.conta_id)
+          .maybeSingle()
+          .then(({ data }) => {
+            setOportunidadeSelecionada({
+              ...oportunidadeFixa,
+              contas: data || null,
+            });
+          })
+          .catch(() => {
+            setOportunidadeSelecionada(oportunidadeFixa);
+          });
+      } else {
+        setOportunidadeSelecionada(oportunidadeFixa);
+      }
+    } else {
+      setOportunidadeSelecionada(null);
+    }
+  }, [oportunidadeFixa, supabaseClient]);
+
+  // Busca search-first de oportunidades
+  useEffect(() => {
+    if (!aberto || oportunidadeFixa || oportunidadeSelecionada) return;
+    let cancelado = false;
+    const termo = buscaOportunidade.trim();
+
+    const temporizador = setTimeout(async () => {
+      if (!supabaseClient) return;
+      setBuscandoOportunidades(true);
+      try {
+        if (!termo) {
+          const { data } = await supabaseClient
+            .from("negocios")
+            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .order("nome")
+            .limit(20);
+          if (!cancelado) setSugestoesOportunidades(data || []);
+        } else {
+          const { data: negsPorNome } = await supabaseClient
+            .from("negocios")
+            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .ilike("nome", "%" + termo + "%")
+            .limit(20);
+
+          // Consultas independentes e seguras em contas, sem concatenar filtros
+          const [resNome, resRazao] = await Promise.all([
+            supabaseClient.from("contas").select("id").ilike("nome", "%" + termo + "%").limit(20),
+            supabaseClient.from("contas").select("id").ilike("razao_social", "%" + termo + "%").limit(20),
+          ]);
+
+          const contaIdsUnicos = new Set();
+          (resNome?.data || []).forEach((c) => c?.id && contaIdsUnicos.add(c.id));
+          (resRazao?.data || []).forEach((c) => c?.id && contaIdsUnicos.add(c.id));
+          const contaIds = Array.from(contaIdsUnicos);
+
+          let negsPorConta = [];
+          if (contaIds.length > 0) {
+            const { data: negs } = await supabaseClient
+              .from("negocios")
+              .select("id, nome, conta_id, contas(id, nome, razao_social)")
+              .in("conta_id", contaIds)
+              .limit(20);
+            negsPorConta = negs || [];
+          }
+
+          if (!cancelado) {
+            const mapa = new Map();
+            (negsPorNome || []).forEach((n) => mapa.set(n.id, n));
+            negsPorConta.forEach((n) => mapa.set(n.id, n));
+            setSugestoesOportunidades(Array.from(mapa.values()));
+          }
+        }
+      } catch (e) {
+        if (!cancelado) setSugestoesOportunidades([]);
+      } finally {
+        if (!cancelado) setBuscandoOportunidades(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelado = true;
+      clearTimeout(temporizador);
+    };
+  }, [aberto, buscaOportunidade, oportunidadeFixa, oportunidadeSelecionada, supabaseClient]);
+
+  if (!aberto) return null;
+
+  const clienteNome =
+    oportunidadeSelecionada?.contas?.nome ||
+    oportunidadeSelecionada?.contas?.razao_social ||
+    oportunidadeSelecionada?.cliente_nome ||
+    oportunidadeSelecionada?.conta_nome ||
+    (oportunidadeSelecionada ? "Cliente não informado" : "—");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErro(null);
+
+    const dados = {
+      negocio_id: oportunidadeSelecionada?.id,
+      fabricante_id: fabricanteId,
+      categoria: categoria,
+      titulo: titulo,
+      cenario: cenario,
+      responsavel_operacional_clickup_id: responsavelId,
+      request_id: requestIdRef.current,
+    };
+
+    try {
+      if (validarPayloadCriacaoRo) {
+        validarPayloadCriacaoRo(dados);
+      } else {
+        if (!dados.negocio_id) throw new Error("A seleção da oportunidade é obrigatória.");
+        if (!dados.fabricante_id) throw new Error("O fabricante é obrigatório.");
+        if (!dados.categoria) throw new Error("A categoria é obrigatória.");
+      }
+    } catch (valErr) {
+      setErro(valErr.message);
+      return;
+    }
+
+    setSalvando(true);
+    try {
+      const headersFn = typeof getSupabaseHeaders === "function" ? getSupabaseHeaders : () => ({});
+      const resultado = await criarRegistroOportunidade(dados, {
+        getHeaders: headersFn,
+      });
+
+      // Sucesso 2xx confirmado: renova request_id para próxima criação e notifica
+      if (gerarRequestIdRo) {
+        requestIdRef.current = gerarRequestIdRo();
+      }
+      if (onSuccess) {
+        onSuccess(resultado);
+      }
+    } catch (saveErr) {
+      // Preserva os dados do formulário e o request_id estável em caso de erro (401, 409, 422, rede)
+      setErro(saveErr.message || "Erro ao registrar R.O. Seus dados foram preservados; tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+      onClick={() => {
+        if (!salvando) onClose();
+      }}
+    >
+      <div
+        ref={modalRef}
+        onKeyDown={modalLayer.onKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-nova-ro-titulo"
+        className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header do Modal */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-extrabold text-sm shadow-md shrink-0">
+              RO
+            </div>
+            <div>
+              <h3 id="modal-nova-ro-titulo" className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">
+                Nova R.O.
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Cadastro de Registro de Oportunidade com fabricante
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={salvando}
+            className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+            title="Fechar (ESC)"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Formulário */}
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-4">
+          {erro && (
+            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-start gap-2">
+              <span className="shrink-0 text-base">⚠️</span>
+              <div className="flex-1">
+                <p>{erro}</p>
+                <p className="text-[11px] font-normal text-rose-600 dark:text-rose-400 mt-0.5">
+                  Os dados digitados foram preservados. Você pode corrigir e tentar novamente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Oportunidade (obrigatória) */}
+          {oportunidadeSelecionada ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Oportunidade *
+                </label>
+                {!oportunidadeFixa && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOportunidadeSelecionada(null);
+                      setBuscaOportunidade("");
+                      setDropdownAberto(true);
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 cursor-pointer"
+                  >
+                    Alterar oportunidade
+                  </button>
+                )}
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    {oportunidadeSelecionada.nome || oportunidadeSelecionada.name}
+                  </p>
+                  {oportunidadeFixa && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Oportunidade vinculada ao contexto atual (fixa)
+                    </p>
+                  )}
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200 dark:border-emerald-800">
+                  Selecionada
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Pesquisar Oportunidade *
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={buscaOportunidade}
+                  onChange={(e) => {
+                    setBuscaOportunidade(e.target.value);
+                    setDropdownAberto(true);
+                  }}
+                  onFocus={() => setDropdownAberto(true)}
+                  placeholder="Digite o nome do projeto ou do cliente..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                />
+                {buscandoOportunidades && (
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 animate-spin">⏳</span>
+                )}
+              </div>
+
+              {dropdownAberto && (
+                <div className="absolute top-full left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 divide-y divide-slate-100 dark:divide-slate-800">
+                  {sugestoesOportunidades.length > 0 ? (
+                    sugestoesOportunidades.map((op) => (
+                      <button
+                        key={op.id}
+                        type="button"
+                        onClick={() => {
+                          setOportunidadeSelecionada(op);
+                          setDropdownAberto(false);
+                        }}
+                        className="w-full text-left p-2.5 hover:bg-indigo-50/70 dark:hover:bg-slate-800 transition-colors flex flex-col gap-0.5 cursor-pointer"
+                      >
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                          {desambiguarOportunidade ? desambiguarOportunidade(op) : (op.nome || op.name)}
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                          Cliente: {op.contas?.nome || op.contas?.razao_social || "Sem cliente"} · Projeto: {op.nome || op.name}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="p-3 text-xs text-slate-400 text-center">
+                      {buscandoOportunidades ? "Pesquisando oportunidades..." : "Nenhuma oportunidade encontrada."}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Cliente (Somente Leitura - Derivado da Oportunidade) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Cliente (da oportunidade)
+            </label>
+            <input
+              type="text"
+              readOnly
+              disabled
+              value={clienteNome}
+              className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-not-allowed"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              O cliente é sempre herdado da oportunidade selecionada.
+            </p>
+          </div>
+
+          {/* Fabricante e Categoria (Obrigatórios) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Fabricante *
+              </label>
+              <select
+                required
+                value={fabricanteId}
+                onChange={(e) => setFabricanteId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">Selecione o fabricante...</option>
+                {fabricantes.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Categoria *
+              </label>
+              <input
+                type="text"
+                required
+                list="categorias-ro-sugestoes"
+                value={categoria}
+                onChange={(e) => setCategoria(e.target.value)}
+                placeholder="Ex: Infraestrutura, Software, Serviços..."
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+              />
+              <datalist id="categorias-ro-sugestoes">
+                <option value="Infraestrutura" />
+                <option value="Software" />
+                <option value="Serviços" />
+              </datalist>
+            </div>
+          </div>
+
+          {/* Título / Escopo (Opcional) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Título / Escopo da R.O. (opcional)
+            </label>
+            <input
+              type="text"
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Ex: Switches Core Data Center, Firewall Perímetro..."
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Cenário e Responsável Operacional (Opcionais) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Cenário (opcional)
+              </label>
+              <input
+                type="text"
+                value={cenario}
+                onChange={(e) => setCenario(e.target.value)}
+                placeholder="Ex: Principal, Alternativo Fortinet"
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Responsável Operacional (opcional)
+              </label>
+              <select
+                value={responsavelId}
+                onChange={(e) => setResponsavelId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">Não definido</option>
+                {vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Footer com botões */}
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={salvando}
+              className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={salvando}
+              className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              {salvando && <span className="animate-spin">⏳</span>}
+              <span>{salvando ? "Salvando R.O..." : "Salvar R.O."}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // VISTA PRINCIPAL DE REGISTROS DE OPORTUNIDADE (R.O. - Task 3.1)
 // ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// MODAL DE PREPARAÇÃO DE ATUALIZAÇÃO POR FABRICANTE (Task 8)
+// ─────────────────────────────────────────────────────────────────────────
+function AtualizacaoFabricanteModal({
+  aberto,
+  onClose,
+  fabricanteNome,
+  evidenciasData,
+  loading,
+  error,
+  showToast,
+}) {
+  const modalRef = React.useRef(null);
+  useModalLayer({ open: aberto, onClose, panelRef: modalRef });
+
+  const [copiando, setCopiando] = useState(false);
+
+  if (!aberto) return null;
+
+  const ros = evidenciasData?.data || [];
+  const total = evidenciasData?.total ?? ros.length;
+  const semAtualizacaoConfirmada = evidenciasData?.total_sem_atualizacao_confirmada ?? evidenciasData?.total_sem_atualizacao ?? 0;
+  const coberturaDesconhecida = evidenciasData?.total_cobertura_desconhecida ?? 0;
+  const comAtualizacao = evidenciasData?.total_com_atualizacao ?? 0;
+  const coberturaCompleta = evidenciasData?.cobertura_evidencias_completa ?? (coberturaDesconhecida === 0);
+
+  const handleCopiarRelatorio = async () => {
+    if (!formatarRelatorioAtualizacaoFabricante) return;
+    setCopiando(true);
+    try {
+      const texto = formatarRelatorioAtualizacaoFabricante(evidenciasData, fabricanteNome);
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(texto);
+      }
+      if (showToast) {
+        showToast('Relatório copiado para a área de transferência!', 'success');
+      }
+    } catch (err) {
+      if (showToast) {
+        showToast('Não foi possível copiar o relatório.', 'error');
+      }
+    } finally {
+      setCopiando(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-xs animate-in fade-in duration-150"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="titulo-atualizacao-fabricante"
+        className="w-full max-w-4xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
+      >
+        {/* Header */}
+        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 mb-2">
+              <span>📋</span>
+              <span>Preparação de Atualização por Fabricante</span>
+            </div>
+            <h2 id="titulo-atualizacao-fabricante" className="text-xl font-bold text-slate-900 dark:text-white">
+              {fabricanteNome || 'Fabricante'} — Evidências Comerciais
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Fatos e evidências de autoria humana registradas na oportunidade no CRM. Período analisado: {evidenciasData?.data_inicio ? (formatarDataCivil ? formatarDataCivil(evidenciasData.data_inicio) : evidenciasData.data_inicio) : '—'} a {evidenciasData?.data_fim ? (formatarDataCivil ? formatarDataCivil(evidenciasData.data_fim) : evidenciasData.data_fim) : '—'}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Fechar (ESC)"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Resumo rápido */}
+        <div className="px-6 py-3 bg-slate-50 dark:bg-slate-850 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-6">
+            <div>
+              <span className="text-slate-400">Total de R.Os:</span>{' '}
+              <strong className="text-slate-800 dark:text-slate-100">{total}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400">Com evidência recente:</span>{' '}
+              <strong className="text-emerald-600 dark:text-emerald-400">{comAtualizacao}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400">Sem atualização confirmada:</span>{' '}
+              <strong className="text-rose-600 dark:text-rose-400">{semAtualizacaoConfirmada}</strong>
+            </div>
+            {coberturaDesconhecida > 0 && (
+              <div>
+                <span className="text-slate-400">Cobertura desconhecida / parcial:</span>{' '}
+                <strong className="text-amber-600 dark:text-amber-400">{coberturaDesconhecida}</strong>
+              </div>
+            )}
+          </div>
+          <div>
+            {!coberturaCompleta ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                ⚠️ Cobertura Parcial ({coberturaDesconhecida} pendente)
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300">
+                ✓ Cobertura Completa
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Corpo com a lista de R.Os */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {loading ? (
+            <div className="py-12 text-center text-xs text-slate-500 animate-pulse">
+              Carregando evidências comerciais humanas da oportunidade...
+            </div>
+          ) : error ? (
+            <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
+              Falha ao carregar evidências: {error}
+            </div>
+          ) : ros.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-500">
+              Nenhuma R.O. encontrada para este fabricante com os filtros atuais.
+            </div>
+          ) : (
+            ros.map((ro, index) => {
+              const numRo = ro.numero_ro || 'Aguardando número';
+              const cliente = ro.cliente || 'Cliente não informado';
+              const oport = ro.oportunidade || 'Oportunidade não informada';
+              const venc = ro.data_vencimento ? (formatarDataCivil ? formatarDataCivil(ro.data_vencimento) : ro.data_vencimento) : 'Sem prazo';
+
+              return (
+                <div
+                  key={ro.id || index}
+                  className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:border-purple-200 dark:hover:border-purple-900/60 transition-all text-xs space-y-2.5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white text-sm">
+                        {cliente} — {oport}
+                      </span>
+                      {ro.oportunidade_clickup_id && (
+                        <a
+                          href={`https://app.clickup.com/t/${ro.oportunidade_clickup_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-2 text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          <span>ClickUp #{ro.oportunidade_clickup_id}</span>
+                          <span>↗</span>
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                        {numRo}
+                      </span>
+                      <span className="px-2 py-0.5 rounded font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
+                        {ro.situacao}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-4 text-slate-500 dark:text-slate-400 text-[11px]">
+                    <div>
+                      Vencimento: <strong className="text-slate-700 dark:text-slate-200">{venc}</strong> ({ro.vigencia || '—'})
+                    </div>
+                    <div>
+                      Ciclo: <strong className="text-slate-700 dark:text-slate-200">{ro.ciclo_renovacao || 0}</strong>
+                    </div>
+                  </div>
+
+                  {/* Evidência no Período vs Sem Atualização Confirmada vs Cobertura Desconhecida */}
+                  {ro.atualizacao_no_periodo ? (
+                    <div className="p-3 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 mb-1">
+                        <span>Atualização humana no período ({formatarDataCivil ? formatarDataCivil(ro.atualizacao_no_periodo.data) : ro.atualizacao_no_periodo.data?.slice(0, 10)})</span>
+                        <span className="text-slate-400 font-normal">por {ro.atualizacao_no_periodo.autor_nome || 'Autor comercial'}</span>
+                      </div>
+                      <p className="text-slate-700 dark:text-slate-200 italic">
+                        "{ro.atualizacao_no_periodo.texto || 'Evidência registrada sem texto.'}"
+                      </p>
+                    </div>
+                  ) : ro.status_evidencia === 'cobertura_desconhecida' ? (
+                    <div className="p-3 rounded-lg bg-slate-100/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="font-bold text-slate-700 dark:text-slate-300 text-[11px] flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>Cobertura de evidências desconhecida ou parcial</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        A consulta de evidências desta oportunidade não pôde ser confirmada integralmente. Não tratada como ausência de atividade comercial.
+                      </p>
+                      {ro.ultima_atividade_humana && (
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                          <span className="text-slate-400">Última atividade parcial:</span>{' '}
+                          <em>"{ro.ultima_atividade_humana.texto || 'Atividade registrada.'}"</em>{' '}
+                          <span className="text-slate-400">
+                            (em {formatarDataCivil ? formatarDataCivil(ro.ultima_atividade_humana.data) : ro.ultima_atividade_humana.data?.slice(0, 10)} por {ro.ultima_atividade_humana.autor_nome || 'Autor comercial'})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1.5">
+                      <div className="font-bold text-amber-800 dark:text-amber-400 text-[11px] flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>Sem atualização humana neste mês (cobertura confirmada)</span>
+                      </div>
+                      {ro.ultima_atividade_humana ? (
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                          <span className="text-slate-400">Última atividade anterior:</span>{' '}
+                          <em>"{ro.ultima_atividade_humana.texto || 'Atividade anterior registrada.'}"</em>{' '}
+                          <span className="text-slate-400">
+                            (em {formatarDataCivil ? formatarDataCivil(ro.ultima_atividade_humana.data) : ro.ultima_atividade_humana.data?.slice(0, 10)} por {ro.ultima_atividade_humana.autor_nome || 'Autor comercial'})
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-500 italic">
+                          Nenhum histórico de atividade humana anterior localizado nesta oportunidade.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Alertas */}
+                  {Array.isArray(ro.alertas) && ro.alertas.length > 0 && (
+                    <div className="space-y-1">
+                      {ro.alertas.map((alerta, aIdx) => (
+                        <div key={aIdx} className="text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                          <span>•</span>
+                          <span>{alerta}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Footer com botão Copiar */}
+        <div className="p-4 px-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 flex items-center justify-between gap-3">
+          <div className="text-xs text-slate-500">
+            Apenas fatos e evidências humanas elegíveis. Textos para portais devem ser conferidos antes do envio.
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            >
+              Fechar
+            </button>
+            <button
+              type="button"
+              onClick={handleCopiarRelatorio}
+              disabled={copiando || loading || ros.length === 0}
+              className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:scale-95 disabled:opacity-50 rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>📋</span>
+              <span>{copiando ? 'Copiando...' : 'Copiar relatório'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RegistrosOportunidadeView({
   rosState,
   rosResumo,
   fabricantes = [],
   vendedores = [],
   onSelect,
+  onCloseSelection,
+  onNovaRo,
   onFilterChange,
   onPageChange,
   onRefresh,
+  getSupabaseHeaders,
+  supabaseClient,
+  showToast,
+  onRoAtualizada,
 }) {
   const { rows = [], filters = {}, page = 1, total = 0, loading, error, selectedId } = rosState;
   const filtroBusca = filters.busca || filters.q || '';
   const [buscaDigitada, setBuscaDigitada] = useState(filtroBusca);
+  const [roNavegada, setRoNavegada] = useState(null);
+  const roSelecionada = (selectedId && (rows.find((ro) => ro.id === selectedId) || (roNavegada?.id === selectedId ? roNavegada : null))) || null;
+
+  const [modalAtualizacaoAberto, setModalAtualizacaoAberto] = useState(false);
+  const [evidenciasState, setEvidenciasState] = useState({
+    loading: false,
+    error: null,
+    data: null,
+  });
+
+  // Carregar evidências humanas no período (Task 8)
+  useEffect(() => {
+    let ativo = true;
+    const carregarEvidencias = async () => {
+      setEvidenciasState((prev) => ({ ...prev, loading: true, error: null }));
+      try {
+        if (!fetchEvidenciasRos) return;
+        const res = await fetchEvidenciasRos(filters, page, 50, {
+          getHeaders: getSupabaseHeaders,
+          getSupabaseHeaders,
+        });
+        if (ativo) {
+          setEvidenciasState({
+            loading: false,
+            error: null,
+            data: res,
+          });
+        }
+      } catch (err) {
+        if (ativo) {
+          setEvidenciasState({
+            loading: false,
+            error: err.message || 'Erro ao carregar evidências.',
+            data: null,
+          });
+        }
+      }
+    };
+    carregarEvidencias();
+    return () => { ativo = false; };
+  }, [filters, page, getSupabaseHeaders]);
 
   // A busca ampla pode consultar contas, oportunidades e R.Os. Esperar uma
   // pausa curta evita uma chamada ao CRM para cada tecla digitada.
@@ -2082,6 +3758,16 @@ function RegistrosOportunidadeView({
         </div>
 
         <div className="flex items-center gap-2">
+          {onNovaRo && (
+            <button
+              type="button"
+              onClick={onNovaRo}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              title="Cadastrar nova R.O."
+            >
+              <span>+ Nova R.O.</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onRefresh}
@@ -2189,19 +3875,37 @@ function RegistrosOportunidadeView({
           </div>
         </div>
 
-        {/* Atualização Humana no Mês (Reservado Task 8) */}
-        <div className="p-4 rounded-xl bg-slate-100/70 dark:bg-slate-800/40 border border-dashed border-slate-300 dark:border-slate-700 shadow-xs flex flex-col justify-between opacity-85">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+        {/* Atualização Humana no Mês (Task 8 - Indicador Real) */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-purple-600 dark:text-purple-400">
             <span>Atualização Humana</span>
-            <span>🧠</span>
+            <span title="Fatos e evidências de autoria humana da oportunidade no CRM">🧠</span>
           </div>
-          <div className="mt-2">
-            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-              Disponível após integração de evidências
+          <div className="mt-2 flex items-baseline gap-2">
+            {evidenciasState.loading ? (
+              <span className="text-sm font-medium text-slate-400 animate-pulse">Calculando...</span>
+            ) : evidenciasState.error ? (
+              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400" title={evidenciasState.error}>
+                Indisponível
+              </span>
+            ) : (
+              <>
+                <span className="text-2xl font-black text-slate-900 dark:text-white">
+                  {evidenciasState.data?.total_sem_atualizacao_confirmada ?? 0}
+                </span>
+                <span className="text-[11px] text-slate-400">sem atualização confirmada</span>
+              </>
+            )}
+          </div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 flex items-center justify-between truncate">
+            <span>
+              {evidenciasState.data ? `${evidenciasState.data.total_com_atualizacao ?? 0} com evidência recente` : 'Evidências no período'}
             </span>
-          </div>
-          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
-            Integração ClickUp Brain (Task 8)
+            {evidenciasState.data && (!evidenciasState.data.cobertura_evidencias_completa || (evidenciasState.data.total_cobertura_desconhecida > 0)) && (
+              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded ml-1" title={`${evidenciasState.data.total_cobertura_desconhecida || 0} oportunidade(s) com cobertura desconhecida`}>
+                cobertura parcial ({evidenciasState.data.total_cobertura_desconhecida ?? 0} pendente)
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -2352,6 +4056,49 @@ function RegistrosOportunidadeView({
               className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none h-[30px]"
             />
           </div>
+
+          {/* Filtros de Período para Evidências Humanas (Task 8) */}
+          <div className="flex flex-col min-w-[130px]">
+            <label htmlFor="filtro-data-inicio" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Período Início
+            </label>
+            <input
+              type="date"
+              id="filtro-data-inicio"
+              value={filters.data_inicio || ''}
+              onChange={(e) => handleMudarFiltro('data_inicio', e.target.value)}
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none h-[30px]"
+            />
+          </div>
+
+          <div className="flex flex-col min-w-[130px]">
+            <label htmlFor="filtro-data-fim" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Período Fim
+            </label>
+            <input
+              type="date"
+              id="filtro-data-fim"
+              value={filters.data_fim || ''}
+              onChange={(e) => handleMudarFiltro('data_fim', e.target.value)}
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none h-[30px]"
+            />
+          </div>
+
+          {/* Ação: Preparar atualização por fabricante (apenas quando houver fabricante selecionado) */}
+          {filters.fabricante_id && (
+            <div className="flex items-end self-end">
+              <button
+                type="button"
+                id="btn-preparar-atualizacao-fabricante"
+                onClick={() => setModalAtualizacaoAberto(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 active:scale-95 text-white text-xs font-bold transition-all shadow-xs cursor-pointer h-[30px]"
+                title="Abre relatório estruturado e copiável com as evidências do fabricante"
+              >
+                <span>📋</span>
+                <span>Preparar atualização por fabricante</span>
+              </button>
+            </div>
+          )}
 
           {/* Filtro Oportunidade ativa (se houver) */}
           {filters.negocio_id && (
@@ -2647,6 +4394,38 @@ function RegistrosOportunidadeView({
           )}
         </div>
       </div>
+      {roSelecionada && (
+        <RegistroOportunidadeDrawer
+          ro={roSelecionada}
+          onClose={() => {
+            setRoNavegada(null);
+            if (onCloseSelection) onCloseSelection();
+          }}
+          supabaseClient={supabaseClient}
+          getSupabaseHeaders={getSupabaseHeaders}
+          showToast={showToast}
+          onRoAtualizada={(roAtualizada) => {
+            if (onRoAtualizada) onRoAtualizada(roAtualizada);
+            if (onRefresh) onRefresh();
+          }}
+          onSelecionarRo={(novoId, novoObj) => {
+            setRoNavegada(novoObj);
+            if (onSelect) onSelect(novoId);
+          }}
+        />
+      )}
+
+      {modalAtualizacaoAberto && (
+        <AtualizacaoFabricanteModal
+          aberto={modalAtualizacaoAberto}
+          onClose={() => setModalAtualizacaoAberto(false)}
+          fabricanteNome={fabricantes.find((f) => String(f.id) === String(filters.fabricante_id))?.nome || 'Fabricante'}
+          evidenciasData={evidenciasState.data}
+          loading={evidenciasState.loading}
+          error={evidenciasState.error}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }
@@ -2726,9 +4505,19 @@ function App() {
   // Listener para sincronizar navegação por hash (Avançar/Voltar do navegador)
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '').trim();
-      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas', 'ros'].includes(hash)) {
-        setActiveTab(hash);
+      const rawHash = window.location.hash.replace('#', '').trim();
+      const [tabName, queryPart] = rawHash.split('?');
+      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas', 'ros'].includes(tabName)) {
+        setActiveTab(tabName);
+        if (tabName === 'ros' && queryPart) {
+          const p = new URLSearchParams(queryPart);
+          const novosFiltros = {};
+          for (const [k, v] of p.entries()) {
+            if (v) novosFiltros[k] = v;
+          }
+          setRosState((prev) => ({ ...prev, filters: novosFiltros, page: 1, selectedId: null }));
+          loadRegistrosOportunidade(novosFiltros, 1);
+        }
       }
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -2852,6 +4641,8 @@ function App() {
     error: null,
   });
   const [fabricantesRo, setFabricantesRo] = useState([]);
+  const [modalNovaRoAberto, setModalNovaRoAberto] = useState(false);
+  const [modalNovaRoOportunidadeFixa, setModalNovaRoOportunidadeFixa] = useState(null);
 
   // Autenticação e Token do Usuário no ClickUp
   const [userClickUpToken, setUserClickUpToken] = useState(() => localStorage.getItem('crm_user_clickup_token') || '');
@@ -5387,7 +7178,7 @@ function App() {
 
   // Carrega lista de fabricantes ativos cadastrados para o filtro de R.O.
   useEffect(() => {
-    if (activeTab === 'ros' && supabaseClient) {
+    if ((activeTab === 'ros' || modalNovaRoAberto) && supabaseClient && fabricantesRo.length === 0) {
       supabaseClient
         .from('fabricantes_ro')
         .select('id, nome')
@@ -5461,6 +7252,85 @@ function App() {
       loadRegistrosOportunidade(rosState.filters, rosState.page);
     }
   }, [activeTab, rosState.filters, rosState.page, loadRegistrosOportunidade]);
+
+  const handleNovaRoSucesso = useCallback((novoRegistro) => {
+    showToast("Registro de Oportunidade criado com sucesso!", "success");
+    setModalNovaRoAberto(false);
+    setModalNovaRoOportunidadeFixa(null);
+    loadRegistrosOportunidade(rosState.filters, rosState.page);
+    window.dispatchEvent(new CustomEvent('ro-criada', { detail: novoRegistro }));
+  }, [loadRegistrosOportunidade, rosState.filters, rosState.page, showToast]);
+
+  const handleAbrirNovaRoOportunidade = useCallback(async (task) => {
+    if (!task) return;
+    if (!supabaseClient) {
+      showToast("Esta oportunidade ainda não está sincronizada ao CRM. Cadastre ou sincronize a oportunidade antes de criar uma R.O.", "warning");
+      return;
+    }
+
+    let negocio = null;
+    try {
+      const consultarCrm = async (criterio) => {
+        let query = supabaseClient
+          .from("negocios")
+          .select("id, nome, conta_id, contas(id, nome, razao_social)");
+        if (criterio.id) {
+          query = query.eq("id", criterio.id);
+        } else if (criterio.clickup_negocio_id) {
+          query = query.eq("clickup_negocio_id", criterio.clickup_negocio_id);
+        } else {
+          return null;
+        }
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data || null;
+      };
+
+      if (resolverNegocioCrmParaRo) {
+        negocio = await resolverNegocioCrmParaRo(task, consultarCrm);
+      } else {
+        if (task.id && String(task.id).includes("-")) {
+          negocio = await consultarCrm({ id: task.id });
+        }
+        if (!negocio && task.id) {
+          const cuId = task.clickup_negocio_id || task.id;
+          negocio = await consultarCrm({ clickup_negocio_id: String(cuId) });
+        }
+      }
+    } catch (err) {
+      console.warn("Erro ao consultar oportunidade CRM para R.O.:", err);
+      showToast("Esta oportunidade ainda não está sincronizada ao CRM. Cadastre ou sincronize a oportunidade antes de criar uma R.O.", "warning");
+      return;
+    }
+
+    if (!negocio || !negocio.id) {
+      showToast("Esta oportunidade ainda não está sincronizada ao CRM. Cadastre ou sincronize a oportunidade antes de criar uma R.O.", "warning");
+      return;
+    }
+
+    setModalNovaRoOportunidadeFixa(negocio);
+    setModalNovaRoAberto(true);
+  }, [supabaseClient, showToast]);
+
+  const handleNavegarParaRos = useCallback((novosFiltros = {}) => {
+    setActiveTab('ros');
+    setRosState((prev) => ({
+      ...prev,
+      filters: { ...novosFiltros },
+      page: 1,
+      selectedId: null,
+    }));
+    loadRegistrosOportunidade(novosFiltros, 1);
+  }, [loadRegistrosOportunidade]);
+
+  useEffect(() => {
+    const handleEventoAbrirNovaRo = (e) => {
+      const opp = e.detail?.negocio || e.detail?.oportunidade || (e.detail?.negocio_id ? { id: e.detail.negocio_id } : null);
+      if (opp) handleAbrirNovaRoOportunidade(opp);
+    };
+    window.addEventListener('abrir-nova-ro', handleEventoAbrirNovaRo);
+    return () => window.removeEventListener('abrir-nova-ro', handleEventoAbrirNovaRo);
+  }, [handleAbrirNovaRoOportunidade]);
 
   // Armazenamento em memória para filtros instantâneos sem atraso
   const rawProposalsRef = useRef([]);
@@ -10108,6 +11978,8 @@ function App() {
               contaParaAbrir={contaParaAbrir}
               abaParaAbrir={abaContaParaAbrir}
               onContaAberta={() => { setContaParaAbrir(null); setAbaContaParaAbrir('visao_geral'); }}
+              onNovaRo={handleAbrirNovaRoOportunidade}
+              onNavegarParaRos={handleNavegarParaRos}
             />
           </div>
         )}
@@ -11529,7 +13401,15 @@ function App() {
           rosResumo={rosResumo}
           fabricantes={fabricantesRo}
           vendedores={vendedoresVisiveis}
+          getSupabaseHeaders={getSupabaseHeaders}
+          supabaseClient={supabaseClient}
+          showToast={showToast}
           onSelect={(id) => setRosState((prev) => ({ ...prev, selectedId: id }))}
+          onCloseSelection={() => setRosState((prev) => ({ ...prev, selectedId: null }))}
+          onNovaRo={() => {
+            setModalNovaRoOportunidadeFixa(null);
+            setModalNovaRoAberto(true);
+          }}
           onFilterChange={(novosFiltros) => {
             setRosState((prev) => ({ ...prev, filters: novosFiltros, page: 1 }));
           }}
@@ -11537,6 +13417,15 @@ function App() {
             setRosState((prev) => ({ ...prev, page: novaPagina }));
           }}
           onRefresh={() => loadRegistrosOportunidade(rosState.filters, rosState.page)}
+          onRoAtualizada={(roAtualizada) => {
+            if (roAtualizada && roAtualizada.id) {
+              setRosState((prev) => ({
+                ...prev,
+                rows: prev.rows.map((r) => r.id === roAtualizada.id ? { ...r, ...roAtualizada } : r),
+              }));
+            }
+            loadRegistrosOportunidade(rosState.filters, rosState.page);
+          }}
         />
       )}
 
@@ -11868,6 +13757,23 @@ function App() {
         </div>
       )}
 
+      {/* Modal de Cadastro de Nova R.O. (Task 5) */}
+      {modalNovaRoAberto && (
+        <NovaRoModal
+          aberto={modalNovaRoAberto}
+          onClose={() => {
+            setModalNovaRoAberto(false);
+            setModalNovaRoOportunidadeFixa(null);
+          }}
+          onSuccess={handleNovaRoSucesso}
+          fabricantes={fabricantesRo}
+          vendedores={vendedoresVisiveis}
+          oportunidadeFixa={modalNovaRoOportunidadeFixa}
+          supabaseClient={supabaseClient}
+          getSupabaseHeaders={getSupabaseHeaders}
+        />
+      )}
+
       {/* Modal de Edição de Oportunidade / Negócio */}
       {showEditNegocioDrawerModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={() => setShowEditNegocioDrawerModal(false)}>
@@ -12058,6 +13964,18 @@ function App() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleAbrirNovaRoOportunidade(selectedTask)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      title="Cadastrar nova R.O. para esta oportunidade"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                      </svg>
+                      <span>Nova R.O.</span>
+                    </button>
+
                     <button 
                       onClick={() => handleAbrirEditarNegocioDrawer(selectedTask)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"

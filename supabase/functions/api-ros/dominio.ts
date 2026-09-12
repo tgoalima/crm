@@ -58,6 +58,7 @@ function versaoEsperada(valor: unknown): number | null {
 }
 
 export type ConsultaRos = {
+  conta_id: string | null;
   negocio_id: string | null;
   fabricante_id: string | null;
   situacao: string | null;
@@ -127,7 +128,7 @@ export function calcularResumoAgregadoDominio(
 
 export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
   const permitidos = [
-    'negocio_id', 'fabricante_id', 'situacao', 'responsavel',
+    'conta_id', 'negocio_id', 'fabricante_id', 'situacao', 'responsavel',
     'vence_ate', 'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
     'pagina', 'limite',
   ];
@@ -144,12 +145,14 @@ export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
     throw new ErroComando(400, 'Paginação inválida: limite deve estar entre 1 e 200 e página deve ser >= 1.');
   }
 
+  const contaIdRaw = params.get('conta_id');
   const negocioIdRaw = params.get('negocio_id');
   const fabricanteIdRaw = params.get('fabricante_id');
   const venceAteRaw = params.get('vence_ate');
   const buscaParam = params.get('busca') || params.get('q');
 
   return {
+    conta_id: contaIdRaw ? uuid(contaIdRaw, 'A conta') : null,
     negocio_id: negocioIdRaw ? uuid(negocioIdRaw, 'A oportunidade') : null,
     fabricante_id: fabricanteIdRaw ? uuid(fabricanteIdRaw, 'O fabricante') : null,
     situacao: texto(params.get('situacao'), 'A situação'),
@@ -188,7 +191,21 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
     };
   }
 
-  let match = rota.match(new RegExp(`^(${UUID_PATTERN})/aprovar$`, 'i'));
+  let match = rota.match(new RegExp(`^(${UUID_PATTERN})/enviar$`, 'i'));
+  if (match) {
+    somente(corpo, ['data_solicitacao', 'observacao', 'versao_esperada', 'request_id']);
+    return {
+      rpc: 'ro_registrar_envio',
+      params: {
+        p_id: match[1],
+        p_data_solicitacao: data(corpo.data_solicitacao, 'A data de solicitação'),
+        p_observacao: texto(corpo.observacao, 'A observação'),
+        p_versao_esperada: versaoEsperada(corpo.versao_esperada),
+        p_request_id: texto(corpo.request_id, 'O request_id'),
+      },
+    };
+  }
+  match = rota.match(new RegExp(`^(${UUID_PATTERN})/aprovar$`, 'i'));
   if (match) {
     somente(corpo, ['numero_ro', 'data_aprovacao', 'data_vencimento', 'versao_esperada', 'request_id']);
     return { rpc: 'ro_aprovar', params: {
@@ -213,7 +230,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
   }
   match = rota.match(new RegExp(`^(${UUID_PATTERN})/renovacoes/(\\d+)/(aprovar|negar)$`, 'i'));
   if (match) {
-    somente(corpo, ['data_resposta', 'novo_vencimento', 'motivo', 'evidencias', 'request_id']);
+    somente(corpo, ['data_resposta', 'novo_vencimento', 'motivo', 'evidencias', 'versao_esperada', 'request_id']);
     const aprovar = match[3].toLowerCase() === 'aprovar';
     return { rpc: 'ro_responder_renovacao', params: {
       p_id: match[1], p_ciclo: Number(match[2]), p_situacao: aprovar ? 'Aprovada' : 'Negada',
@@ -221,6 +238,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
       p_novo_vencimento: aprovar ? data(corpo.novo_vencimento, 'O novo vencimento') : null,
       p_motivo: aprovar ? null : texto(corpo.motivo, 'O motivo', true),
       p_evidencias: corpo.evidencias ?? [],
+      p_versao_esperada: versaoEsperada(corpo.versao_esperada),
       p_request_id: texto(corpo.request_id, 'O request_id'),
     } };
   }
@@ -248,4 +266,205 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
     } };
   }
   throw new ErroComando(404, 'Rota não encontrada.');
+}
+
+export type ConsultaEvidenciasRos = {
+  negocio_id: string | null;
+  fabricante_id: string | null;
+  fabricante: string | null;
+  situacao: string | null;
+  responsavel: string | null;
+  numero_ro: string | null;
+  cliente: string | null;
+  oportunidade: string | null;
+  busca: string | null;
+  data_inicio: string;
+  data_fim: string;
+  pagina: number;
+  limite: number;
+};
+
+export function obterHojeSp(): string {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const valor = Object.fromEntries(partes.map((p) => [p.type, p.value]));
+  return `${valor.year}-${valor.month}-${valor.day}`;
+}
+
+export function interpretarConsultaEvidencias(
+  params: URLSearchParams,
+  hojeSpReferencia?: string,
+): ConsultaEvidenciasRos {
+  const permitidos = [
+    'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
+    'numero_ro', 'cliente', 'oportunidade', 'busca', 'q', 'pagina', 'limite',
+    'data_inicio', 'data_fim',
+  ];
+  for (const chave of params.keys()) {
+    if (!permitidos.includes(chave)) {
+      throw new ErroComando(400, `Parâmetro de consulta inválido para evidências: ${chave}.`);
+    }
+  }
+
+  const negocioId = params.get('negocio_id')?.trim();
+  const fabricanteId = params.get('fabricante_id')?.trim();
+  if (negocioId) uuid(negocioId, 'negocio_id');
+  if (fabricanteId) uuid(fabricanteId, 'fabricante_id');
+
+  const hoje = hojeSpReferencia || obterHojeSp();
+  const rawInicio = params.get('data_inicio')?.trim();
+  const rawFim = params.get('data_fim')?.trim();
+
+  const dataInicio = rawInicio ? data(rawInicio, 'data_inicio') : `${hoje.slice(0, 7)}-01`;
+  const dataFim = rawFim ? data(rawFim, 'data_fim') : hoje;
+
+  if (dataInicio > dataFim) {
+    throw new ErroComando(400, 'Período inválido: data_inicio é posterior a data_fim.');
+  }
+
+  const rawPagina = params.get('pagina');
+  const pagina = rawPagina ? Number(rawPagina) : 1;
+  if (!Number.isInteger(pagina) || pagina < 1) {
+    throw new ErroComando(400, 'Página inválida.');
+  }
+
+  const rawLimite = params.get('limite');
+  const limite = rawLimite ? Number(rawLimite) : 50;
+  if (!Number.isInteger(limite) || limite < 1 || limite > 200) {
+    throw new ErroComando(400, 'Limite deve estar entre 1 e 200.');
+  }
+
+  return {
+    negocio_id: negocioId || null,
+    fabricante_id: fabricanteId || null,
+    fabricante: params.get('fabricante')?.trim() || null,
+    situacao: params.get('situacao')?.trim() || null,
+    responsavel: params.get('responsavel')?.trim() || null,
+    numero_ro: params.get('numero_ro')?.trim() || null,
+    cliente: params.get('cliente')?.trim() || null,
+    oportunidade: params.get('oportunidade')?.trim() || null,
+    busca: params.get('busca')?.trim() || params.get('q')?.trim() || null,
+    data_inicio: dataInicio,
+    data_fim: dataFim,
+    pagina,
+    limite,
+  };
+}
+
+function calcularVigenciaSimples(vencimento: string | null, hoje: string): string {
+  if (!vencimento) return 'Sem prazo';
+  const dias = Math.round((Date.parse(`${vencimento}T00:00:00Z`) - Date.parse(`${hoje}T00:00:00Z`)) / 86400000);
+  if (dias < 0) return 'Vencida';
+  if (dias === 0) return 'Vence hoje';
+  if (dias <= 15) return 'A vencer';
+  return 'Vigente';
+}
+
+export function enriquecerRosComEvidencias(
+  registros: any[],
+  mapaEvidencias: Map<string, any | Error>,
+  dataInicio: string,
+  dataFim: string,
+  hojeSp: string,
+) {
+  let coberturaCompleta = true;
+  let totalSemAtualizacaoConfirmada = 0;
+  let totalCoberturaDesconhecida = 0;
+  let totalComAtualizacao = 0;
+
+  const ros = (registros || []).map((ro) => {
+    const idNegocio = ro.negocios?.clickup_negocio_id || ro.negocio?.clickup_negocio_id || null;
+    const coleta = idNegocio ? mapaEvidencias.get(idNegocio) : null;
+    const alertas: string[] = [];
+    let lista: any[] = [];
+    let coberturaOportunidadeConfirmada = true;
+
+    if (!idNegocio) {
+      coberturaCompleta = false;
+      coberturaOportunidadeConfirmada = false;
+      alertas.push('Oportunidade sem identificador ClickUp para consulta de evidências.');
+    } else if (coleta instanceof Error || !coleta) {
+      coberturaCompleta = false;
+      coberturaOportunidadeConfirmada = false;
+      const msgErro = coleta instanceof Error ? coleta.message : 'Falha na consulta';
+      alertas.push(`Não foi possível consultar as evidências humanas desta oportunidade (${msgErro}).`);
+    } else {
+      lista = coleta.evidencias || [];
+      // Se a fonte for apenas banco e foi lida até o fim, a sincronização CRM está completa
+      const bancoIncompleto = coleta.cobertura_banco_completa === false;
+      const clickupIncompleto = typeof coleta.fonte === 'string' && coleta.fonte.includes('ClickUp') && coleta.cobertura_clickup_completa === false;
+      if (bancoIncompleto || clickupIncompleto) {
+        coberturaCompleta = false;
+        coberturaOportunidadeConfirmada = false;
+        alertas.push('A cobertura das evidências desta oportunidade está incompleta.');
+      }
+      if (coleta.autor_classificacao_invalida) {
+        coberturaCompleta = false;
+        coberturaOportunidadeConfirmada = false;
+        alertas.push('Classificação de autoria não configurada ou inválida no CRM.');
+      }
+    }
+
+    const noPeriodo = lista.find((a) => {
+      const dia = String(a.data || '').slice(0, 10);
+      return dia >= dataInicio && dia <= dataFim;
+    }) || null;
+
+    const ultima = lista[0] || null;
+
+    let statusEvidencia: 'com_atualizacao' | 'sem_atualizacao_confirmada' | 'cobertura_desconhecida' = 'cobertura_desconhecida';
+
+    if (noPeriodo) {
+      totalComAtualizacao++;
+      statusEvidencia = 'com_atualizacao';
+    } else if (coberturaOportunidadeConfirmada) {
+      totalSemAtualizacaoConfirmada++;
+      statusEvidencia = 'sem_atualizacao_confirmada';
+      if (ultima && ultima.data) {
+        alertas.unshift(`Sem atualização humana neste mês — última atividade em ${ultima.data.slice(0, 10)}.`);
+      } else {
+        alertas.unshift('Sem atualização humana neste mês.');
+      }
+    } else {
+      totalCoberturaDesconhecida++;
+      statusEvidencia = 'cobertura_desconhecida';
+    }
+
+    const clienteNome = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || ro.negocio?.conta || null;
+    const oportunidadeNome = ro.negocios?.nome || ro.negocio?.nome || null;
+    const fabricanteNome = ro.fabricantes_ro?.nome || ro.fabricante || null;
+    const ciclos = (ro.renovacoes_ro || []).map((r: any) => Number(r.ciclo) || 0);
+
+    return {
+      id: ro.id,
+      cliente: clienteNome,
+      oportunidade: oportunidadeNome,
+      oportunidade_clickup_id: idNegocio,
+      oportunidade_url: idNegocio ? `https://app.clickup.com/t/${idNegocio}` : null,
+      fabricante: fabricanteNome,
+      categoria: ro.categoria || null,
+      cenario: ro.cenario || null,
+      numero_ro: ro.numero_ro || null,
+      situacao: ro.situacao,
+      data_vencimento: ro.data_vencimento,
+      vigencia: calcularVigenciaSimples(ro.data_vencimento, hojeSp),
+      ciclo_renovacao: ciclos.length ? Math.max(...ciclos) : (ro.ciclo_renovacao || 0),
+      atualizacao_no_periodo: noPeriodo,
+      ultima_atividade_humana: ultima,
+      evidencias_humanas: lista.slice(0, 3),
+      status_evidencia: statusEvidencia,
+      alertas,
+      fonte_evidencias: coleta && !(coleta instanceof Error) ? (coleta.fonte || 'CRM') : null,
+    };
+  });
+
+  return {
+    ros,
+    total_sem_atualizacao_confirmada: totalSemAtualizacaoConfirmada,
+    total_cobertura_desconhecida: totalCoberturaDesconhecida,
+    total_com_atualizacao: totalComAtualizacao,
+    total_sem_atualizacao: totalSemAtualizacaoConfirmada,
+    cobertura_evidencias_completa: coberturaCompleta,
+  };
 }
