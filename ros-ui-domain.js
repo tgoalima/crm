@@ -299,6 +299,39 @@
     return `Sem cliente informado — ${nomeOp}`;
   };
 
+
+  const resolverNegocioCrmParaRo = async (task, consultarCrm) => {
+    if (!task || typeof task !== "object" || typeof consultarCrm !== "function") {
+      return null;
+    }
+    const idRaw = task.id ? String(task.id).trim() : "";
+    const clickupId = task.clickup_negocio_id ? String(task.clickup_negocio_id).trim() : "";
+
+    // 1. Tenta por UUID se idRaw parecer um UUID (com traços)
+    if (idRaw && idRaw.includes("-")) {
+      try {
+        const resUuid = await consultarCrm({ id: idRaw });
+        if (resUuid && resUuid.id) return resUuid;
+      } catch {
+        // segue para tentar por clickup_negocio_id
+      }
+    }
+
+    // 2. Tenta por clickup_negocio_id
+    const targetCuId = clickupId || idRaw;
+    if (targetCuId) {
+      try {
+        const resCu = await consultarCrm({ clickup_negocio_id: targetCuId });
+        if (resCu && resCu.id) return resCu;
+      } catch {
+        return null;
+      }
+    }
+
+    // Nunca retorna fallback fictício com task.id
+    return null;
+  };
+
   const criarRegistroOportunidade = async (dados, options = {}) => {
     const fetchFn = options.fetchImpl || global.fetch;
     if (typeof fetchFn !== 'function') throw new Error('Ambiente sem suporte a fetch disponível.');
@@ -354,5 +387,6 @@
     gerarRequestIdRo,
     desambiguarOportunidade,
     criarRegistroOportunidade,
+    resolverNegocioCrmParaRo,
   };
 })(globalThis);

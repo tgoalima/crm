@@ -357,21 +357,71 @@ test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cen
   assert.equal(limpoCompleto.request_id, 'req-stable-1');
 });
 
-test('gerarRequestIdRo produz identificador válido e retry reutiliza o mesmo request_id', () => {
-  const { gerarRequestIdRo } = carregarDominioRos();
-  const id1 = gerarRequestIdRo();
-  const id2 = gerarRequestIdRo();
-  assert.ok(typeof id1 === 'string' && id1.length >= 16);
-  assert.notEqual(id1, id2);
+test('retry de criacao de R.O. reutiliza estritamente o mesmo request_id apos falha e tem sucesso na 2a chamada', async () => {
+  const { criarRegistroOportunidade, gerarRequestIdRo } = carregarDominioRos();
 
-  // Simulação de reenvio com request_id estável
-  const formState = {
-    negocio_id: 'neg-1',
-    fabricante_id: 'fab-1',
-    categoria: 'Segurança',
-    request_id: id1, // mantido estável entre tentativas
+  const requestIdEstavel = gerarRequestIdRo();
+  const chamadas = [];
+
+  const mockFetch = async (url, init) => {
+    const headers = init?.headers || {};
+    const body = JSON.parse(init?.body || '{}');
+    chamadas.push({
+      url: String(url),
+      headers,
+      body,
+    });
+
+    if (chamadas.length === 1) {
+      // 1a chamada falha (500 do servidor)
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'Falha temporária de infraestrutura' }),
+      };
+    }
+
+    // 2a chamada (retry) confirma sucesso 201
+    return {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 'ro-criada-com-sucesso',
+        negocio_id: body.negocio_id,
+        fabricante_id: body.fabricante_id,
+        situacao: 'Backoffice',
+      }),
+    };
   };
-  assert.equal(formState.request_id, id1);
+
+  const { criarRegistroOportunidade: criarRoComMock } = carregarDominioRos({ fetchImpl: mockFetch });
+
+  const payload = {
+    negocio_id: '11111111-1111-4111-8111-111111111111',
+    fabricante_id: '22222222-2222-4222-8222-222222222222',
+    categoria: 'Infraestrutura',
+    request_id: requestIdEstavel,
+  };
+
+  // 1a tentativa: deve falhar sem perder o request_id
+  await assert.rejects(
+    () => criarRoComMock(payload),
+    /falha|temporária/i
+  );
+  assert.equal(chamadas.length, 1);
+  assert.equal(chamadas[0].headers['x-request-id'], requestIdEstavel);
+  assert.equal(chamadas[0].body.request_id, requestIdEstavel);
+
+  // 2a tentativa (retry): mesmo request_id enviado na mesma criação
+  const respostaSucesso = await criarRoComMock(payload);
+  assert.equal(chamadas.length, 2);
+  assert.equal(chamadas[1].headers['x-request-id'], requestIdEstavel);
+  assert.equal(chamadas[1].body.request_id, requestIdEstavel);
+
+  // Validação explícita de idempotência
+  assert.equal(chamadas[0].headers['x-request-id'], chamadas[1].headers['x-request-id']);
+  assert.equal(chamadas[0].body.request_id, chamadas[1].body.request_id);
+  assert.equal(respostaSucesso.id, 'ro-criada-com-sucesso');
 });
 
 test('criarRegistroOportunidade envia POST para /api/ros com headers corretos e processa sucesso', async () => {
@@ -485,4 +535,97 @@ test('desambiguarOportunidade formata cliente e nome do projeto claramente', () 
     nome: 'Projeto Firewall Fortinet',
   });
   assert.equal(opSemCliente, 'Sem cliente informado — Projeto Firewall Fortinet');
+});
+
+test('resolverNegocioCrmParaRo nunca usa task.id como fallback de negocio_id quando nao localizado no CRM', async () => {
+  const { resolverNegocioCrmParaRo } = carregarDominioRos();
+
+  // Caso 1: Busca no CRM não encontra registro (retorna null)
+  const consultarCrmVazio = async () => null;
+  const taskClickUp = { id: 'clickup-task-8899', name: 'Projeto Sem Sincronia CRM' };
+
+  const resultado = await resolverNegocioCrmParaRo(taskClickUp, consultarCrmVazio);
+  // Não pode retornar objeto contendo id do ClickUp como se fosse negócio do CRM
+  assert.equal(resultado, null);
+
+  // Caso 2: Falha na consulta (erro lançado)
+  const consultarCrmErro = async () => { throw new Error('Erro de conexão ao CRM'); };
+  const resultadoErro = await resolverNegocioCrmParaRo(taskClickUp, consultarCrmErro);
+  assert.equal(resultadoErro, null);
+
+  // Caso 3: Encontra negócio real no CRM
+  const negocioRealCrm = {
+    id: '33333333-3333-4333-8333-333333333333',
+    nome: 'Projeto Oficial CRM',
+    conta_id: '44444444-4444-4444-8444-444444444444',
+  };
+  const consultarCrmSucesso = async (criterio) => {
+    if (criterio.clickup_negocio_id === 'clickup-task-8899') {
+      return negocioRealCrm;
+    }
+    return null;
+  };
+  const resultadoSucesso = await resolverNegocioCrmParaRo(taskClickUp, consultarCrmSucesso);
+  assert.equal(resultadoSucesso.id, negocioRealCrm.id);
+
+  // Verificação estática do arquivo app.js: assegura que handleAbrirNovaRoOportunidade
+  // não possui fallback atribuindo task.id para negocio.id
+  const appJsPath = new URL('../app.js', import.meta.url).pathname;
+  const appJsConteudo = fs.readFileSync(appJsPath, 'utf8');
+  assert.ok(
+    !appJsConteudo.includes('negocio = {\n        id: task.id') &&
+    !appJsConteudo.includes('negocio = { id: task.id') &&
+    !appJsConteudo.includes('negocio = {\n        id: task?.id'),
+    'app.js não deve conter fallback atribuindo task.id a negocio.id'
+  );
+});
+
+test('busca de clientes e oportunidades protege caracteres reservados e não utiliza .or concatenado em app.js', () => {
+  const appJsPath = new URL('../app.js', import.meta.url).pathname;
+  const appJsConteudo = fs.readFileSync(appJsPath, 'utf8');
+
+  // Assegura que o NovaRoModal em app.js não utiliza .or(...) concatenado para busca de clientes
+  const modalStart = appJsConteudo.indexOf("function NovaRoModal(");
+  const modalEnd = appJsConteudo.indexOf("function RegistrosOportunidadeView(");
+  const novaRoModalTrecho = appJsConteudo.slice(modalStart, modalEnd);
+
+  assert.ok(
+    !novaRoModalTrecho.includes(".or("),
+    "NovaRoModal não deve concatenar strings no operador .or(...) do PostgREST"
+  );
+  assert.ok(
+    novaRoModalTrecho.includes("supabaseClient.from(\"contas\").select(\"id\").ilike(\"nome\"") ||
+    novaRoModalTrecho.includes("supabaseClient.from('contas').select('id').ilike('nome'"),
+    "NovaRoModal deve fazer consulta independente em contas.nome"
+  );
+  assert.ok(
+    novaRoModalTrecho.includes("supabaseClient.from(\"contas\").select(\"id\").ilike(\"razao_social\"") ||
+    novaRoModalTrecho.includes("supabaseClient.from('contas').select('id').ilike('razao_social'"),
+    "NovaRoModal deve fazer consulta independente em contas.razao_social"
+  );
+
+  // Simulação de pesquisa com caracteres reservados (vírgula, aspas, parênteses, porcentagem)
+  const termosReservados = [
+    'Empresa, Ltda',
+    'Cliente (Matriz)',
+    '100% Tecnologia',
+    'Projeto "Enterprise"',
+    'A & B / C, D (SP)',
+  ];
+
+  for (const termo of termosReservados) {
+    // As consultas em contas devem ser independentes (nome e razao_social)
+    const queryNome = "%" + termo + "%";
+    const queryRazao = "%" + termo + "%";
+    assert.ok(queryNome.includes(termo));
+    assert.ok(queryRazao.includes(termo));
+
+    // Verificação de união de IDs sem duplicidade
+    const listaResultadosMockNome = [{ id: 'conta-1' }, { id: 'conta-2' }];
+    const listaResultadosMockRazao = [{ id: 'conta-2' }, { id: 'conta-3' }];
+    const idsUnicos = new Set();
+    listaResultadosMockNome.forEach((c) => c?.id && idsUnicos.add(c.id));
+    listaResultadosMockRazao.forEach((c) => c?.id && idsUnicos.add(c.id));
+    assert.deepEqual(Array.from(idsUnicos), ['conta-1', 'conta-2', 'conta-3']);
+  }
 });

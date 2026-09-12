@@ -424,6 +424,7 @@ const {
   gerarRequestIdRo,
   desambiguarOportunidade,
   criarRegistroOportunidade,
+  resolverNegocioCrmParaRo,
 } = window.RosUiDomain || {};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2044,18 +2045,6 @@ function NovaRoModal({
     requestIdRef.current = gerarRequestIdRo();
   }
 
-  // Listener ESC
-  useEffect(() => {
-    if (!aberto) return;
-    const aoTeclar = (e) => {
-      if (e.key === "Escape" && !salvando) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", aoTeclar);
-    return () => window.removeEventListener("keydown", aoTeclar);
-  }, [aberto, salvando, onClose]);
-
   // Sincroniza oportunidadeFixa
   useEffect(() => {
     if (oportunidadeFixa) {
@@ -2108,15 +2097,19 @@ function NovaRoModal({
             .ilike("nome", "%" + termo + "%")
             .limit(20);
 
-          const { data: contasMatch } = await supabaseClient
-            .from("contas")
-            .select("id")
-            .or("nome.ilike.%" + termo + "%,razao_social.ilike.%" + termo + "%")
-            .limit(20);
+          // Consultas independentes e seguras em contas, sem concatenar filtros
+          const [resNome, resRazao] = await Promise.all([
+            supabaseClient.from("contas").select("id").ilike("nome", "%" + termo + "%").limit(20),
+            supabaseClient.from("contas").select("id").ilike("razao_social", "%" + termo + "%").limit(20),
+          ]);
+
+          const contaIdsUnicos = new Set();
+          (resNome?.data || []).forEach((c) => c?.id && contaIdsUnicos.add(c.id));
+          (resRazao?.data || []).forEach((c) => c?.id && contaIdsUnicos.add(c.id));
+          const contaIds = Array.from(contaIdsUnicos);
 
           let negsPorConta = [];
-          if (contasMatch && contasMatch.length > 0) {
-            const contaIds = contasMatch.map((c) => c.id);
+          if (contaIds.length > 0) {
             const { data: negs } = await supabaseClient
               .from("negocios")
               .select("id, nome, conta_id, contas(id, nome, razao_social)")
@@ -5990,40 +5983,54 @@ function App() {
 
   const handleAbrirNovaRoOportunidade = useCallback(async (task) => {
     if (!task) return;
+    if (!supabaseClient) {
+      showToast("Esta oportunidade ainda não está sincronizada ao CRM. Cadastre ou sincronize a oportunidade antes de criar uma R.O.", "warning");
+      return;
+    }
+
     let negocio = null;
-    if (supabaseClient) {
-      try {
+    try {
+      const consultarCrm = async (criterio) => {
+        let query = supabaseClient
+          .from("negocios")
+          .select("id, nome, conta_id, contas(id, nome, razao_social)");
+        if (criterio.id) {
+          query = query.eq("id", criterio.id);
+        } else if (criterio.clickup_negocio_id) {
+          query = query.eq("clickup_negocio_id", criterio.clickup_negocio_id);
+        } else {
+          return null;
+        }
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data || null;
+      };
+
+      if (resolverNegocioCrmParaRo) {
+        negocio = await resolverNegocioCrmParaRo(task, consultarCrm);
+      } else {
         if (task.id && String(task.id).includes("-")) {
-          const { data } = await supabaseClient
-            .from("negocios")
-            .select("id, nome, conta_id, contas(id, nome, razao_social)")
-            .eq("id", task.id)
-            .maybeSingle();
-          if (data) negocio = data;
+          negocio = await consultarCrm({ id: task.id });
         }
         if (!negocio && task.id) {
-          const { data } = await supabaseClient
-            .from("negocios")
-            .select("id, nome, conta_id, contas(id, nome, razao_social)")
-            .eq("clickup_negocio_id", String(task.id))
-            .maybeSingle();
-          if (data) negocio = data;
+          const cuId = task.clickup_negocio_id || task.id;
+          negocio = await consultarCrm({ clickup_negocio_id: String(cuId) });
         }
-      } catch (err) {
-        console.warn("Erro ao consultar oportunidade para R.O.:", err);
       }
+    } catch (err) {
+      console.warn("Erro ao consultar oportunidade CRM para R.O.:", err);
+      showToast("Esta oportunidade ainda não está sincronizada ao CRM. Cadastre ou sincronize a oportunidade antes de criar uma R.O.", "warning");
+      return;
     }
-    if (!negocio) {
-      negocio = {
-        id: task.id,
-        nome: task.nome || task.name || "Oportunidade",
-        conta_id: task.conta_id || null,
-        contas: empresaDoNegocio?.id === task.conta_id ? empresaDoNegocio : null,
-      };
+
+    if (!negocio || !negocio.id) {
+      showToast("Esta oportunidade ainda não está sincronizada ao CRM. Cadastre ou sincronize a oportunidade antes de criar uma R.O.", "warning");
+      return;
     }
+
     setModalNovaRoOportunidadeFixa(negocio);
     setModalNovaRoAberto(true);
-  }, [supabaseClient, empresaDoNegocio]);
+  }, [supabaseClient, showToast]);
 
   // Armazenamento em memória para filtros instantâneos sem atraso
   const rawProposalsRef = useRef([]);
