@@ -2512,58 +2512,126 @@ function RoActionModal({
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// DRAWER DE DETALHES E AÇÕES DA R.O. (Task 6)
+// DRAWER DE DETALHES E AÇÕES DA R.O. (Task 6 e Task 7)
 // ─────────────────────────────────────────────────────────────────────────
 function RegistroOportunidadeDrawer({
   ro: roInicial,
   onClose,
+  supabaseClient = null,
   getSupabaseHeaders = null,
   showToast = null,
   onRoAtualizada = null,
+  onSelecionarRo = null,
 }) {
   const [ro, setRo] = useState(roInicial);
   const [acaoAtiva, setAcaoAtiva] = useState(null);
   const [sucessoraAtiva, setSucessoraAtiva] = useState(null);
   const [roAnterior, setRoAnterior] = useState(null);
+  const [statusRelacoes, setStatusRelacoes] = useState(supabaseClient ? 'carregando' : 'indisponivel');
+  const [carregandoNavegacao, setCarregandoNavegacao] = useState(false);
 
   useEffect(() => {
     setRo(roInicial);
   }, [roInicial]);
 
-  // Buscar sucessora ativa e R.O. anterior para cadeia de substituição
-  useEffect(() => {
+  // Buscar sucessora ativa e R.O. anterior para cadeia de substituição usando apenas o prop supabaseClient
+  const buscarRelacoes = useCallback(async () => {
     if (!ro?.id) return;
-    const buscarRelacoes = async () => {
-      try {
-        const supabase = typeof globalThis.supabaseClient !== 'undefined' ? globalThis.supabaseClient : null;
-        if (!supabase) return;
+    if (!supabaseClient) {
+      setStatusRelacoes('indisponivel');
+      setSucessoraAtiva(null);
+      setRoAnterior(null);
+      return;
+    }
 
-        // Buscar se existe uma R.O. que aponta para esta como ro_anterior_id
-        const { data: sucessoras } = await supabase
+    setStatusRelacoes('carregando');
+    try {
+      // Buscar se existe uma R.O. que aponta para esta como ro_anterior_id
+      const { data: sucessoras, error: errSucessoras } = await supabaseClient
+        .from('registros_oportunidade')
+        .select('id, numero_ro, situacao, fabricantes_ro(nome)')
+        .eq('ro_anterior_id', ro.id)
+        .not('situacao', 'in', '("Reprovada","Encerrada")')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (errSucessoras) {
+        console.warn('[RegistroOportunidadeDrawer] Erro ao consultar sucessora:', errSucessoras);
+        setStatusRelacoes('erro');
+        return;
+      }
+
+      setSucessoraAtiva(sucessoras && sucessoras.length > 0 ? sucessoras[0] : null);
+
+      // Buscar a R.O. anterior se houver
+      if (ro.ro_anterior_id) {
+        const { data: anterior, error: errAnterior } = await supabaseClient
           .from('registros_oportunidade')
           .select('id, numero_ro, situacao, fabricantes_ro(nome)')
-          .eq('ro_anterior_id', ro.id)
-          .not('situacao', 'in', '("Reprovada","Encerrada")')
-          .limit(1);
-        setSucessoraAtiva(sucessoras?.length > 0 ? sucessoras[0] : null);
+          .eq('id', ro.ro_anterior_id)
+          .maybeSingle();
 
-        // Buscar a R.O. anterior se houver
-        if (ro.ro_anterior_id) {
-          const { data: anterior } = await supabase
-            .from('registros_oportunidade')
-            .select('id, numero_ro, situacao, fabricantes_ro(nome)')
-            .eq('id', ro.ro_anterior_id)
-            .maybeSingle();
-          setRoAnterior(anterior || null);
-        } else {
-          setRoAnterior(null);
+        if (errAnterior) {
+          console.warn('[RegistroOportunidadeDrawer] Erro ao consultar anterior:', errAnterior);
+          setStatusRelacoes('erro');
+          return;
         }
-      } catch (err) {
-        console.warn('[RegistroOportunidadeDrawer] Falha ao buscar relações de substituição:', err);
+        setRoAnterior(anterior || null);
+      } else {
+        setRoAnterior(null);
       }
-    };
+
+      setStatusRelacoes('pronto');
+    } catch (err) {
+      console.warn('[RegistroOportunidadeDrawer] Falha ao buscar relações de substituição:', err);
+      setStatusRelacoes('erro');
+    }
+  }, [ro?.id, ro?.ro_anterior_id, supabaseClient]);
+
+  useEffect(() => {
     buscarRelacoes();
-  }, [ro?.id, ro?.ro_anterior_id, ro?.situacao]);
+  }, [buscarRelacoes]);
+
+  // Navegar entre anterior e sucessora trocando o registro exibido no mesmo drawer
+  const handleNavegarParaRo = async (targetId) => {
+    if (!targetId || targetId === ro?.id) return;
+    setCarregandoNavegacao(true);
+    try {
+      let novaRo = null;
+      if (fetchRegistroOportunidade) {
+        try {
+          novaRo = await fetchRegistroOportunidade(targetId, { getSupabaseHeaders });
+        } catch (errApi) {
+          console.warn('[RegistroOportunidadeDrawer] Falha ao consultar R.O. na navegação via API:', errApi);
+        }
+      }
+      if (!novaRo && supabaseClient) {
+        try {
+          const { data: roData, error: errDb } = await supabaseClient
+            .from('registros_oportunidade')
+            .select()
+            .eq('id', targetId)
+            .maybeSingle();
+          if (roData && !errDb) {
+            novaRo = roData;
+          }
+        } catch (errDbCatch) {
+          console.warn('[RegistroOportunidadeDrawer] Falha ao consultar R.O. no supabaseClient:', errDbCatch);
+        }
+      }
+
+      if (novaRo) {
+        setRo(novaRo);
+        if (typeof onSelecionarRo === 'function') {
+          onSelecionarRo(novaRo.id, novaRo);
+        }
+      } else if (showToast) {
+        showToast('Não foi possível carregar os detalhes da R.O. selecionada.', 'error');
+      }
+    } finally {
+      setCarregandoNavegacao(false);
+    }
+  };
 
   useEffect(() => {
     const aoTeclar = (evento) => { if (evento.key === 'Escape' && !acaoAtiva) onClose(); };
@@ -2606,6 +2674,7 @@ function RegistroOportunidadeDrawer({
       showToast(mensagemToast || 'Operação realizada com sucesso!', 'success');
     }
     await recarregarRoCompleta();
+    await buscarRelacoes();
   };
 
   return (
@@ -2681,29 +2750,71 @@ function RegistroOportunidadeDrawer({
             </section>
 
             <section className="rounded-xl border border-purple-200 dark:border-purple-900/60 p-4 bg-purple-50/30 dark:bg-purple-950/10">
-              <h3 className="font-bold text-slate-900 dark:text-white">Sucessão</h3>
-              {!ro.ro_anterior_id && !sucessoraAtiva ? (
-                <p className="mt-1 text-xs text-slate-500">Sem substituição vinculada.</p>
-              ) : (
-                <div className="mt-2 space-y-2">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-slate-900 dark:text-white">Sucessão</h3>
+                {carregandoNavegacao && (
+                  <span className="text-xs text-purple-600 dark:text-purple-400 italic">Carregando registro...</span>
+                )}
+              </div>
+
+              {statusRelacoes === 'carregando' && (
+                <p className="text-xs text-slate-500 italic">Carregando relações de substituição...</p>
+              )}
+
+              {statusRelacoes === 'indisponivel' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">Informações de substituição indisponíveis (cliente não conectado).</p>
+              )}
+
+              {statusRelacoes === 'erro' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">Falha ao consultar relações de substituição.</p>
+              )}
+
+              {statusRelacoes === 'pronto' && !ro.ro_anterior_id && !sucessoraAtiva && (
+                <p className="text-xs text-slate-500">Sem substituição vinculada.</p>
+              )}
+
+              {statusRelacoes === 'pronto' && (roAnterior || sucessoraAtiva) && (
+                <div className="space-y-3">
                   {roAnterior && (
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-purple-600 dark:text-purple-400 font-semibold">← Anterior:</span>
-                      <span className="text-slate-700 dark:text-slate-200">{roAnterior.numero_ro || 'Sem número'}</span>
-                      <span className="text-slate-500">({roAnterior.situacao})</span>
+                    <div className="flex items-center justify-between gap-2 text-xs bg-white/70 dark:bg-slate-800/70 p-2.5 rounded-lg border border-purple-100 dark:border-purple-900/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-600 dark:text-purple-400 font-semibold">← Anterior:</span>
+                        <span className="text-slate-800 dark:text-slate-100 font-bold">{roAnterior.numero_ro || 'Sem número'}</span>
+                        <span className="text-slate-500">({roAnterior.situacao})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleNavegarParaRo(roAnterior.id)}
+                        disabled={carregandoNavegacao}
+                        className="px-2.5 py-1 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 hover:bg-purple-200 dark:hover:bg-purple-900/80 rounded transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Abrir anterior
+                      </button>
                     </div>
                   )}
-                  {ro.ro_anterior_id && !roAnterior && (
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-purple-600 dark:text-purple-400 font-semibold">← Anterior:</span>
-                      <span className="text-slate-500 italic">Carregando...</span>
-                    </div>
-                  )}
+
                   {sucessoraAtiva && (
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-purple-600 dark:text-purple-400 font-semibold">→ Sucessora:</span>
-                      <span className="text-slate-700 dark:text-slate-200">{sucessoraAtiva.numero_ro || 'Aguardando número'}</span>
-                      <span className="text-slate-500">({sucessoraAtiva.situacao})</span>
+                    <div className="flex items-center justify-between gap-2 text-xs bg-white/70 dark:bg-slate-800/70 p-2.5 rounded-lg border border-purple-100 dark:border-purple-900/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-600 dark:text-purple-400 font-semibold">→ Sucessora:</span>
+                        <span className="text-slate-800 dark:text-slate-100 font-bold">{sucessoraAtiva.numero_ro || 'Aguardando número'}</span>
+                        <span className="text-slate-500">({sucessoraAtiva.situacao})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleNavegarParaRo(sucessoraAtiva.id)}
+                        disabled={carregandoNavegacao}
+                        className="px-2.5 py-1 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 hover:bg-purple-200 dark:hover:bg-purple-900/80 rounded transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Abrir sucessora
+                      </button>
+                    </div>
+                  )}
+
+                  {((sucessoraAtiva && ['Backoffice', 'Aguardando aprovação'].includes(sucessoraAtiva.situacao)) ||
+                    (roAnterior && ['Backoffice', 'Aguardando aprovação'].includes(ro.situacao))) && (
+                    <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-800 dark:text-amber-300">
+                      <p className="font-medium">A R.O. anterior permanece aprovada até a sucessora receber aprovação oficial.</p>
                     </div>
                   )}
                 </div>
@@ -3229,13 +3340,15 @@ function RegistrosOportunidadeView({
   onPageChange,
   onRefresh,
   getSupabaseHeaders,
+  supabaseClient,
   showToast,
   onRoAtualizada,
 }) {
   const { rows = [], filters = {}, page = 1, total = 0, loading, error, selectedId } = rosState;
   const filtroBusca = filters.busca || filters.q || '';
   const [buscaDigitada, setBuscaDigitada] = useState(filtroBusca);
-  const roSelecionada = rows.find((ro) => ro.id === selectedId) || null;
+  const [roNavegada, setRoNavegada] = useState(null);
+  const roSelecionada = (selectedId && (rows.find((ro) => ro.id === selectedId) || (roNavegada?.id === selectedId ? roNavegada : null))) || null;
 
   // A busca ampla pode consultar contas, oportunidades e R.Os. Esperar uma
   // pausa curta evita uma chamada ao CRM para cada tecla digitada.
@@ -3903,12 +4016,20 @@ function RegistrosOportunidadeView({
       {roSelecionada && (
         <RegistroOportunidadeDrawer
           ro={roSelecionada}
-          onClose={onCloseSelection}
+          onClose={() => {
+            setRoNavegada(null);
+            if (onCloseSelection) onCloseSelection();
+          }}
+          supabaseClient={supabaseClient}
           getSupabaseHeaders={getSupabaseHeaders}
           showToast={showToast}
           onRoAtualizada={(roAtualizada) => {
             if (onRoAtualizada) onRoAtualizada(roAtualizada);
             if (onRefresh) onRefresh();
+          }}
+          onSelecionarRo={(novoId, novoObj) => {
+            setRoNavegada(novoObj);
+            if (onSelect) onSelect(novoId);
           }}
         />
       )}
@@ -12855,6 +12976,7 @@ function App() {
           fabricantes={fabricantesRo}
           vendedores={vendedoresVisiveis}
           getSupabaseHeaders={getSupabaseHeaders}
+          supabaseClient={supabaseClient}
           showToast={showToast}
           onSelect={(id) => setRosState((prev) => ({ ...prev, selectedId: id }))}
           onCloseSelection={() => setRosState((prev) => ({ ...prev, selectedId: null }))}

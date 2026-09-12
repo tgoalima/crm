@@ -1280,3 +1280,74 @@ test('app.js contém os elementos de UI de substituição (Task 7)', () => {
   assert.ok(appJs.includes('← Anterior:'));
   assert.ok(appJs.includes('→ Sucessora:'));
 });
+
+
+test('Task 7 - drawer recebe e usa supabaseClient por prop, sem globalThis.supabaseClient', () => {
+  const appJs = lerArquivo('app.js');
+
+  // Não pode haver nenhuma referência a globalThis.supabaseClient
+  assert.equal(appJs.includes('globalThis.supabaseClient'), false, 'Não deve existir globalThis.supabaseClient no app.js');
+
+  // Drawer declara prop supabaseClient
+  assert.ok(appJs.includes('function RegistroOportunidadeDrawer({'));
+  assert.ok(appJs.includes('supabaseClient = null'));
+
+  // RegistrosOportunidadeView repassa supabaseClient ao Drawer
+  assert.ok(appJs.includes('<RegistroOportunidadeDrawer'));
+  assert.ok(appJs.includes('supabaseClient={supabaseClient}'));
+
+  // App passa supabaseClient para RegistrosOportunidadeView
+  assert.ok(appJs.includes('<RegistrosOportunidadeView'));
+});
+
+test('Task 7 - relação sucessora encontrada bloqueia a ação substituir', () => {
+  const { obterAcoesPermitidasRo } = carregarDominioRos();
+
+  // Sem sucessora ativa, R.O. Aprovada pode iniciar substituição
+  const acoesSemSucessora = Array.from(obterAcoesPermitidasRo('Aprovada', false, { temSucessoraAtiva: false }));
+  assert.ok(acoesSemSucessora.includes('substituir'));
+
+  // Com sucessora ativa, a ação substituir é bloqueada
+  const acoesComSucessora = Array.from(obterAcoesPermitidasRo('Aprovada', false, { temSucessoraAtiva: true }));
+  assert.equal(acoesComSucessora.includes('substituir'), false);
+  assert.deepEqual(acoesComSucessora, ['solicitar_renovacao', 'encerrar']);
+});
+
+test('Task 7 - relação indisponível não é apresentada como ausência confirmada', () => {
+  const appJs = lerArquivo('app.js');
+
+  // A UI não pode assumir 'Sem substituição vinculada' se o cliente não estiver disponível ou estiver carregando
+  assert.ok(appJs.includes("statusRelacoes === 'indisponivel'"));
+  assert.ok(appJs.includes("statusRelacoes === 'carregando'"));
+  assert.ok(appJs.includes("statusRelacoes === 'pronto' && !ro.ro_anterior_id && !sucessoraAtiva"));
+  assert.ok(appJs.includes('Informações de substituição indisponíveis'));
+});
+
+test('Task 7 - há controles para abrir anterior e sucessora com textos esperados', () => {
+  const appJs = lerArquivo('app.js');
+
+  // Controles de navegação
+  assert.ok(appJs.includes('Abrir anterior'));
+  assert.ok(appJs.includes('Abrir sucessora'));
+  assert.ok(appJs.includes('handleNavegarParaRo(roAnterior.id)'));
+  assert.ok(appJs.includes('handleNavegarParaRo(sucessoraAtiva.id)'));
+
+  // Sucessora sem número exibe 'Aguardando número'
+  assert.ok(appJs.includes("sucessoraAtiva.numero_ro || 'Aguardando número'"));
+
+  // Texto contextual obrigatório durante vigência simultânea
+  assert.ok(appJs.includes('A R.O. anterior permanece aprovada até a sucessora receber aprovação oficial.'));
+});
+
+test('Task 7 - navegar entre anterior e sucessora troca o registro exibido sem perder o drawer', () => {
+  const appJs = lerArquivo('app.js');
+
+  // Drawer tem função de navegação interna que atualiza ro no mesmo drawer
+  assert.ok(appJs.includes('const handleNavegarParaRo = async (targetId) => {'));
+  assert.ok(appJs.includes('setRo(novaRo)'));
+  assert.ok(appJs.includes('onSelecionarRo(novaRo.id, novaRo)'));
+
+  // View suporta roNavegada para não fechar o drawer caso a R.O. não conste na lista paginada atual
+  assert.ok(appJs.includes('const [roNavegada, setRoNavegada] = useState(null);'));
+  assert.ok(appJs.includes('roNavegada?.id === selectedId ? roNavegada : null'));
+});
