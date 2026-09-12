@@ -188,7 +188,21 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
     };
   }
 
-  let match = rota.match(new RegExp(`^(${UUID_PATTERN})/aprovar$`, 'i'));
+  let match = rota.match(new RegExp(`^(${UUID_PATTERN})/enviar$`, 'i'));
+  if (match) {
+    somente(corpo, ['data_solicitacao', 'observacao', 'versao_esperada', 'request_id']);
+    return {
+      rpc: 'ro_registrar_envio',
+      params: {
+        p_id: match[1],
+        p_data_solicitacao: data(corpo.data_solicitacao, 'A data de solicitação'),
+        p_observacao: texto(corpo.observacao, 'A observação'),
+        p_versao_esperada: versaoEsperada(corpo.versao_esperada),
+        p_request_id: texto(corpo.request_id, 'O request_id'),
+      },
+    };
+  }
+  match = rota.match(new RegExp(`^(${UUID_PATTERN})/aprovar$`, 'i'));
   if (match) {
     somente(corpo, ['numero_ro', 'data_aprovacao', 'data_vencimento', 'versao_esperada', 'request_id']);
     return { rpc: 'ro_aprovar', params: {

@@ -299,7 +299,8 @@ test('painel ordena eventos recentes primeiro e separa vigência, ciclo e açõe
 
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Backoffice')), ['enviar', 'aprovar', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aguardando aprovação')), ['aprovar', 'encerrar']);
-  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada')), ['renovar', 'substituir', 'encerrar']);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada', false)), ['solicitar_renovacao', 'encerrar']);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada', true)), ['responder_renovacao', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
 });
 
@@ -628,4 +629,357 @@ test('busca de clientes e oportunidades protege caracteres reservados e não uti
     listaResultadosMockRazao.forEach((c) => c?.id && idsUnicos.add(c.id));
     assert.deepEqual(Array.from(idsUnicos), ['conta-1', 'conta-2', 'conta-3']);
   }
+});
+
+test('obterAcoesPermitidasRo bloqueia nova solicitação se houver ciclo pendente e nunca oferece substituir na Task 6', () => {
+  const { obterAcoesPermitidasRo } = carregarDominioRos();
+
+  // Backoffice: enviar, aprovar, encerrar
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Backoffice')), ['enviar', 'aprovar', 'encerrar']);
+
+  // Aguardando aprovação: aprovar, encerrar
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aguardando aprovação')), ['aprovar', 'encerrar']);
+
+  // Aprovada sem renovação pendente: solicitar_renovacao, encerrar (NUNCA substituir)
+  const acoesSemPendente = Array.from(obterAcoesPermitidasRo('Aprovada', false));
+  assert.deepEqual(acoesSemPendente, ['solicitar_renovacao', 'encerrar']);
+  assert.equal(acoesSemPendente.includes('substituir'), false);
+
+  // Aprovada com renovação pendente: responder_renovacao, encerrar (NUNCA solicitar_renovacao, NUNCA substituir)
+  const acoesComPendente = Array.from(obterAcoesPermitidasRo('Aprovada', true));
+  assert.deepEqual(acoesComPendente, ['responder_renovacao', 'encerrar']);
+  assert.equal(acoesComPendente.includes('solicitar_renovacao'), false);
+  assert.equal(acoesComPendente.includes('substituir'), false);
+
+  // Inativas
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Reprovada')), []);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Substituída')), []);
+});
+
+test('validarPayloadAcaoRo valida regras estritas de cada ação operacional', () => {
+  const { validarPayloadAcaoRo } = carregarDominioRos();
+
+  // A) Enviar
+  assert.throws(() => validarPayloadAcaoRo('enviar', {}), /data do envio/i);
+  assert.throws(() => validarPayloadAcaoRo('enviar', { data_solicitacao: '2026-02-30' }), /data válida/i);
+  const envioValido = validarPayloadAcaoRo('enviar', {
+    data_solicitacao: '2026-09-12',
+    observacao: 'Enviado ao portal do fabricante',
+    versao_esperada: 1,
+    request_id: 'req-envio-1',
+  });
+  assert.equal(envioValido.rota, 'enviar');
+  assert.equal(envioValido.payload.data_solicitacao, '2026-09-12');
+  assert.equal(envioValido.payload.observacao, 'Enviado ao portal do fabricante');
+  assert.equal(envioValido.payload.versao_esperada, 1);
+  assert.equal(envioValido.payload.request_id, 'req-envio-1');
+
+  // B) Aprovar
+  assert.throws(() => validarPayloadAcaoRo('aprovar', { data_aprovacao: '2026-09-12', data_vencimento: '2026-12-11' }), /número oficial/i);
+  assert.throws(() => validarPayloadAcaoRo('aprovar', { numero_ro: 'RO-1', data_aprovacao: '2026-09-12' }), /data de vencimento/i);
+  const aprovacaoValida = validarPayloadAcaoRo('aprovar', {
+    numero_ro: 'RO-DELL-2026-01',
+    data_aprovacao: '2026-09-12',
+    data_vencimento: '2026-12-11',
+    versao_esperada: 2,
+    request_id: 'req-aprov-1',
+  });
+  assert.equal(aprovacaoValida.rota, 'aprovar');
+  assert.equal(aprovacaoValida.payload.numero_ro, 'RO-DELL-2026-01');
+  assert.equal(aprovacaoValida.payload.data_vencimento, '2026-12-11');
+
+  // C) Solicitar renovação
+  assert.throws(() => validarPayloadAcaoRo('solicitar_renovacao', {}), /data de solicitação/i);
+  const renovacaoSolicitada = validarPayloadAcaoRo('solicitar_renovacao', {
+    data_solicitacao: '2026-11-20',
+    versao_esperada: 3,
+  });
+  assert.equal(renovacaoSolicitada.rota, 'renovacoes');
+  assert.equal(renovacaoSolicitada.payload.data_solicitacao, '2026-11-20');
+
+  // D) Responder renovação - Aprovação (exige novo vencimento posterior ao atual)
+  assert.throws(() => validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'aprovar',
+    data_resposta: '2026-11-25',
+    novo_vencimento: '2026-12-11', // igual ao vencimento atual
+  }, { data_vencimento: '2026-12-11', ciclo: 1 }), /posterior ao vencimento atual/i);
+
+  assert.throws(() => validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'aprovar',
+    data_resposta: '2026-11-25',
+    novo_vencimento: '2026-10-01', // anterior ao atual
+  }, { data_vencimento: '2026-12-11', ciclo: 1 }), /posterior ao vencimento atual/i);
+
+  const renovacaoAprovada = validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'aprovar',
+    data_resposta: '2026-11-25',
+    novo_vencimento: '2027-03-11',
+    request_id: 'req-ren-aprov',
+  }, { data_vencimento: '2026-12-11', ciclo: 2 });
+  assert.equal(renovacaoAprovada.rota, 'renovacoes/2/aprovar');
+  assert.equal(renovacaoAprovada.payload.novo_vencimento, '2027-03-11');
+  assert.equal(renovacaoAprovada.payload.request_id, 'req-ren-aprov');
+
+  // D) Responder renovação - Negativa (exige motivo, não envia novo vencimento e preserva anterior)
+  assert.throws(() => validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'negar',
+    data_resposta: '2026-11-25',
+  }, { ciclo: 2 }), /motivo da negativa/i);
+
+  const renovacaoNegada = validarPayloadAcaoRo('responder_renovacao', {
+    tipo_resposta: 'negar',
+    data_resposta: '2026-11-25',
+    motivo: 'Fabricante informou limite de prazo expirado',
+    novo_vencimento: '2027-01-01', // se digitado indevidamente, não deve ser repassado
+  }, { data_vencimento: '2026-12-11', ciclo: 2 });
+  assert.equal(renovacaoNegada.rota, 'renovacoes/2/negar');
+  assert.equal(renovacaoNegada.payload.motivo, 'Fabricante informou limite de prazo expirado');
+  assert.equal(renovacaoNegada.payload.novo_vencimento, undefined);
+
+  // E) Encerrar ou reprovar
+  assert.throws(() => validarPayloadAcaoRo('encerrar', {
+    situacao: 'Substituída',
+    data_encerramento: '2026-12-01',
+    motivo: 'Tentativa de substituição indevida',
+  }), /situação final deve ser "Encerrada" ou "Reprovada"/i);
+
+  assert.throws(() => validarPayloadAcaoRo('encerrar', {
+    situacao: 'Encerrada',
+    data_encerramento: '2026-12-01',
+  }), /motivo/i);
+
+  const encerramentoValido = validarPayloadAcaoRo('encerrar', {
+    situacao: 'Encerrada',
+    data_encerramento: '2026-12-02',
+    motivo: 'Oportunidade perdida para concorrente',
+    versao_esperada: 4,
+  });
+  assert.equal(encerramentoValido.rota, 'encerrar');
+  assert.equal(encerramentoValido.payload.situacao, 'Encerrada');
+  assert.equal(encerramentoValido.payload.data_encerramento, '2026-12-02');
+  assert.equal(encerramentoValido.payload.motivo, 'Oportunidade perdida para concorrente');
+});
+
+test('executarAcaoRo envia POST com headers, x-request-id e payload corretos', async () => {
+  let urlChamada = '';
+  let metodoChamado = '';
+  let headersChamados = {};
+  let bodyChamado = null;
+
+  const mockFetch = async (url, init) => {
+    urlChamada = String(url);
+    metodoChamado = init?.method;
+    headersChamados = init?.headers || {};
+    bodyChamado = JSON.parse(init?.body || '{}');
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          id: 'ro-123',
+          situacao: 'Aguardando aprovação',
+          versao: 2,
+        },
+      }),
+    };
+  };
+
+  const { executarAcaoRo } = carregarDominioRos({ fetchImpl: mockFetch });
+
+  const getHeaders = () => ({ Authorization: 'Bearer token-jwt-crm' });
+  const resultado = await executarAcaoRo(
+    'ro-123',
+    'enviar',
+    { data_solicitacao: '2026-09-12', versao_esperada: 1, request_id: 'req-envio-mock' },
+    { getHeaders }
+  );
+
+  assert.equal(metodoChamado, 'POST');
+  assert.equal(urlChamada, '/api/ros/ro-123/enviar');
+  assert.equal(headersChamados['Authorization'], 'Bearer token-jwt-crm');
+  assert.equal(headersChamados['Content-Type'], 'application/json');
+  assert.equal(headersChamados['x-request-id'], 'req-envio-mock');
+  assert.equal(bodyChamado.data_solicitacao, '2026-09-12');
+  assert.equal(bodyChamado.request_id, 'req-envio-mock');
+  assert.equal(resultado.situacao, 'Aguardando aprovação');
+  assert.equal(resultado.versao, 2);
+});
+
+test('executarAcaoRo traduz erros 401, 403, 409, 422, 500 e falha de rede sem ocultar detalhes', async () => {
+  const { executarAcaoRo } = carregarDominioRos();
+
+  // 401
+  const mock401 = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({ error: 'Unauthorized' }),
+  });
+  const { executarAcaoRo: acao401 } = carregarDominioRos({ fetchImpl: mock401 });
+  await assert.rejects(() => acao401('ro-1', 'enviar', {}), (err) => {
+    assert.equal(err.status, 401);
+    assert.match(err.message, /login novamente/i);
+    return true;
+  });
+
+  // 403
+  const mock403 = async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({ error: 'Forbidden' }),
+  });
+  const { executarAcaoRo: acao403 } = carregarDominioRos({ fetchImpl: mock403 });
+  await assert.rejects(() => acao403('ro-1', 'enviar', {}), (err) => {
+    assert.equal(err.status, 403);
+    assert.match(err.message, /autorização registrada/i);
+    return true;
+  });
+
+  // 409 Conflito de versão
+  const mock409 = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: 'Conflito de versão da R.O. (esperada: 1, atual: 2)' }),
+  });
+  const { executarAcaoRo: acao409 } = carregarDominioRos({ fetchImpl: mock409 });
+  await assert.rejects(() => acao409('ro-1', 'aprovar', {}), (err) => {
+    assert.equal(err.status, 409);
+    assert.match(err.message, /conflito/i);
+    return true;
+  });
+
+  // 422 Dados inválidos
+  const mock422 = async () => ({
+    ok: false,
+    status: 422,
+    json: async () => ({ error: 'Data de resposta inválida' }),
+  });
+  const { executarAcaoRo: acao422 } = carregarDominioRos({ fetchImpl: mock422 });
+  await assert.rejects(() => acao422('ro-1', 'enviar', {}), (err) => {
+    assert.equal(err.status, 422);
+    assert.match(err.message, /Data de resposta inválida/i);
+    return true;
+  });
+
+  // 500
+  const mock500 = async () => ({
+    ok: false,
+    status: 500,
+    json: async () => ({ error: 'Falha interna' }),
+  });
+  const { executarAcaoRo: acao500 } = carregarDominioRos({ fetchImpl: mock500 });
+  await assert.rejects(() => acao500('ro-1', 'enviar', {}), (err) => {
+    assert.equal(err.status, 500);
+    assert.match(err.message, /Falha interna|servidor/i);
+    return true;
+  });
+
+  // Falha de rede
+  const mockRede = async () => {
+    throw new Error('Connection refused');
+  };
+  const { executarAcaoRo: acaoRede } = carregarDominioRos({ fetchImpl: mockRede });
+  await assert.rejects(() => acaoRede('ro-1', 'enviar', {}), (err) => {
+    assert.equal(err.isNetworkError, true);
+    assert.match(err.message, /Falha de rede/i);
+    return true;
+  });
+});
+
+test('retry de executarAcaoRo reutiliza exatamente o mesmo request_id na segunda tentativa', async () => {
+  const { gerarRequestIdRo } = carregarDominioRos();
+  const requestIdEstavel = gerarRequestIdRo();
+  const chamadas = [];
+
+  const mockFetch = async (url, init) => {
+    chamadas.push({
+      url: String(url),
+      headers: init?.headers || {},
+      body: JSON.parse(init?.body || '{}'),
+    });
+
+    if (chamadas.length === 1) {
+      // 1ª tentativa falha por timeout/500
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'Timeout ao contatar backend' }),
+      };
+    }
+
+    // 2ª tentativa (retry) bem-sucedida
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          id: 'ro-retry-id',
+          situacao: 'Aprovada',
+          numero_ro: 'RO-CONFIRMADA-1',
+        },
+      }),
+    };
+  };
+
+  const { executarAcaoRo } = carregarDominioRos({ fetchImpl: mockFetch });
+
+  const payload = {
+    numero_ro: 'RO-CONFIRMADA-1',
+    data_aprovacao: '2026-09-12',
+    data_vencimento: '2026-12-11',
+    request_id: requestIdEstavel,
+  };
+
+  // 1ª tentativa falha
+  await assert.rejects(() => executarAcaoRo('ro-retry-id', 'aprovar', payload), /Timeout|servidor/i);
+  assert.equal(chamadas.length, 1);
+  assert.equal(chamadas[0].headers['x-request-id'], requestIdEstavel);
+  assert.equal(chamadas[0].body.request_id, requestIdEstavel);
+
+  // 2ª tentativa reenvia com o mesmo request_id
+  const sucesso = await executarAcaoRo('ro-retry-id', 'aprovar', payload);
+  assert.equal(chamadas.length, 2);
+  assert.equal(chamadas[1].headers['x-request-id'], requestIdEstavel);
+  assert.equal(chamadas[1].body.request_id, requestIdEstavel);
+
+  // Validação estrita de estabilidade do request_id no retry
+  assert.equal(chamadas[0].headers['x-request-id'], chamadas[1].headers['x-request-id']);
+  assert.equal(chamadas[0].body.request_id, chamadas[1].body.request_id);
+  assert.equal(sucesso.situacao, 'Aprovada');
+});
+
+test('fetchRegistroOportunidade busca R.O. individual para recarregamento em caso de conflito', async () => {
+  let urlChamada = '';
+  let headersChamados = {};
+
+  const mockFetch = async (url, init) => {
+    urlChamada = String(url);
+    headersChamados = init?.headers || {};
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [{
+          id: 'ro-recarregar-123',
+          versao: 3,
+          situacao: 'Aprovada',
+          numero_ro: 'RO-ATUALIZADA-9',
+          data_vencimento: '2027-01-15',
+        }],
+        total: 1,
+      }),
+    };
+  };
+
+  const { fetchRegistroOportunidade } = carregarDominioRos({ fetchImpl: mockFetch });
+
+  const ro = await fetchRegistroOportunidade('ro-recarregar-123', {
+    getHeaders: () => ({ Authorization: 'Bearer token-crm' }),
+  });
+
+  assert.equal(urlChamada, '/api/ros/ro-recarregar-123');
+  assert.equal(headersChamados['Authorization'], 'Bearer token-crm');
+  assert.equal(ro.id, 'ro-recarregar-123');
+  assert.equal(ro.versao, 3);
+  assert.equal(ro.numero_ro, 'RO-ATUALIZADA-9');
 });

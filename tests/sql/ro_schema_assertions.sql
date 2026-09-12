@@ -123,6 +123,14 @@ BEGIN
         negocio_b, fabricante, 'Software', 'Projeto RPC', 'Nuvem',
         '112112544', '90848927', 'Thiago Lima', '11111111-1111-4111-8111-111111111101'
     );
+    SELECT * INTO ro_rpc FROM public.ro_registrar_envio(
+        ro_rpc.id, DATE '2026-09-10', 'Enviada para análise do fabricante', NULL,
+        '11111111-1111-4111-8111-111111111101e', '90848927', 'Thiago Lima'
+    );
+    IF (SELECT situacao FROM public.registros_oportunidade WHERE id = ro_rpc.id) <> 'Aguardando aprovação'
+       OR (SELECT data_solicitacao FROM public.registros_oportunidade WHERE id = ro_rpc.id) <> DATE '2026-09-10' THEN
+        RAISE EXCEPTION 'Registro de envio não atualizou situação ou data de solicitação';
+    END IF;
     SELECT * INTO ro_rpc FROM public.ro_aprovar(
         ro_rpc.id, 'RO-RPC-1', DATE '2026-09-12', DATE '2026-12-11',
         NULL, '11111111-1111-4111-8111-111111111102', '90848927', 'Thiago Lima'
@@ -136,7 +144,7 @@ BEGIN
         DATE '2027-03-11', NULL, '[]'::jsonb,
         '11111111-1111-4111-8111-111111111104', '90848927', 'Thiago Lima'
     );
-    IF (SELECT count(*) FROM public.eventos_ro WHERE registro_oportunidade_id = ro_rpc.id) <> 4 THEN
+    IF (SELECT count(*) FROM public.eventos_ro WHERE registro_oportunidade_id = ro_rpc.id) <> 5 THEN
         RAISE EXCEPTION 'Fluxo RPC não registrou todos os eventos esperados';
     END IF;
     SELECT * INTO ro_substituta FROM public.ro_substituir(

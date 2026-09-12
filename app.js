@@ -421,6 +421,9 @@ const {
   resumirCiclosRo,
   obterAcoesPermitidasRo,
   validarPayloadCriacaoRo,
+  validarPayloadAcaoRo,
+  executarAcaoRo,
+  fetchRegistroOportunidade,
   gerarRequestIdRo,
   desambiguarOportunidade,
   criarRegistroOportunidade,
@@ -1986,25 +1989,661 @@ const SegmentosSettings = ({ client }) => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────
-function RegistroOportunidadeDrawer({ ro, onClose }) {
+// ─────────────────────────────────────────────────────────────────────────
+// MODAL REUTILIZÁVEL DE AÇÕES DE R.O. (Task 6)
+// ─────────────────────────────────────────────────────────────────────────
+function RoActionModal({
+  aberto,
+  acao,
+  ro,
+  cicloPendente = null,
+  onClose,
+  onSuccess,
+  getSupabaseHeaders = null,
+}) {
+  const modalRef = React.useRef(null);
+  const modalLayer = useModalLayer({ open: aberto, onClose, panelRef: modalRef });
+
+  const [requestId, setRequestId] = useState(() => (gerarRequestIdRo ? gerarRequestIdRo() : `req-${Date.now()}`));
+  const [versaoEsperada, setVersaoEsperada] = useState(ro?.versao || 1);
+
+  // Campos do formulário
+  const [dataSolicitacao, setDataSolicitacao] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+  const [observacao, setObservacao] = useState('');
+  const [numeroRo, setNumeroRo] = useState(ro?.numero_ro || '');
+  const [dataAprovacao, setDataAprovacao] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+  const [dataVencimento, setDataVencimento] = useState(ro?.data_vencimento || '');
+  const [tipoResposta, setTipoResposta] = useState('aprovar');
+  const [dataResposta, setDataResposta] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+  const [novoVencimento, setNovoVencimento] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [situacaoFinal, setSituacaoFinal] = useState('Encerrada');
+  const [dataEncerramento, setDataEncerramento] = useState(() => (obterHojeSaoPaulo ? obterHojeSaoPaulo() : ''));
+
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState(null);
+  const [avisoConflito, setAvisoConflito] = useState(null);
+
   useEffect(() => {
-    const aoTeclar = (evento) => { if (evento.key === 'Escape') onClose(); };
+    if (aberto) {
+      setRequestId(gerarRequestIdRo ? gerarRequestIdRo() : `req-${Date.now()}`);
+      setVersaoEsperada(ro?.versao || 1);
+      setErro(null);
+      setAvisoConflito(null);
+      setObservacao('');
+      setMotivo('');
+      setTipoResposta('aprovar');
+      setNovoVencimento('');
+      if (acao === 'enviar') {
+        setDataSolicitacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'aprovar') {
+        setNumeroRo(ro?.numero_ro || '');
+        setDataAprovacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+        setDataVencimento(ro?.data_vencimento || '');
+      } else if (acao === 'solicitar_renovacao') {
+        setDataSolicitacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'responder_renovacao') {
+        setDataResposta(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'encerrar') {
+        setSituacaoFinal('Encerrada');
+        setDataEncerramento(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      }
+    }
+  }, [aberto, acao, ro?.id]);
+
+  if (!aberto || !acao) return null;
+
+  const handleSubmeter = async (e) => {
+    if (e) e.preventDefault();
+    setErro(null);
+    setAvisoConflito(null);
+
+    const dadosAcao = {
+      data_solicitacao: dataSolicitacao,
+      observacao,
+      numero_ro: numeroRo,
+      data_aprovacao: dataAprovacao,
+      data_vencimento: dataVencimento,
+      tipo_resposta: tipoResposta,
+      data_resposta: dataResposta,
+      novo_vencimento: novoVencimento,
+      motivo,
+      situacao: situacaoFinal,
+      data_encerramento: dataEncerramento,
+      ciclo: cicloPendente?.ciclo || 1,
+      vencimento_anterior: ro?.data_vencimento,
+      versao_esperada: versaoEsperada,
+      request_id: requestId,
+    };
+
+    const contexto = {
+      versao: versaoEsperada,
+      data_vencimento: ro?.data_vencimento,
+      ciclo: cicloPendente?.ciclo || 1,
+    };
+
+    let validacao;
+    try {
+      if (!validarPayloadAcaoRo) throw new Error('Módulo de validação indisponível.');
+      validacao = validarPayloadAcaoRo(acao, dadosAcao, contexto);
+    } catch (err) {
+      setErro(err.message || 'Dados inválidos.');
+      return;
+    }
+
+    setSalvando(true);
+    try {
+      if (!executarAcaoRo) throw new Error('Cliente de execução indisponível.');
+      const res = await executarAcaoRo(
+        ro.id,
+        validacao.rota,
+        validacao.payload,
+        { getSupabaseHeaders, requestId }
+      );
+
+      let msg = 'Ação executada com sucesso!';
+      if (acao === 'enviar') msg = 'Envio ao fabricante registrado com sucesso!';
+      else if (acao === 'aprovar') msg = 'R.O. aprovada com sucesso!';
+      else if (acao === 'solicitar_renovacao') msg = 'Renovação solicitada com sucesso!';
+      else if (acao === 'responder_renovacao') {
+        msg = tipoResposta === 'aprovar' ? 'Renovação aprovada com sucesso!' : 'Negativa de renovação registrada.';
+      } else if (acao === 'encerrar') {
+        msg = situacaoFinal === 'Reprovada' ? 'R.O. reprovada com sucesso.' : 'R.O. encerrada com sucesso.';
+      }
+
+      if (onSuccess) onSuccess(res, msg);
+    } catch (err) {
+      if (err.status === 409) {
+        // Conflito de versão: manter dados do formulário, recarregar R.O., atualizar versão esperada
+        try {
+          if (fetchRegistroOportunidade) {
+            const roAtualizada = await fetchRegistroOportunidade(ro.id, { getSupabaseHeaders });
+            if (roAtualizada && roAtualizada.versao) {
+              setVersaoEsperada(roAtualizada.versao);
+            }
+          }
+        } catch (reloadErr) {
+          console.warn('[RoActionModal] Falha ao recarregar R.O. em 409:', reloadErr);
+        }
+        setAvisoConflito('Esta R.O. foi alterada por outra pessoa. Revise os dados atualizados antes de confirmar novamente.');
+        setErro(null);
+      } else {
+        setErro(err.message || 'Erro ao processar operação.');
+      }
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  let titulo = 'Ação na R.O.';
+  let subtitulo = '';
+  let labelBotaoConfirmar = 'Confirmar';
+
+  if (acao === 'enviar') {
+    titulo = 'Registrar envio ao fabricante';
+    subtitulo = 'A R.O. passará para Aguardando aprovação. O número e vencimento continuam vazios até a resposta do fabricante.';
+    labelBotaoConfirmar = 'Confirmar envio';
+  } else if (acao === 'aprovar') {
+    titulo = 'Aprovar R.O.';
+    subtitulo = 'Aprovação oficial da R.O. pelo fabricante. A aprovação pode ocorrer diretamente mesmo sem envio prévio registrado.';
+    labelBotaoConfirmar = 'Confirmar aprovação';
+  } else if (acao === 'solicitar_renovacao') {
+    titulo = 'Solicitar renovação de R.O.';
+    subtitulo = 'Abre um novo ciclo de renovação em análise com o fabricante. A situação "Aprovada" e o vencimento atual permanecem inalterados.';
+    labelBotaoConfirmar = 'Solicitar renovação';
+  } else if (acao === 'responder_renovacao') {
+    const numCiclo = cicloPendente?.ciclo || 1;
+    titulo = `Responder renovação (Ciclo ${numCiclo})`;
+    subtitulo = 'Registre o retorno oficial do fabricante quanto à solicitação de renovação desta R.O.';
+    labelBotaoConfirmar = 'Confirmar resposta';
+  } else if (acao === 'encerrar') {
+    titulo = 'Encerrar ou reprovar R.O.';
+    subtitulo = 'Finaliza o ciclo comercial ativo desta R.O. Não altera o estágio nem dados da oportunidade no CRM.';
+    labelBotaoConfirmar = 'Finalizar R.O.';
+  }
+
+  const prazoSugeridoFabricante = ro?.fabricantes_ro?.prazo_inicial_sugerido_dias;
+
+  return (
+    <div
+      ref={modalRef}
+      onKeyDown={modalLayer.onKeyDown}
+      role="dialog"
+      aria-modal="true"
+      aria-label={titulo}
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !salvando) onClose(); }}
+    >
+      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">{titulo}</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{subtitulo}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={salvando}
+            className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Fechar"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmeter} className="p-5 space-y-4 overflow-y-auto flex-1">
+          {avisoConflito && (
+            <div className="rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 p-3.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+              <span className="text-base">⚠️</span>
+              <div>
+                <p className="font-bold">Aviso de concorrência</p>
+                <p className="mt-0.5 leading-relaxed">{avisoConflito}</p>
+              </div>
+            </div>
+          )}
+
+          {erro && (
+            <div className="rounded-xl border border-rose-300 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-950/40 p-3.5 text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+              <span className="text-base">⚠️</span>
+              <div>
+                <p className="font-bold">Não foi possível concluir</p>
+                <p className="mt-0.5 leading-relaxed">{erro}</p>
+              </div>
+            </div>
+          )}
+
+          {/* A) ENVIAR AO FABRICANTE */}
+          {acao === 'enviar' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data do envio / solicitação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataSolicitacao}
+                  onChange={(e) => setDataSolicitacao(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Observação <span className="text-slate-400 font-normal">(opcional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={observacao}
+                  onChange={(e) => setObservacao(e.target.value)}
+                  placeholder="Ex: Enviado por e-mail para o gerente de contas do fabricante..."
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </>
+          )}
+
+          {/* B) APROVAR R.O. */}
+          {acao === 'aprovar' && (
+            <>
+              {prazoSugeridoFabricante && (
+                <div className="rounded-lg bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 p-2.5 text-xs text-indigo-800 dark:text-indigo-300">
+                  <span className="font-bold">Sugestão do fabricante:</span> {prazoSugeridoFabricante} dias de vigência a partir da aprovação (informação apenas sugestiva — preenchimento manual obrigatório abaixo).
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Número oficial da R.O. <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: RO-DELL-2026-0987"
+                  value={numeroRo}
+                  onChange={(e) => setNumeroRo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Data de aprovação <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={dataAprovacao}
+                    onChange={(e) => setDataAprovacao(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Data de vencimento <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={dataVencimento}
+                    onChange={(e) => setDataVencimento(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* C) SOLICITAR RENOVAÇÃO */}
+          {acao === 'solicitar_renovacao' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data da solicitação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataSolicitacao}
+                  onChange={(e) => setDataSolicitacao(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="rounded-lg bg-slate-100 dark:bg-slate-800/60 p-3 text-xs text-slate-600 dark:text-slate-400">
+                <p><span className="font-bold">Vencimento atual:</span> {formatarDataCivil ? formatarDataCivil(ro?.data_vencimento) : ro?.data_vencimento || '—'}</p>
+                <p className="mt-1">A R.O. continuará como Aprovada com seu vencimento preservado enquanto a renovação estiver em análise.</p>
+              </div>
+            </>
+          )}
+
+          {/* D) RESPONDER RENOVAÇÃO */}
+          {acao === 'responder_renovacao' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+                  Resposta do fabricante <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTipoResposta('aprovar')}
+                    className={`rounded-lg p-2.5 text-xs font-bold text-center border transition-all cursor-pointer ${
+                      tipoResposta === 'aprovar'
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 ring-2 ring-emerald-500/20'
+                        : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    ✓ Aprovar renovação
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipoResposta('negar')}
+                    className={`rounded-lg p-2.5 text-xs font-bold text-center border transition-all cursor-pointer ${
+                      tipoResposta === 'negar'
+                        ? 'border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300 ring-2 ring-rose-500/20'
+                        : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    ✕ Negar renovação
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data da resposta <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataResposta}
+                  onChange={(e) => setDataResposta(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {tipoResposta === 'aprovar' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Novo vencimento <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={novoVencimento}
+                      onChange={(e) => setNovoVencimento(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Vencimento atual: <span className="font-semibold">{formatarDataCivil ? formatarDataCivil(ro?.data_vencimento) : ro?.data_vencimento || '—'}</span>. O novo vencimento deve ser posterior a esta data.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Motivo da negativa <span className="text-rose-500">*</span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      required
+                      placeholder="Descreva o motivo apresentado pelo fabricante para não renovar a R.O..."
+                      value={motivo}
+                      onChange={(e) => setMotivo(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      O vencimento atual da R.O. ({formatarDataCivil ? formatarDataCivil(ro?.data_vencimento) : ro?.data_vencimento || '—'}) será preservado.
+                    </p>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* E) ENCERRAR OU REPROVAR */}
+          {acao === 'encerrar' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Situação final <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={situacaoFinal}
+                  onChange={(e) => setSituacaoFinal(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="Encerrada">Encerrada</option>
+                  <option value="Reprovada">Reprovada</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {situacaoFinal === 'Encerrada'
+                    ? 'Use para projetos concluídos, perdidos para concorrentes ou cancelados pelo cliente.'
+                    : 'Use quando o fabricante tiver recusado a oportunidade definitivamente.'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Data do encerramento / reprovação <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataEncerramento}
+                  onChange={(e) => setDataEncerramento(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Motivo <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Justifique o motivo do encerramento ou reprovação da R.O..."
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              disabled={salvando}
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={salvando}
+              className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
+            >
+              {salvando && (
+                <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              {labelBotaoConfirmar}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DRAWER DE DETALHES E AÇÕES DA R.O. (Task 6)
+// ─────────────────────────────────────────────────────────────────────────
+function RegistroOportunidadeDrawer({
+  ro: roInicial,
+  onClose,
+  getSupabaseHeaders = null,
+  showToast = null,
+  onRoAtualizada = null,
+}) {
+  const [ro, setRo] = useState(roInicial);
+  const [acaoAtiva, setAcaoAtiva] = useState(null);
+
+  useEffect(() => {
+    setRo(roInicial);
+  }, [roInicial]);
+
+  useEffect(() => {
+    const aoTeclar = (evento) => { if (evento.key === 'Escape' && !acaoAtiva) onClose(); };
     window.addEventListener('keydown', aoTeclar);
     return () => window.removeEventListener('keydown', aoTeclar);
-  }, [onClose]);
+  }, [onClose, acaoAtiva]);
 
   const eventos = ordenarEventosRo ? ordenarEventosRo(ro.eventos_ro) : [];
   const ciclos = resumirCiclosRo ? resumirCiclosRo(ro.renovacoes_ro) : { aprovados: 0, pendente: null };
-  const acoes = obterAcoesPermitidasRo ? obterAcoesPermitidasRo(ro.situacao) : [];
+  const acoes = obterAcoesPermitidasRo ? obterAcoesPermitidasRo(ro.situacao, !!ciclos.pendente) : [];
   const cliente = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || '—';
   const vigencia = calcularVigenciaRo ? calcularVigenciaRo(ro.data_vencimento) : 'Sem prazo';
 
-  return <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <aside role="dialog" aria-modal="true" aria-label="Detalhe da R.O." className="h-full w-full max-w-xl overflow-y-auto bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-200 dark:border-slate-700">
-      <header className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800"><div><p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Registro de oportunidade</p><h2 className="mt-1 text-lg font-extrabold">{ro.numero_ro || 'Aguardando número'}</h2><p className="text-xs text-slate-500 mt-1">{ro.fabricantes_ro?.nome || 'Fabricante não informado'} · {ro.situacao}</p></div><button type="button" autoFocus onClick={onClose} className="rounded-lg px-3 py-2 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800">Fechar ✕</button></header>
-      <div className="p-5 space-y-5 text-sm"><section className="grid grid-cols-2 gap-3"><div><p className="text-xs text-slate-500">Cliente</p><p className="font-semibold">{cliente}</p></div><div><p className="text-xs text-slate-500">Oportunidade</p><p className="font-semibold">{ro.negocios?.nome || '—'}</p></div><div><p className="text-xs text-slate-500">Vencimento</p><p className="font-semibold">{formatarDataCivil ? formatarDataCivil(ro.data_vencimento) : '—'} · {vigencia}</p></div><div><p className="text-xs text-slate-500">Categoria</p><p className="font-semibold">{formatarCategoriaRo ? formatarCategoriaRo(ro.categoria) : '—'}</p></div></section><section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4"><h3 className="font-bold">Renovações</h3><p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{ciclos.aprovados} ciclo(s) aprovado(s){ciclos.pendente ? ` · Ciclo ${ciclos.pendente.ciclo || 1} em análise` : ''}</p></section><section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4"><h3 className="font-bold">Sucessão</h3><p className="mt-1 text-xs text-slate-500">{ro.ro_anterior_id || ro.ro_sucessora_id ? 'Há vínculo de substituição nesta R.O.' : 'Sem substituição vinculada.'}</p></section><section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4"><h3 className="font-bold">Histórico da R.O.</h3><div className="mt-3 space-y-3">{eventos.length ? eventos.map((evento, indice) => <div key={`${evento.id || evento.created_at}-${indice}`} className="border-l-2 border-indigo-300 pl-3"><p className="font-semibold text-xs">{evento.tipo || evento.evento || 'Movimentação'}</p><p className="text-xs text-slate-500">{formatarDataCivil ? formatarDataCivil(evento.created_at) : evento.created_at || 'Data não informada'}</p></div>) : <p className="text-xs text-slate-500">Nenhum evento registrado ainda.</p>}</div></section><section className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4"><h3 className="font-bold">Sincronização e atualização humana</h3><p className="mt-1 text-xs text-slate-500">Evidências comerciais e sincronização com ClickUp serão incluídas na próxima etapa.</p></section>{acoes.length > 0 && <section><h3 className="font-bold mb-2">Ações disponíveis</h3><div className="flex flex-wrap gap-2">{acoes.map((acao) => <span key={acao} className="rounded-lg bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-xs font-bold text-indigo-700 dark:text-indigo-300">{acao}</span>)}</div></section>}</div>
-    </aside>
-  </div>;
+  const recarregarRoCompleta = async () => {
+    if (fetchRegistroOportunidade && ro?.id) {
+      try {
+        const roFresca = await fetchRegistroOportunidade(ro.id, { getSupabaseHeaders });
+        if (roFresca) {
+          setRo(roFresca);
+          if (onRoAtualizada) onRoAtualizada(roFresca);
+        }
+      } catch (err) {
+        console.warn('[RegistroOportunidadeDrawer] Falha ao recarregar R.O.:', err);
+      }
+    }
+  };
+
+  const handleSucessoAcao = async (resultado, mensagemToast) => {
+    setAcaoAtiva(null);
+    if (showToast) {
+      showToast(mensagemToast || 'Operação realizada com sucesso!', 'success');
+    }
+    await recarregarRoCompleta();
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <aside role="dialog" aria-modal="true" aria-label="Detalhe da R.O." className="h-full w-full max-w-xl overflow-y-auto bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-200 dark:border-slate-700 flex flex-col">
+          <header className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Registro de oportunidade</p>
+              <h2 className="mt-1 text-lg font-extrabold text-slate-900 dark:text-white">{ro.numero_ro || 'Aguardando número'}</h2>
+              <p className="text-xs text-slate-500 mt-1">{ro.fabricantes_ro?.nome || 'Fabricante não informado'} · {ro.situacao}</p>
+            </div>
+            <button type="button" autoFocus onClick={onClose} className="rounded-lg px-3 py-2 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-pointer">
+              Fechar ✕
+            </button>
+          </header>
+
+          <div className="p-5 space-y-5 text-sm flex-1">
+            <section className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-slate-500">Cliente</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{cliente}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Oportunidade</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{ro.negocios?.nome || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Vencimento</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{formatarDataCivil ? formatarDataCivil(ro.data_vencimento) : '—'} · {vigencia}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Categoria</p>
+                <p className="font-semibold text-slate-900 dark:text-white">{formatarCategoriaRo ? formatarCategoriaRo(ro.categoria) : '—'}</p>
+              </div>
+            </section>
+
+            {acoes.length > 0 && (
+              <section className="rounded-xl border border-indigo-200 dark:border-indigo-900/60 p-4 bg-indigo-50/40 dark:bg-indigo-950/20">
+                <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-1">Ações operacionais</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Execute movimentações na R.O. sem alterar os dados da oportunidade no CRM.</p>
+                <div className="flex flex-wrap gap-2">
+                  {acoes.map((acaoId) => {
+                    const mapConfig = {
+                      enviar: { label: 'Registrar envio ao fabricante', classe: 'bg-blue-600 hover:bg-blue-700 text-white' },
+                      aprovar: { label: 'Aprovar R.O.', classe: 'bg-emerald-600 hover:bg-emerald-700 text-white' },
+                      solicitar_renovacao: { label: 'Solicitar renovação', classe: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+                      responder_renovacao: { label: 'Responder renovação pendente', classe: 'bg-amber-600 hover:bg-amber-700 text-white' },
+                      encerrar: { label: 'Encerrar / Reprovar', classe: 'bg-rose-600 hover:bg-rose-700 text-white' },
+                    };
+                    const conf = mapConfig[acaoId] || { label: acaoId, classe: 'bg-slate-700 text-white' };
+                    return (
+                      <button
+                        key={acaoId}
+                        type="button"
+                        onClick={() => setAcaoAtiva(acaoId)}
+                        className={`rounded-lg px-3 py-2 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 ${conf.classe}`}
+                      >
+                        {conf.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Renovações</h3>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                {ciclos.aprovados} ciclo(s) aprovado(s){ciclos.pendente ? ` · Ciclo ${ciclos.pendente.ciclo || 1} em análise` : ''}
+              </p>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Sucessão</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {ro.ro_anterior_id || ro.ro_sucessora_id ? 'Há vínculo de substituição nesta R.O.' : 'Sem substituição vinculada.'}
+              </p>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Histórico da R.O.</h3>
+              <div className="mt-3 space-y-3">
+                {eventos.length ? eventos.map((evento, indice) => (
+                  <div key={`${evento.id || evento.created_at}-${indice}`} className="border-l-2 border-indigo-300 dark:border-indigo-600 pl-3">
+                    <p className="font-semibold text-xs text-slate-800 dark:text-slate-200">{evento.tipo || evento.evento || 'Movimentação'}</p>
+                    <p className="text-xs text-slate-500">{formatarDataCivil ? formatarDataCivil(evento.created_at) : evento.created_at || 'Data não informada'}</p>
+                  </div>
+                )) : (
+                  <p className="text-xs text-slate-500">Nenhum evento registrado ainda.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4">
+              <h3 className="font-bold text-slate-900 dark:text-white">Sincronização e atualização humana</h3>
+              <p className="mt-1 text-xs text-slate-500">Evidências comerciais e sincronização com ClickUp serão incluídas na próxima etapa.</p>
+            </section>
+          </div>
+        </aside>
+      </div>
+
+      {acaoAtiva && (
+        <RoActionModal
+          aberto={!!acaoAtiva}
+          acao={acaoAtiva}
+          ro={ro}
+          cicloPendente={ciclos.pendente}
+          onClose={() => setAcaoAtiva(null)}
+          onSuccess={handleSucessoAcao}
+          getSupabaseHeaders={getSupabaseHeaders}
+        />
+      )}
+    </>
+  );
 }
 
 
@@ -2487,6 +3126,9 @@ function RegistrosOportunidadeView({
   onFilterChange,
   onPageChange,
   onRefresh,
+  getSupabaseHeaders,
+  showToast,
+  onRoAtualizada,
 }) {
   const { rows = [], filters = {}, page = 1, total = 0, loading, error, selectedId } = rosState;
   const filtroBusca = filters.busca || filters.q || '';
@@ -3156,7 +3798,18 @@ function RegistrosOportunidadeView({
           )}
         </div>
       </div>
-      {roSelecionada && <RegistroOportunidadeDrawer ro={roSelecionada} onClose={onCloseSelection} />}
+      {roSelecionada && (
+        <RegistroOportunidadeDrawer
+          ro={roSelecionada}
+          onClose={onCloseSelection}
+          getSupabaseHeaders={getSupabaseHeaders}
+          showToast={showToast}
+          onRoAtualizada={(roAtualizada) => {
+            if (onRoAtualizada) onRoAtualizada(roAtualizada);
+            if (onRefresh) onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -12099,6 +12752,8 @@ function App() {
           rosResumo={rosResumo}
           fabricantes={fabricantesRo}
           vendedores={vendedoresVisiveis}
+          getSupabaseHeaders={getSupabaseHeaders}
+          showToast={showToast}
           onSelect={(id) => setRosState((prev) => ({ ...prev, selectedId: id }))}
           onCloseSelection={() => setRosState((prev) => ({ ...prev, selectedId: null }))}
           onNovaRo={() => {
@@ -12112,6 +12767,15 @@ function App() {
             setRosState((prev) => ({ ...prev, page: novaPagina }));
           }}
           onRefresh={() => loadRegistrosOportunidade(rosState.filters, rosState.page)}
+          onRoAtualizada={(roAtualizada) => {
+            if (roAtualizada && roAtualizada.id) {
+              setRosState((prev) => ({
+                ...prev,
+                rows: prev.rows.map((r) => r.id === roAtualizada.id ? { ...r, ...roAtualizada } : r),
+              }));
+            }
+            loadRegistrosOportunidade(rosState.filters, rosState.page);
+          }}
         />
       )}
 

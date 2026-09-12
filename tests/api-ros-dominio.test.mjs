@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+
+const lerArquivo = (caminho) => fs.readFileSync(new URL('../' + caminho, import.meta.url), 'utf8');
 import { interpretarComando, interpretarConsulta, calcularResumoAgregadoDominio, predicadoIlikePostgrest } from '../supabase/functions/api-ros/dominio.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -183,7 +185,7 @@ test('predicado de busca PostgREST encapsula caracteres reservados do texto do u
 });
 
 test('migration do resumo não expõe função SECURITY DEFINER ao público', () => {
-  const migration = fs.readFileSync('supabase/migrations/20260912c_ro_resumo_agregado.sql', 'utf8');
+  const migration = lerArquivo('supabase/migrations/20260912c_ro_resumo_agregado.sql');
   assert.match(migration, /SECURITY INVOKER/);
   assert.doesNotMatch(migration, /SECURITY DEFINER/);
   assert.match(migration, /REVOKE ALL ON FUNCTION public\.ro_resumo_agregado[\s\S]*FROM PUBLIC, anon, authenticated;/);
@@ -191,14 +193,14 @@ test('migration do resumo não expõe função SECURITY DEFINER ao público', ()
 });
 
 test('consulta de R.O. usa somente colunas existentes de contas', () => {
-  const migration = fs.readFileSync('supabase/migrations/20260912c_ro_resumo_agregado.sql', 'utf8');
-  const api = fs.readFileSync('supabase/functions/api-ros/index.ts', 'utf8');
+  const migration = lerArquivo('supabase/migrations/20260912c_ro_resumo_agregado.sql');
+  const api = lerArquivo('supabase/functions/api-ros/index.ts');
   assert.doesNotMatch(migration, /nome_fantasia/);
   assert.doesNotMatch(api, /nome_fantasia/);
 });
 
 test('teste SQL do resumo começa uma transação antes de executar inserções e sempre faz rollback', () => {
-  const testeSql = fs.readFileSync('tests/sql/ro_resumo_agregado_assertions.sql', 'utf8').trim();
+  const testeSql = lerArquivo('tests/sql/ro_resumo_agregado_assertions.sql').trim();
   assert.match(testeSql, /^--[^\n]*\n[\s\S]*?BEGIN;/);
   assert.match(testeSql, /ROLLBACK;\s*$/);
 });
@@ -262,4 +264,49 @@ test('calcularResumoAgregadoDominio agrega mais de uma página, renovações em 
   assert.equal(resumo.aguardando_aprovacao, 20);
   assert.equal(resumo.renovacoes_em_analise, 30);
   assert.equal(resumo.vencem_15_dias, 20); // 15 + 5
+});
+
+test('comando de envio aceita somente campos previstos e mapeia para ro_registrar_envio', () => {
+  const comando = interpretarComando('POST', `${uuid}/enviar`, {
+    data_solicitacao: '2026-09-12',
+    observacao: 'Enviado por e-mail ao parceiro',
+    versao_esperada: 2,
+    request_id: 'req-envio-1',
+  });
+  assert.equal(comando.rpc, 'ro_registrar_envio');
+  assert.equal(comando.params.p_id, uuid);
+  assert.equal(comando.params.p_data_solicitacao, '2026-09-12');
+  assert.equal(comando.params.p_observacao, 'Enviado por e-mail ao parceiro');
+  assert.equal(comando.params.p_versao_esperada, 2);
+  assert.equal(comando.params.p_request_id, 'req-envio-1');
+
+  // Rejeita campos inesperados
+  assert.throws(() => interpretarComando('POST', `${uuid}/enviar`, {
+    data_solicitacao: '2026-09-12',
+    campo_estranho: 'invalido',
+  }), /campo/i);
+
+  // Exige data de solicitação válida
+  assert.throws(() => interpretarComando('POST', `${uuid}/enviar`, {
+    observacao: 'Sem data',
+  }), /data/i);
+
+  assert.throws(() => interpretarComando('POST', `${uuid}/enviar`, {
+    data_solicitacao: '2026-02-30',
+  }), /data/i);
+});
+
+test('migration de envio não expõe função SECURITY DEFINER ao público e revoga execute', () => {
+  const migration = lerArquivo('supabase/migrations/20260912d_ro_registrar_envio.sql');
+  assert.match(migration, /SECURITY INVOKER/);
+  assert.doesNotMatch(migration, /SECURITY DEFINER/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.ro_registrar_envio[\s\S]*FROM PUBLIC, anon, authenticated;/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.ro_registrar_envio[\s\S]*TO service_role;/);
+});
+
+test('teste SQL do fluxo de R.O. inclui asserção transacional para ro_registrar_envio e sempre faz rollback', () => {
+  const testeSql = lerArquivo('tests/sql/ro_schema_assertions.sql').trim();
+  assert.match(testeSql, /ro_registrar_envio/);
+  assert.match(testeSql, /Aguardando aprovação/);
+  assert.match(testeSql, /ROLLBACK;\s*$/);
 });

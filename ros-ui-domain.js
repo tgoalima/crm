@@ -240,11 +240,157 @@
     };
   };
 
-  const obterAcoesPermitidasRo = (situacao) => {
+  const validarDataCivil = (valor, nomeCampo) => {
+    if (!valor || typeof valor !== 'string') {
+      throw new Error(`${nomeCampo} é obrigatória.`);
+    }
+    const limpo = valor.trim();
+    const match = limpo.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new Error(`${nomeCampo} deve usar o formato YYYY-MM-DD.`);
+    }
+    const ano = Number(match[1]);
+    const mes = Number(match[2]);
+    const dia = Number(match[3]);
+    const d = new Date(Date.UTC(ano, mes - 1, dia));
+    if (d.getUTCFullYear() !== ano || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) {
+      throw new Error(`${nomeCampo} deve ser uma data válida.`);
+    }
+    return limpo;
+  };
+
+  const obterAcoesPermitidasRo = (situacao, temPendente = false) => {
     if (situacao === 'Backoffice') return ['enviar', 'aprovar', 'encerrar'];
     if (situacao === 'Aguardando aprovação') return ['aprovar', 'encerrar'];
-    if (situacao === 'Aprovada') return ['renovar', 'substituir', 'encerrar'];
+    if (situacao === 'Aprovada') {
+      return [temPendente ? 'responder_renovacao' : 'solicitar_renovacao', 'encerrar'];
+    }
     return [];
+  };
+
+  const validarPayloadAcaoRo = (acao, dados = {}, contexto = {}) => {
+    if (!dados || typeof dados !== 'object') {
+      throw new Error('Dados da ação são obrigatórios.');
+    }
+
+    const versaoEsperada = dados.versao_esperada !== undefined && dados.versao_esperada !== null
+      ? Number(dados.versao_esperada)
+      : (contexto.versao !== undefined ? Number(contexto.versao) : null);
+
+    const requestId = dados.request_id ? String(dados.request_id).trim() : null;
+
+    if (acao === 'enviar') {
+      const dataSolicitacao = validarDataCivil(dados.data_solicitacao, 'A data do envio/solicitação');
+      const observacao = dados.observacao ? String(dados.observacao).trim() : null;
+      return {
+        rota: 'enviar',
+        payload: {
+          data_solicitacao: dataSolicitacao,
+          observacao,
+          versao_esperada: versaoEsperada,
+          request_id: requestId,
+        },
+      };
+    }
+
+    if (acao === 'aprovar') {
+      const numeroRo = dados.numero_ro ? String(dados.numero_ro).trim() : '';
+      if (!numeroRo) {
+        throw new Error('O número oficial da R.O. é obrigatório.');
+      }
+      const dataAprovacao = validarDataCivil(dados.data_aprovacao, 'A data de aprovação');
+      const dataVencimento = validarDataCivil(dados.data_vencimento, 'A data de vencimento');
+      return {
+        rota: 'aprovar',
+        payload: {
+          numero_ro: numeroRo,
+          data_aprovacao: dataAprovacao,
+          data_vencimento: dataVencimento,
+          versao_esperada: versaoEsperada,
+          request_id: requestId,
+        },
+      };
+    }
+
+    if (acao === 'solicitar_renovacao') {
+      const dataSolicitacao = validarDataCivil(dados.data_solicitacao, 'A data de solicitação');
+      return {
+        rota: 'renovacoes',
+        payload: {
+          data_solicitacao: dataSolicitacao,
+          evidencias: Array.isArray(dados.evidencias) ? dados.evidencias : [],
+          versao_esperada: versaoEsperada,
+          request_id: requestId,
+        },
+      };
+    }
+
+    if (acao === 'responder_renovacao') {
+      const tipoResposta = dados.tipo_resposta ? String(dados.tipo_resposta).trim().toLowerCase() : '';
+      if (!['aprovar', 'negar'].includes(tipoResposta)) {
+        throw new Error('A resposta de renovação deve ser "aprovar" ou "negar".');
+      }
+      const dataResposta = validarDataCivil(dados.data_resposta, 'A data da resposta');
+      const ciclo = Number(dados.ciclo || contexto.ciclo || 1);
+      if (!Number.isInteger(ciclo) || ciclo < 1) {
+        throw new Error('Ciclo de renovação inválido.');
+      }
+
+      if (tipoResposta === 'aprovar') {
+        const novoVencimento = validarDataCivil(dados.novo_vencimento, 'O novo vencimento');
+        const vencimentoAtual = contexto.data_vencimento || dados.vencimento_anterior;
+        if (vencimentoAtual && novoVencimento <= vencimentoAtual) {
+          throw new Error('O novo vencimento deve ser posterior ao vencimento atual da R.O.');
+        }
+        return {
+          rota: `renovacoes/${ciclo}/aprovar`,
+          payload: {
+            data_resposta: dataResposta,
+            novo_vencimento: novoVencimento,
+            evidencias: Array.isArray(dados.evidencias) ? dados.evidencias : [],
+            request_id: requestId,
+          },
+        };
+      } else {
+        const motivo = dados.motivo ? String(dados.motivo).trim() : '';
+        if (!motivo) {
+          throw new Error('O motivo da negativa de renovação é obrigatório.');
+        }
+        return {
+          rota: `renovacoes/${ciclo}/negar`,
+          payload: {
+            data_resposta: dataResposta,
+            motivo,
+            evidencias: Array.isArray(dados.evidencias) ? dados.evidencias : [],
+            request_id: requestId,
+          },
+        };
+      }
+    }
+
+    if (acao === 'encerrar') {
+      const situacao = dados.situacao ? String(dados.situacao).trim() : '';
+      if (!['Encerrada', 'Reprovada'].includes(situacao)) {
+        throw new Error('A situação final deve ser "Encerrada" ou "Reprovada".');
+      }
+      const dataEncerramento = validarDataCivil(dados.data_encerramento, 'A data do encerramento');
+      const motivo = dados.motivo ? String(dados.motivo).trim() : '';
+      if (!motivo) {
+        throw new Error('O motivo do encerramento/reprovação é obrigatório.');
+      }
+      return {
+        rota: 'encerrar',
+        payload: {
+          situacao,
+          data_encerramento: dataEncerramento,
+          motivo,
+          versao_esperada: versaoEsperada,
+          request_id: requestId,
+        },
+      };
+    }
+
+    throw new Error(`Ação desconhecida: ${acao}`);
   };
 
 
@@ -367,10 +513,116 @@
     return payload?.data || payload;
   };
 
+  const executarAcaoRo = async (id, rotaOuAcao, payload = {}, options = {}) => {
+    const fetchFn = options.fetchImpl || global.fetch;
+    if (typeof fetchFn !== 'function') throw new Error('Ambiente sem suporte a fetch disponível.');
+    if (!id || typeof id !== 'string') throw new Error('Identificador da R.O. é obrigatório.');
+
+    const baseUrl = options.baseUrl || '/api/ros';
+    const rotaLimpa = String(rotaOuAcao || '').replace(/^\/+/, '');
+    if (!rotaLimpa) throw new Error('Rota de ação não informada.');
+
+    const url = `${baseUrl}/${id}/${rotaLimpa}`;
+    const requestId = options.requestId || payload?.request_id || (typeof options.gerarRequestId === 'function' ? options.gerarRequestId() : null);
+
+    const getHeadersFn = options.getSupabaseHeaders || options.getHeaders;
+    const authHeaders = typeof getHeadersFn === 'function' ? getHeadersFn() : {};
+    const headers = {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    };
+    if (requestId) {
+      headers['x-request-id'] = requestId;
+    }
+
+    const payloadEnvio = { ...payload };
+    if (requestId && !payloadEnvio.request_id) {
+      payloadEnvio.request_id = requestId;
+    }
+
+    let response;
+    try {
+      response = await fetchFn(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payloadEnvio),
+      });
+    } catch (error) {
+      const erroRede = new Error(`Falha de rede ao executar ação da R.O.: ${error?.message || error}`);
+      erroRede.isNetworkError = true;
+      throw erroRede;
+    }
+
+    let payloadResposta = null;
+    try {
+      payloadResposta = await response.json();
+    } catch {
+      payloadResposta = null;
+    }
+
+    if (!response.ok) {
+      const mensagem = traduzirErroApiRos(response.status, payloadResposta, 'Erro ao executar ação da R.O.');
+      const erroApi = new Error(mensagem);
+      erroApi.status = response.status;
+      erroApi.data = payloadResposta;
+      throw erroApi;
+    }
+
+    return payloadResposta?.data !== undefined ? payloadResposta.data : payloadResposta;
+  };
+
+  const fetchRegistroOportunidade = async (id, options = {}) => {
+    const fetchFn = options.fetchImpl || global.fetch;
+    if (typeof fetchFn !== 'function') throw new Error('Ambiente sem suporte a fetch disponível.');
+    if (!id || typeof id !== 'string') throw new Error('Identificador da R.O. é obrigatório.');
+
+    const baseUrl = options.baseUrl || '/api/ros';
+    const getHeadersFn = options.getSupabaseHeaders || options.getHeaders;
+    const authHeaders = typeof getHeadersFn === 'function' ? getHeadersFn() : {};
+
+    let response;
+    try {
+      response = await fetchFn(`${baseUrl}/${id}`, {
+        method: 'GET',
+        headers: authHeaders,
+      });
+    } catch (error) {
+      const erroRede = new Error(`Falha de rede ao consultar detalhes da R.O.: ${error?.message || error}`);
+      erroRede.isNetworkError = true;
+      throw erroRede;
+    }
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const msg = traduzirErroApiRos(response.status, payload, 'Erro ao carregar detalhes da R.O.');
+      const erro = new Error(msg);
+      erro.status = response.status;
+      erro.data = payload;
+      throw erro;
+    }
+
+    if (Array.isArray(payload?.data)) {
+      if (payload.data.length === 0) {
+        const erro404 = new Error('R.O. não encontrada.');
+        erro404.status = 404;
+        throw erro404;
+      }
+      return payload.data[0];
+    }
+    return payload?.data || payload;
+  };
+
   global.RosUiDomain = {
     montarQueryRos,
     traduzirErroApiRos,
     fetchRegistrosOportunidade,
+    fetchRegistroOportunidade,
     fetchResumoRos,
     obterHojeSaoPaulo,
     formatarDataCivil,
@@ -384,9 +636,12 @@
     resumirCiclosRo,
     obterAcoesPermitidasRo,
     validarPayloadCriacaoRo,
+    validarPayloadAcaoRo,
+    executarAcaoRo,
     gerarRequestIdRo,
     desambiguarOportunidade,
     criarRegistroOportunidade,
     resolverNegocioCrmParaRo,
   };
+
 })(globalThis);
