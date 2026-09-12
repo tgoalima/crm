@@ -247,6 +247,93 @@
     return [];
   };
 
+
+  const validarPayloadCriacaoRo = (payload) => {
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Dados da R.O. são obrigatórios.');
+    }
+    const negocioId = payload.negocio_id ? String(payload.negocio_id).trim() : '';
+    if (!negocioId) {
+      throw new Error('A seleção da oportunidade é obrigatória.');
+    }
+    const fabricanteId = payload.fabricante_id ? String(payload.fabricante_id).trim() : '';
+    if (!fabricanteId) {
+      throw new Error('O fabricante é obrigatório.');
+    }
+    const categoria = payload.categoria ? String(payload.categoria).trim() : '';
+    if (!categoria) {
+      throw new Error('A categoria é obrigatória.');
+    }
+
+    return {
+      negocio_id: negocioId,
+      fabricante_id: fabricanteId,
+      categoria,
+      titulo: payload.titulo ? String(payload.titulo).trim() : null,
+      cenario: payload.cenario ? String(payload.cenario).trim() : null,
+      responsavel_operacional_clickup_id: payload.responsavel_operacional_clickup_id ? String(payload.responsavel_operacional_clickup_id).trim() : null,
+      request_id: payload.request_id ? String(payload.request_id).trim() : null,
+    };
+  };
+
+  const gerarRequestIdRo = () => {
+    try {
+      if (typeof global.crypto?.randomUUID === 'function') {
+        return global.crypto.randomUUID();
+      }
+    } catch {}
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
+  const desambiguarOportunidade = (oportunidade) => {
+    if (!oportunidade || typeof oportunidade !== 'object') return 'Oportunidade não identificada';
+    const nomeOp = oportunidade.nome || oportunidade.name || `Oportunidade #${String(oportunidade.id || '').slice(0, 8)}`;
+    const conta = oportunidade.contas?.nome || oportunidade.contas?.razao_social || oportunidade.contas?.nome_fantasia || oportunidade.cliente_nome || oportunidade.conta_nome || '';
+    if (conta) {
+      return `${conta} — ${nomeOp}`;
+    }
+    return `Sem cliente informado — ${nomeOp}`;
+  };
+
+  const criarRegistroOportunidade = async (dados, options = {}) => {
+    const fetchFn = options.fetchImpl || global.fetch;
+    if (typeof fetchFn !== 'function') throw new Error('Ambiente sem suporte a fetch disponível.');
+
+    const payloadLimpo = validarPayloadCriacaoRo(dados);
+    const requestId = payloadLimpo.request_id || gerarRequestIdRo();
+    payloadLimpo.request_id = requestId;
+
+    const baseUrl = options.baseUrl || '/api/ros';
+    const authHeaders = typeof options.getHeaders === 'function' ? options.getHeaders() : {};
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-request-id': requestId,
+      ...authHeaders,
+    };
+
+    let response;
+    try {
+      response = await fetchFn(baseUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payloadLimpo),
+      });
+    } catch (error) {
+      throw new Error(`Falha de rede ao criar R.O.: ${error?.message || error}`);
+    }
+
+    let payload = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    if (!response.ok) {
+      throw new Error(traduzirErroApiRos(response.status, payload, 'Erro ao criar Registro de Oportunidade.'));
+    }
+    return payload?.data || payload;
+  };
+
   global.RosUiDomain = {
     montarQueryRos,
     traduzirErroApiRos,
@@ -263,5 +350,9 @@
     ordenarEventosRo,
     resumirCiclosRo,
     obterAcoesPermitidasRo,
+    validarPayloadCriacaoRo,
+    gerarRequestIdRo,
+    desambiguarOportunidade,
+    criarRegistroOportunidade,
   };
 })(globalThis);

@@ -420,6 +420,10 @@ const {
   ordenarEventosRo,
   resumirCiclosRo,
   obterAcoesPermitidasRo,
+  validarPayloadCriacaoRo,
+  gerarRequestIdRo,
+  desambiguarOportunidade,
+  criarRegistroOportunidade,
 } = window.RosUiDomain || {};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2002,6 +2006,481 @@ function RegistroOportunidadeDrawer({ ro, onClose }) {
   </div>;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────
+// MODAL DE CADASTRO DE NOVA R.O. (Task 5)
+// ─────────────────────────────────────────────────────────────────────────
+function NovaRoModal({
+  aberto,
+  onClose,
+  onSuccess,
+  fabricantes = [],
+  vendedores = [],
+  oportunidadeFixa = null,
+  supabaseClient = null,
+  getSupabaseHeaders = null,
+}) {
+  const modalRef = React.useRef(null);
+  const modalLayer = useModalLayer({ open: aberto, onClose, panelRef: modalRef });
+
+  const [oportunidadeSelecionada, setOportunidadeSelecionada] = useState(oportunidadeFixa);
+  const [buscaOportunidade, setBuscaOportunidade] = useState("");
+  const [sugestoesOportunidades, setSugestoesOportunidades] = useState([]);
+  const [buscandoOportunidades, setBuscandoOportunidades] = useState(false);
+  const [dropdownAberto, setDropdownAberto] = useState(false);
+
+  const [fabricanteId, setFabricanteId] = useState("");
+  const [categoria, setCategoria] = useState("");
+  const [titulo, setTitulo] = useState("");
+  const [cenario, setCenario] = useState("");
+  const [responsavelId, setResponsavelId] = useState("");
+
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState(null);
+
+  // request_id estável durante tentativas de reenvio da mesma criação (idempotência)
+  const requestIdRef = useRef(null);
+  if (!requestIdRef.current && gerarRequestIdRo) {
+    requestIdRef.current = gerarRequestIdRo();
+  }
+
+  // Listener ESC
+  useEffect(() => {
+    if (!aberto) return;
+    const aoTeclar = (e) => {
+      if (e.key === "Escape" && !salvando) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [aberto, salvando, onClose]);
+
+  // Sincroniza oportunidadeFixa
+  useEffect(() => {
+    if (oportunidadeFixa) {
+      if (oportunidadeFixa.contas) {
+        setOportunidadeSelecionada(oportunidadeFixa);
+      } else if (oportunidadeFixa.conta_id && supabaseClient) {
+        supabaseClient
+          .from("contas")
+          .select("id, nome, razao_social")
+          .eq("id", oportunidadeFixa.conta_id)
+          .maybeSingle()
+          .then(({ data }) => {
+            setOportunidadeSelecionada({
+              ...oportunidadeFixa,
+              contas: data || null,
+            });
+          })
+          .catch(() => {
+            setOportunidadeSelecionada(oportunidadeFixa);
+          });
+      } else {
+        setOportunidadeSelecionada(oportunidadeFixa);
+      }
+    } else {
+      setOportunidadeSelecionada(null);
+    }
+  }, [oportunidadeFixa, supabaseClient]);
+
+  // Busca search-first de oportunidades
+  useEffect(() => {
+    if (!aberto || oportunidadeFixa || oportunidadeSelecionada) return;
+    let cancelado = false;
+    const termo = buscaOportunidade.trim();
+
+    const temporizador = setTimeout(async () => {
+      if (!supabaseClient) return;
+      setBuscandoOportunidades(true);
+      try {
+        if (!termo) {
+          const { data } = await supabaseClient
+            .from("negocios")
+            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .order("nome")
+            .limit(20);
+          if (!cancelado) setSugestoesOportunidades(data || []);
+        } else {
+          const { data: negsPorNome } = await supabaseClient
+            .from("negocios")
+            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .ilike("nome", "%" + termo + "%")
+            .limit(20);
+
+          const { data: contasMatch } = await supabaseClient
+            .from("contas")
+            .select("id")
+            .or("nome.ilike.%" + termo + "%,razao_social.ilike.%" + termo + "%")
+            .limit(20);
+
+          let negsPorConta = [];
+          if (contasMatch && contasMatch.length > 0) {
+            const contaIds = contasMatch.map((c) => c.id);
+            const { data: negs } = await supabaseClient
+              .from("negocios")
+              .select("id, nome, conta_id, contas(id, nome, razao_social)")
+              .in("conta_id", contaIds)
+              .limit(20);
+            negsPorConta = negs || [];
+          }
+
+          if (!cancelado) {
+            const mapa = new Map();
+            (negsPorNome || []).forEach((n) => mapa.set(n.id, n));
+            negsPorConta.forEach((n) => mapa.set(n.id, n));
+            setSugestoesOportunidades(Array.from(mapa.values()));
+          }
+        }
+      } catch (e) {
+        if (!cancelado) setSugestoesOportunidades([]);
+      } finally {
+        if (!cancelado) setBuscandoOportunidades(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelado = true;
+      clearTimeout(temporizador);
+    };
+  }, [aberto, buscaOportunidade, oportunidadeFixa, oportunidadeSelecionada, supabaseClient]);
+
+  if (!aberto) return null;
+
+  const clienteNome =
+    oportunidadeSelecionada?.contas?.nome ||
+    oportunidadeSelecionada?.contas?.razao_social ||
+    oportunidadeSelecionada?.cliente_nome ||
+    oportunidadeSelecionada?.conta_nome ||
+    (oportunidadeSelecionada ? "Cliente não informado" : "—");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErro(null);
+
+    const dados = {
+      negocio_id: oportunidadeSelecionada?.id,
+      fabricante_id: fabricanteId,
+      categoria: categoria,
+      titulo: titulo,
+      cenario: cenario,
+      responsavel_operacional_clickup_id: responsavelId,
+      request_id: requestIdRef.current,
+    };
+
+    try {
+      if (validarPayloadCriacaoRo) {
+        validarPayloadCriacaoRo(dados);
+      } else {
+        if (!dados.negocio_id) throw new Error("A seleção da oportunidade é obrigatória.");
+        if (!dados.fabricante_id) throw new Error("O fabricante é obrigatório.");
+        if (!dados.categoria) throw new Error("A categoria é obrigatória.");
+      }
+    } catch (valErr) {
+      setErro(valErr.message);
+      return;
+    }
+
+    setSalvando(true);
+    try {
+      const headersFn = typeof getSupabaseHeaders === "function" ? getSupabaseHeaders : () => ({});
+      const resultado = await criarRegistroOportunidade(dados, {
+        getHeaders: headersFn,
+      });
+
+      // Sucesso 2xx confirmado: renova request_id para próxima criação e notifica
+      if (gerarRequestIdRo) {
+        requestIdRef.current = gerarRequestIdRo();
+      }
+      if (onSuccess) {
+        onSuccess(resultado);
+      }
+    } catch (saveErr) {
+      // Preserva os dados do formulário e o request_id estável em caso de erro (401, 409, 422, rede)
+      setErro(saveErr.message || "Erro ao registrar R.O. Seus dados foram preservados; tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+      onClick={() => {
+        if (!salvando) onClose();
+      }}
+    >
+      <div
+        ref={modalRef}
+        onKeyDown={modalLayer.onKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-nova-ro-titulo"
+        className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col ring-1 ring-slate-200 dark:ring-slate-700"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header do Modal */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-extrabold text-sm shadow-md shrink-0">
+              RO
+            </div>
+            <div>
+              <h3 id="modal-nova-ro-titulo" className="font-black text-base text-slate-900 dark:text-slate-100 leading-tight">
+                Nova R.O.
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Cadastro de Registro de Oportunidade com fabricante
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={salvando}
+            className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+            title="Fechar (ESC)"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Formulário */}
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-4">
+          {erro && (
+            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-start gap-2">
+              <span className="shrink-0 text-base">⚠️</span>
+              <div className="flex-1">
+                <p>{erro}</p>
+                <p className="text-[11px] font-normal text-rose-600 dark:text-rose-400 mt-0.5">
+                  Os dados digitados foram preservados. Você pode corrigir e tentar novamente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Oportunidade (obrigatória) */}
+          {oportunidadeSelecionada ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Oportunidade *
+                </label>
+                {!oportunidadeFixa && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOportunidadeSelecionada(null);
+                      setBuscaOportunidade("");
+                      setDropdownAberto(true);
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 cursor-pointer"
+                  >
+                    Alterar oportunidade
+                  </button>
+                )}
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    {oportunidadeSelecionada.nome || oportunidadeSelecionada.name}
+                  </p>
+                  {oportunidadeFixa && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Oportunidade vinculada ao contexto atual (fixa)
+                    </p>
+                  )}
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200 dark:border-emerald-800">
+                  Selecionada
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Pesquisar Oportunidade *
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={buscaOportunidade}
+                  onChange={(e) => {
+                    setBuscaOportunidade(e.target.value);
+                    setDropdownAberto(true);
+                  }}
+                  onFocus={() => setDropdownAberto(true)}
+                  placeholder="Digite o nome do projeto ou do cliente..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                />
+                {buscandoOportunidades && (
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 animate-spin">⏳</span>
+                )}
+              </div>
+
+              {dropdownAberto && (
+                <div className="absolute top-full left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 divide-y divide-slate-100 dark:divide-slate-800">
+                  {sugestoesOportunidades.length > 0 ? (
+                    sugestoesOportunidades.map((op) => (
+                      <button
+                        key={op.id}
+                        type="button"
+                        onClick={() => {
+                          setOportunidadeSelecionada(op);
+                          setDropdownAberto(false);
+                        }}
+                        className="w-full text-left p-2.5 hover:bg-indigo-50/70 dark:hover:bg-slate-800 transition-colors flex flex-col gap-0.5 cursor-pointer"
+                      >
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                          {desambiguarOportunidade ? desambiguarOportunidade(op) : (op.nome || op.name)}
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                          Cliente: {op.contas?.nome || op.contas?.razao_social || "Sem cliente"} · Projeto: {op.nome || op.name}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="p-3 text-xs text-slate-400 text-center">
+                      {buscandoOportunidades ? "Pesquisando oportunidades..." : "Nenhuma oportunidade encontrada."}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Cliente (Somente Leitura - Derivado da Oportunidade) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Cliente (da oportunidade)
+            </label>
+            <input
+              type="text"
+              readOnly
+              disabled
+              value={clienteNome}
+              className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-not-allowed"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              O cliente é sempre herdado da oportunidade selecionada.
+            </p>
+          </div>
+
+          {/* Fabricante e Categoria (Obrigatórios) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Fabricante *
+              </label>
+              <select
+                required
+                value={fabricanteId}
+                onChange={(e) => setFabricanteId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">Selecione o fabricante...</option>
+                {fabricantes.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Categoria *
+              </label>
+              <input
+                type="text"
+                required
+                list="categorias-ro-sugestoes"
+                value={categoria}
+                onChange={(e) => setCategoria(e.target.value)}
+                placeholder="Ex: Infraestrutura, Software, Serviços..."
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+              />
+              <datalist id="categorias-ro-sugestoes">
+                <option value="Infraestrutura" />
+                <option value="Software" />
+                <option value="Serviços" />
+              </datalist>
+            </div>
+          </div>
+
+          {/* Título / Escopo (Opcional) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Título / Escopo da R.O. (opcional)
+            </label>
+            <input
+              type="text"
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Ex: Switches Core Data Center, Firewall Perímetro..."
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Cenário e Responsável Operacional (Opcionais) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Cenário (opcional)
+              </label>
+              <input
+                type="text"
+                value={cenario}
+                onChange={(e) => setCenario(e.target.value)}
+                placeholder="Ex: Principal, Alternativo Fortinet"
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Responsável Operacional (opcional)
+              </label>
+              <select
+                value={responsavelId}
+                onChange={(e) => setResponsavelId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">Não definido</option>
+                {vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Footer com botões */}
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={salvando}
+              className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={salvando}
+              className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              {salvando && <span className="animate-spin">⏳</span>}
+              <span>{salvando ? "Salvando R.O..." : "Salvar R.O."}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // VISTA PRINCIPAL DE REGISTROS DE OPORTUNIDADE (R.O. - Task 3.1)
 // ─────────────────────────────────────────────────────────────────────────
 function RegistrosOportunidadeView({
@@ -2011,6 +2490,7 @@ function RegistrosOportunidadeView({
   vendedores = [],
   onSelect,
   onCloseSelection,
+  onNovaRo,
   onFilterChange,
   onPageChange,
   onRefresh,
@@ -2108,6 +2588,16 @@ function RegistrosOportunidadeView({
         </div>
 
         <div className="flex items-center gap-2">
+          {onNovaRo && (
+            <button
+              type="button"
+              onClick={onNovaRo}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              title="Cadastrar nova R.O."
+            >
+              <span>+ Nova R.O.</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onRefresh}
@@ -2879,6 +3369,8 @@ function App() {
     error: null,
   });
   const [fabricantesRo, setFabricantesRo] = useState([]);
+  const [modalNovaRoAberto, setModalNovaRoAberto] = useState(false);
+  const [modalNovaRoOportunidadeFixa, setModalNovaRoOportunidadeFixa] = useState(null);
 
   // Autenticação e Token do Usuário no ClickUp
   const [userClickUpToken, setUserClickUpToken] = useState(() => localStorage.getItem('crm_user_clickup_token') || '');
@@ -5414,7 +5906,7 @@ function App() {
 
   // Carrega lista de fabricantes ativos cadastrados para o filtro de R.O.
   useEffect(() => {
-    if (activeTab === 'ros' && supabaseClient) {
+    if ((activeTab === 'ros' || modalNovaRoAberto) && supabaseClient && fabricantesRo.length === 0) {
       supabaseClient
         .from('fabricantes_ro')
         .select('id, nome')
@@ -5488,6 +5980,50 @@ function App() {
       loadRegistrosOportunidade(rosState.filters, rosState.page);
     }
   }, [activeTab, rosState.filters, rosState.page, loadRegistrosOportunidade]);
+
+  const handleNovaRoSucesso = useCallback((novoRegistro) => {
+    showToast("Registro de Oportunidade criado com sucesso!", "success");
+    setModalNovaRoAberto(false);
+    setModalNovaRoOportunidadeFixa(null);
+    loadRegistrosOportunidade(rosState.filters, rosState.page);
+  }, [loadRegistrosOportunidade, rosState.filters, rosState.page, showToast]);
+
+  const handleAbrirNovaRoOportunidade = useCallback(async (task) => {
+    if (!task) return;
+    let negocio = null;
+    if (supabaseClient) {
+      try {
+        if (task.id && String(task.id).includes("-")) {
+          const { data } = await supabaseClient
+            .from("negocios")
+            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .eq("id", task.id)
+            .maybeSingle();
+          if (data) negocio = data;
+        }
+        if (!negocio && task.id) {
+          const { data } = await supabaseClient
+            .from("negocios")
+            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .eq("clickup_negocio_id", String(task.id))
+            .maybeSingle();
+          if (data) negocio = data;
+        }
+      } catch (err) {
+        console.warn("Erro ao consultar oportunidade para R.O.:", err);
+      }
+    }
+    if (!negocio) {
+      negocio = {
+        id: task.id,
+        nome: task.nome || task.name || "Oportunidade",
+        conta_id: task.conta_id || null,
+        contas: empresaDoNegocio?.id === task.conta_id ? empresaDoNegocio : null,
+      };
+    }
+    setModalNovaRoOportunidadeFixa(negocio);
+    setModalNovaRoAberto(true);
+  }, [supabaseClient, empresaDoNegocio]);
 
   // Armazenamento em memória para filtros instantâneos sem atraso
   const rawProposalsRef = useRef([]);
@@ -11558,6 +12094,10 @@ function App() {
           vendedores={vendedoresVisiveis}
           onSelect={(id) => setRosState((prev) => ({ ...prev, selectedId: id }))}
           onCloseSelection={() => setRosState((prev) => ({ ...prev, selectedId: null }))}
+          onNovaRo={() => {
+            setModalNovaRoOportunidadeFixa(null);
+            setModalNovaRoAberto(true);
+          }}
           onFilterChange={(novosFiltros) => {
             setRosState((prev) => ({ ...prev, filters: novosFiltros, page: 1 }));
           }}
@@ -11896,6 +12436,23 @@ function App() {
         </div>
       )}
 
+      {/* Modal de Cadastro de Nova R.O. (Task 5) */}
+      {modalNovaRoAberto && (
+        <NovaRoModal
+          aberto={modalNovaRoAberto}
+          onClose={() => {
+            setModalNovaRoAberto(false);
+            setModalNovaRoOportunidadeFixa(null);
+          }}
+          onSuccess={handleNovaRoSucesso}
+          fabricantes={fabricantesRo}
+          vendedores={vendedoresVisiveis}
+          oportunidadeFixa={modalNovaRoOportunidadeFixa}
+          supabaseClient={supabaseClient}
+          getSupabaseHeaders={getSupabaseHeaders}
+        />
+      )}
+
       {/* Modal de Edição de Oportunidade / Negócio */}
       {showEditNegocioDrawerModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4" onClick={() => setShowEditNegocioDrawerModal(false)}>
@@ -12086,6 +12643,18 @@ function App() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleAbrirNovaRoOportunidade(selectedTask)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                      title="Cadastrar nova R.O. para esta oportunidade"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                      </svg>
+                      <span>Nova R.O.</span>
+                    </button>
+
                     <button 
                       onClick={() => handleAbrirEditarNegocioDrawer(selectedTask)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"

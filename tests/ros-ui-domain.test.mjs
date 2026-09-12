@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-const caminhoDominio = path.resolve('ros-ui-domain.js');
+const caminhoDominio = new URL('../ros-ui-domain.js', import.meta.url).pathname;
 
 function carregarDominioRos({ fetchImpl } = {}) {
   const contexto = { URLSearchParams, fetch: fetchImpl };
@@ -301,4 +301,188 @@ test('painel ordena eventos recentes primeiro e separa vigência, ciclo e açõe
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aguardando aprovação')), ['aprovar', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada')), ['renovar', 'substituir', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
+});
+
+test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cenário e responsável opcionais', () => {
+  const { validarPayloadCriacaoRo } = carregarDominioRos();
+
+  // Bloqueio sem oportunidade
+  assert.throws(
+    () => validarPayloadCriacaoRo({ fabricante_id: 'fab-1', categoria: 'Software' }),
+    /oportunidade/i
+  );
+  assert.throws(
+    () => validarPayloadCriacaoRo({ negocio_id: '', fabricante_id: 'fab-1', categoria: 'Software' }),
+    /oportunidade/i
+  );
+
+  // Bloqueio sem fabricante
+  assert.throws(
+    () => validarPayloadCriacaoRo({ negocio_id: 'neg-1', categoria: 'Software' }),
+    /fabricante/i
+  );
+
+  // Bloqueio sem categoria
+  assert.throws(
+    () => validarPayloadCriacaoRo({ negocio_id: 'neg-1', fabricante_id: 'fab-1', categoria: '' }),
+    /categoria/i
+  );
+
+  // Sucesso com campos mínimos obrigatórios (cenário e responsável opcionais)
+  const limpoMinimo = validarPayloadCriacaoRo({
+    negocio_id: 'neg-1',
+    fabricante_id: 'fab-1',
+    categoria: 'Infraestrutura',
+  });
+  assert.equal(limpoMinimo.negocio_id, 'neg-1');
+  assert.equal(limpoMinimo.fabricante_id, 'fab-1');
+  assert.equal(limpoMinimo.categoria, 'Infraestrutura');
+  assert.equal(limpoMinimo.cenario, null);
+  assert.equal(limpoMinimo.responsavel_operacional_clickup_id, null);
+  assert.equal(limpoMinimo.titulo, null);
+
+  // Sucesso com todos os campos preenchidos
+  const limpoCompleto = validarPayloadCriacaoRo({
+    negocio_id: 'neg-2',
+    fabricante_id: 'fab-2',
+    categoria: 'Nuvem',
+    titulo: 'Expansão Datacenter',
+    cenario: 'Migração de servidores legados',
+    responsavel_operacional_clickup_id: '90848927',
+    request_id: 'req-stable-1',
+  });
+  assert.equal(limpoCompleto.titulo, 'Expansão Datacenter');
+  assert.equal(limpoCompleto.cenario, 'Migração de servidores legados');
+  assert.equal(limpoCompleto.responsavel_operacional_clickup_id, '90848927');
+  assert.equal(limpoCompleto.request_id, 'req-stable-1');
+});
+
+test('gerarRequestIdRo produz identificador válido e retry reutiliza o mesmo request_id', () => {
+  const { gerarRequestIdRo } = carregarDominioRos();
+  const id1 = gerarRequestIdRo();
+  const id2 = gerarRequestIdRo();
+  assert.ok(typeof id1 === 'string' && id1.length >= 16);
+  assert.notEqual(id1, id2);
+
+  // Simulação de reenvio com request_id estável
+  const formState = {
+    negocio_id: 'neg-1',
+    fabricante_id: 'fab-1',
+    categoria: 'Segurança',
+    request_id: id1, // mantido estável entre tentativas
+  };
+  assert.equal(formState.request_id, id1);
+});
+
+test('criarRegistroOportunidade envia POST para /api/ros com headers corretos e processa sucesso', async () => {
+  let urlChamada = '';
+  let metodoChamado = '';
+  let headersChamados = {};
+  let corpoChamado = null;
+
+  const mockFetch = async (url, init) => {
+    urlChamada = String(url);
+    metodoChamado = init?.method;
+    headersChamados = init?.headers || {};
+    corpoChamado = JSON.parse(init?.body || '{}');
+    return {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 'ro-nova-1',
+        negocio_id: corpoChamado.negocio_id,
+        fabricante_id: corpoChamado.fabricante_id,
+        situacao: 'Backoffice',
+      }),
+    };
+  };
+
+  const { criarRegistroOportunidade } = carregarDominioRos({ fetchImpl: mockFetch });
+  const resultado = await criarRegistroOportunidade(
+    {
+      negocio_id: 'neg-123',
+      fabricante_id: 'fab-456',
+      categoria: 'Software',
+      cenario: 'Cenário teste',
+      request_id: 'req-abc-999',
+    },
+    { getHeaders: () => ({ Authorization: 'Bearer token-clickup-123' }) }
+  );
+
+  assert.equal(urlChamada, '/api/ros');
+  assert.equal(metodoChamado, 'POST');
+  assert.equal(headersChamados.Authorization, 'Bearer token-clickup-123');
+  assert.equal(headersChamados['x-request-id'], 'req-abc-999');
+  assert.equal(corpoChamado.negocio_id, 'neg-123');
+  assert.equal(corpoChamado.request_id, 'req-abc-999');
+  assert.equal(resultado.id, 'ro-nova-1');
+  assert.equal(resultado.situacao, 'Backoffice');
+});
+
+test('criarRegistroOportunidade traduz erros 401, 409, 422 e falha de rede preservando dados para retry', async () => {
+  const criarMockErro = (status, payload) => async () => ({
+    ok: false,
+    status,
+    json: async () => payload,
+  });
+
+  // 401
+  const { criarRegistroOportunidade: criar401 } = carregarDominioRos({
+    fetchImpl: criarMockErro(401, { error: 'Unauthorized' }),
+  });
+  await assert.rejects(
+    () => criar401({ negocio_id: 'neg-1', fabricante_id: 'fab-1', categoria: 'Software' }),
+    /sessão expirada|não autenticada/i
+  );
+
+  // 409
+  const { criarRegistroOportunidade: criar409 } = carregarDominioRos({
+    fetchImpl: criarMockErro(409, { error: 'R.O. já cadastrada para este fabricante' }),
+  });
+  await assert.rejects(
+    () => criar409({ negocio_id: 'neg-1', fabricante_id: 'fab-1', categoria: 'Software' }),
+    /já cadastrada|conflito/i
+  );
+
+  // 422
+  const { criarRegistroOportunidade: criar422 } = carregarDominioRos({
+    fetchImpl: criarMockErro(422, { error: 'Categoria inválida' }),
+  });
+  await assert.rejects(
+    () => criar422({ negocio_id: 'neg-1', fabricante_id: 'fab-1', categoria: 'Software' }),
+    /inválid/i
+  );
+
+  // Falha de rede
+  const { criarRegistroOportunidade: criarRede } = carregarDominioRos({
+    fetchImpl: async () => { throw new Error('Failed to fetch'); },
+  });
+  await assert.rejects(
+    () => criarRede({ negocio_id: 'neg-1', fabricante_id: 'fab-1', categoria: 'Software' }),
+    /falha de rede/i
+  );
+});
+
+test('desambiguarOportunidade formata cliente e nome do projeto claramente', () => {
+  const { desambiguarOportunidade } = carregarDominioRos();
+
+  const opComCliente = desambiguarOportunidade({
+    id: 'op-1',
+    nome: 'Expansão Datacenter HCI',
+    contas: { nome: 'Hospital Santa Joana' },
+  });
+  assert.equal(opComCliente, 'Hospital Santa Joana — Expansão Datacenter HCI');
+
+  const opComRazaoSocial = desambiguarOportunidade({
+    id: 'op-2',
+    nome: 'Licenciamento Red Hat',
+    contas: { razao_social: 'Acme Corp S/A' },
+  });
+  assert.equal(opComRazaoSocial, 'Acme Corp S/A — Licenciamento Red Hat');
+
+  const opSemCliente = desambiguarOportunidade({
+    id: 'op-3',
+    nome: 'Projeto Firewall Fortinet',
+  });
+  assert.equal(opSemCliente, 'Sem cliente informado — Projeto Firewall Fortinet');
 });
