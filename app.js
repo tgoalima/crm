@@ -4505,9 +4505,19 @@ function App() {
   // Listener para sincronizar navegação por hash (Avançar/Voltar do navegador)
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '').trim();
-      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas', 'ros'].includes(hash)) {
-        setActiveTab(hash);
+      const rawHash = window.location.hash.replace('#', '').trim();
+      const [tabName, queryPart] = rawHash.split('?');
+      if (['kanban', 'relatorios', 'tasks', 'propostas', 'empresas', 'ros'].includes(tabName)) {
+        setActiveTab(tabName);
+        if (tabName === 'ros' && queryPart) {
+          const p = new URLSearchParams(queryPart);
+          const novosFiltros = {};
+          for (const [k, v] of p.entries()) {
+            if (v) novosFiltros[k] = v;
+          }
+          setRosState((prev) => ({ ...prev, filters: novosFiltros, page: 1, selectedId: null }));
+          loadRegistrosOportunidade(novosFiltros, 1);
+        }
       }
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -7248,6 +7258,7 @@ function App() {
     setModalNovaRoAberto(false);
     setModalNovaRoOportunidadeFixa(null);
     loadRegistrosOportunidade(rosState.filters, rosState.page);
+    window.dispatchEvent(new CustomEvent('ro-criada', { detail: novoRegistro }));
   }, [loadRegistrosOportunidade, rosState.filters, rosState.page, showToast]);
 
   const handleAbrirNovaRoOportunidade = useCallback(async (task) => {
@@ -7300,6 +7311,26 @@ function App() {
     setModalNovaRoOportunidadeFixa(negocio);
     setModalNovaRoAberto(true);
   }, [supabaseClient, showToast]);
+
+  const handleNavegarParaRos = useCallback((novosFiltros = {}) => {
+    setActiveTab('ros');
+    setRosState((prev) => ({
+      ...prev,
+      filters: { ...novosFiltros },
+      page: 1,
+      selectedId: null,
+    }));
+    loadRegistrosOportunidade(novosFiltros, 1);
+  }, [loadRegistrosOportunidade]);
+
+  useEffect(() => {
+    const handleEventoAbrirNovaRo = (e) => {
+      const opp = e.detail?.negocio || e.detail?.oportunidade || (e.detail?.negocio_id ? { id: e.detail.negocio_id } : null);
+      if (opp) handleAbrirNovaRoOportunidade(opp);
+    };
+    window.addEventListener('abrir-nova-ro', handleEventoAbrirNovaRo);
+    return () => window.removeEventListener('abrir-nova-ro', handleEventoAbrirNovaRo);
+  }, [handleAbrirNovaRoOportunidade]);
 
   // Armazenamento em memória para filtros instantâneos sem atraso
   const rawProposalsRef = useRef([]);
@@ -11947,6 +11978,8 @@ function App() {
               contaParaAbrir={contaParaAbrir}
               abaParaAbrir={abaContaParaAbrir}
               onContaAberta={() => { setContaParaAbrir(null); setAbaContaParaAbrir('visao_geral'); }}
+              onNovaRo={handleAbrirNovaRoOportunidade}
+              onNavegarParaRos={handleNavegarParaRos}
             />
           </div>
         )}

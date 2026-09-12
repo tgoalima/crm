@@ -792,3 +792,44 @@ test('deduplicação determinística de comentários ClickUp e atividades CRM co
   assert.equal(resultado.excluidas.agente, 1, 'Deve registrar 1 comentário de agente excluído');
   assert.equal(resultado.excluidas.sistema, 1, 'Deve registrar 1 comentário de sistema excluído');
 });
+
+
+test('interpretarConsulta aceita conta_id válido como UUID e rejeita UUID inválido (Ficha 360º)', () => {
+  // UUID válido aceito
+  const pValido = new URLSearchParams({ conta_id: uuid });
+  const consultaValida = interpretarConsulta(pValido);
+  assert.equal(consultaValida.conta_id, uuid);
+
+  // conta_id inválido (não UUID) rejeitado com erro 400
+  const pInvalido = new URLSearchParams({ conta_id: 'nao-e-uuid' });
+  assert.throws(() => interpretarConsulta(pInvalido), /conta.*inválid/i);
+});
+
+test('api-ros index.ts resolve oportunidades da conta por conta_id sem atalho textual nem ambiguidade (Ficha 360º)', () => {
+  const indexTs = lerArquivo('supabase/functions/api-ros/index.ts');
+
+  // Verifica que index.ts filtra por conta_id buscando na tabela negocios
+  assert.ok(indexTs.includes('consulta.conta_id'));
+  assert.ok(indexTs.includes('.from("negocios")'));
+  assert.ok(indexTs.includes('.eq("conta_id", consulta.conta_id)'));
+  assert.ok(indexTs.includes('query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO])'));
+
+  // Não usa busca textual de cliente para resolver conta_id
+  assert.ok(!indexTs.includes('buscarIdsContas(supabase, consulta.conta_id)'));
+});
+
+test('simulação de consulta por conta_id: conta sem oportunidades ou com múltiplas oportunidades', () => {
+  const UUID_NULO = '00000000-0000-0000-0000-000000000000';
+
+  // Cenário 1: Conta sem oportunidades cadastradas
+  const negsContaVazia = [];
+  const negIdsVazio = negsContaVazia.map(n => n.id);
+  const filtroIdsVazio = negIdsVazio.length > 0 ? negIdsVazio : [UUID_NULO];
+  assert.deepEqual(filtroIdsVazio, [UUID_NULO], 'Conta sem oportunidades deve filtrar por UUID_NULO resultando em 0 R.Os');
+
+  // Cenário 2: Conta com múltiplas oportunidades
+  const negsContaMultiplas = [{ id: 'neg-1' }, { id: 'neg-2' }, { id: 'neg-3' }];
+  const negIdsMultiplos = negsContaMultiplas.map(n => n.id);
+  const filtroIdsMultiplos = negIdsMultiplos.length > 0 ? negIdsMultiplos : [UUID_NULO];
+  assert.deepEqual(filtroIdsMultiplos, ['neg-1', 'neg-2', 'neg-3'], 'Conta com múltiplas oportunidades deve filtrar por todas as oportunidades');
+});

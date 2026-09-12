@@ -1563,3 +1563,92 @@ test('Task 8 - UI no card e modal exibe cobertura parcial/desconhecida separadam
   assert.ok(appJs.includes('Cobertura desconhecida / parcial:') || appJs.includes('cobertura desconhecida'));
   assert.ok(appJs.includes('Sem atualização confirmada:'));
 });
+
+
+test('montarQueryRos serializa conta_id preservando demais filtros (Ficha 360º)', () => {
+  const { montarQueryRos } = carregarDominioRos();
+  const contaUuid = '33333333-3333-4333-8333-333333333333';
+
+  const params = montarQueryRos({ conta_id: contaUuid, situacao: 'Aprovada' });
+  const str = params.toString();
+
+  assert.ok(str.includes(`conta_id=${contaUuid}`));
+  assert.ok(str.includes('situacao=Aprovada'));
+  assert.ok(!str.includes('data_inicio'), 'Não pode incluir filtros de evidência');
+});
+
+test('Ficha 360º em empresas.js integra aba de R.Os estruturadas com todos os requisitos', () => {
+  const empresasJs = lerArquivo('empresas.js');
+
+  // 1. Aba 'ros' presente no seletor de abas
+  assert.ok(empresasJs.includes("['ros', `R.Os (${rosData.loading ? '...' : rosData.total !== null ? rosData.total : 0})`]"), 'Aba R.Os deve estar no seletor de abas');
+
+  // 2. Busca usando /api/ros?conta_id=... e headers de autenticação
+  assert.ok(empresasJs.includes('/api/ros?conta_id='), 'Deve buscar em /api/ros?conta_id=');
+  assert.ok(empresasJs.includes('getEmpresasClickUpHeaders()'), 'Deve usar headers com token do usuário');
+
+  // 3. R.O. sempre exibe a oportunidade de origem
+  assert.ok(empresasJs.includes('ro.negocios?.nome || ro.negocio?.nome'));
+  assert.ok(empresasJs.includes('ro.fabricantes_ro?.nome || ro.fabricante'));
+  assert.ok(empresasJs.includes("ro.numero_ro || 'Aguardando número'"));
+
+  // 4. Link seguro para oportunidade no ClickUp com target _blank e rel noopener noreferrer
+  assert.ok(empresasJs.includes('rel="noopener noreferrer"'));
+  assert.ok(empresasJs.includes('https://app.clickup.com/t/'));
+
+  // 5. Exibe vigência, vencimento e ciclo
+  assert.ok(empresasJs.includes('Ciclo'));
+  assert.ok(empresasJs.includes('Vencimento:'));
+
+  // 6. Resultado parcial (> 200) sinalizado com banner e nunca afirmado como lista completa
+  assert.ok(empresasJs.includes('listagem parcial da conta'));
+  assert.ok(empresasJs.includes('Ver todas na tela geral'));
+
+  // 7. Erro da API exibe mensagem e botão retry, nunca estado de lista vazia
+  assert.ok(empresasJs.includes('Não foi possível consultar as R.Os desta conta'));
+  assert.ok(empresasJs.includes('Tentar novamente'));
+  assert.ok(empresasJs.includes('!rosData.loading && !rosData.error && rosData.rows.length === 0'), 'Estado vazio só aparece se não houver erro nem loading');
+});
+
+test('Ação Nova R.O. na Ficha 360º comunica com app.js reutilizando o mesmo modal existente', () => {
+  const empresasJs = lerArquivo('empresas.js');
+  const appJs = lerArquivo('app.js');
+
+  // Em empresas.js: botão Nova R.O. nos itens de oportunidade
+  assert.ok(empresasJs.includes('+ Nova R.O.'));
+  assert.ok(empresasJs.includes('handleNovaRoOportunidade(n)'));
+  assert.ok(empresasJs.includes("new CustomEvent('abrir-nova-ro'"));
+
+  // Em app.js: EmpresasTab recebe onNovaRo e app.js escuta abrir-nova-ro
+  assert.ok(appJs.includes('onNovaRo={handleAbrirNovaRoOportunidade}'));
+  assert.ok(appJs.includes("window.addEventListener('abrir-nova-ro'"));
+
+  // Em app.js: oportunidade chega pré-preenchida e bloqueada (oportunidadeFixa)
+  assert.ok(appJs.includes('setModalNovaRoOportunidadeFixa(negocio)'));
+  assert.ok(appJs.includes('setModalNovaRoAberto(true)'));
+
+  // Em app.js: após criar com sucesso, dispara evento 'ro-criada'
+  assert.ok(appJs.includes("new CustomEvent('ro-criada'"));
+
+  // Em empresas.js: escuta 'ro-criada' para recarregar a seção
+  assert.ok(empresasJs.includes("window.addEventListener('ro-criada'"));
+});
+
+test('Campos legados de R.O. em empresas.js são marcados como dados legados e preservados', () => {
+  const empresasJs = lerArquivo('empresas.js');
+
+  // Título e aviso explicativo dos dados legados
+  assert.ok(empresasJs.includes('Registros de Oportunidade (R.O.) — Dados legados'));
+  assert.ok(empresasJs.includes('Estes campos são legados e mantidos apenas para histórico'));
+  assert.ok(empresasJs.includes('Novas R.Os devem ser criadas pela seção estruturada vinculada à oportunidade'));
+
+  // Campos continuam existindo e não foram apagados
+  assert.ok(empresasJs.includes('name="roInfra"'));
+  assert.ok(empresasJs.includes('name="roSw1"'));
+  assert.ok(empresasJs.includes('name="roSw2"'));
+  assert.ok(empresasJs.includes('name="roSw3"'));
+  assert.ok(empresasJs.includes('name="roSw4"'));
+
+  // Não são enviados para a rota /api/ros
+  assert.ok(!empresasJs.includes('/api/ros/legado'));
+});

@@ -254,6 +254,17 @@ Deno.serve(async (req) => {
         renovacoes_ro(*), eventos_ro(*)
       `, { count: "exact" });
       if (tail) query = query.eq("id", tail);
+      if (consulta.conta_id) {
+        const { data: negsConta, error: errNegsConta } = await supabase
+          .from("negocios")
+          .select("id")
+          .eq("conta_id", consulta.conta_id);
+        if (errNegsConta) {
+          throw new ErroComando(500, `Falha ao consultar oportunidades da conta: ${errNegsConta.message}`);
+        }
+        const negIds = idsUnicos(negsConta);
+        query = query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
+      }
       if (consulta.negocio_id) query = query.eq("negocio_id", consulta.negocio_id);
       if (consulta.fabricante_id) query = query.eq("fabricante_id", consulta.fabricante_id);
       if (consulta.situacao) query = query.eq("situacao", consulta.situacao);

@@ -6,7 +6,7 @@
     params.set('pagina', String(Math.max(1, Number(page) || 1)));
     params.set('limite', String(Math.max(1, Math.min(200, Number(limit) || 50))));
     for (const chave of [
-      'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
+      'conta_id', 'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
       'vence_ate', 'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
     ]) {
       const valor = filters[chave];

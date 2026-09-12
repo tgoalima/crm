@@ -58,6 +58,7 @@ function versaoEsperada(valor: unknown): number | null {
 }
 
 export type ConsultaRos = {
+  conta_id: string | null;
   negocio_id: string | null;
   fabricante_id: string | null;
   situacao: string | null;
@@ -127,7 +128,7 @@ export function calcularResumoAgregadoDominio(
 
 export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
   const permitidos = [
-    'negocio_id', 'fabricante_id', 'situacao', 'responsavel',
+    'conta_id', 'negocio_id', 'fabricante_id', 'situacao', 'responsavel',
     'vence_ate', 'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
     'pagina', 'limite',
   ];
@@ -144,12 +145,14 @@ export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
     throw new ErroComando(400, 'Paginação inválida: limite deve estar entre 1 e 200 e página deve ser >= 1.');
   }
 
+  const contaIdRaw = params.get('conta_id');
   const negocioIdRaw = params.get('negocio_id');
   const fabricanteIdRaw = params.get('fabricante_id');
   const venceAteRaw = params.get('vence_ate');
   const buscaParam = params.get('busca') || params.get('q');
 
   return {
+    conta_id: contaIdRaw ? uuid(contaIdRaw, 'A conta') : null,
     negocio_id: negocioIdRaw ? uuid(negocioIdRaw, 'A oportunidade') : null,
     fabricante_id: fabricanteIdRaw ? uuid(fabricanteIdRaw, 'O fabricante') : null,
     situacao: texto(params.get('situacao'), 'A situação'),
