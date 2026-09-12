@@ -1976,8 +1976,21 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                             const fabricanteNome = ro.fabricantes_ro?.nome || ro.fabricante || 'Fabricante';
                             const situacao = ro.situacao || 'Backoffice';
                             const ciclo = ro.renovacoes_ro?.ciclo || (Array.isArray(ro.renovacoes_ro) && ro.renovacoes_ro.length > 0 ? Math.max(...ro.renovacoes_ro.map(r => r.ciclo || 1)) : 1);
-                            const vigenciaInfo = globalThis?.RosUiDomain?.calcularVigenciaRo ? globalThis.RosUiDomain.calcularVigenciaRo(ro) : { rotulo: 'Sem prazo', badgeClass: 'bg-slate-100 text-slate-600' };
-                            const rotuloSit = globalThis?.RosUiDomain?.obterRotuloSituacao ? globalThis.RosUiDomain.obterRotuloSituacao(situacao) : { rotulo: situacao, badgeClass: 'bg-slate-100 text-slate-700' };
+                            const vigenciaTexto = globalThis?.RosUiDomain?.calcularVigenciaRo
+                              ? globalThis.RosUiDomain.calcularVigenciaRo(ro.data_vencimento)
+                              : (ro.data_vencimento ? 'Vigente' : 'Sem prazo');
+                            const mapaClassesVigencia = {
+                              'Vencida': 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800',
+                              'Vence hoje': 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border border-amber-400 dark:border-amber-700 animate-pulse',
+                              'A vencer': 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800',
+                              'Vence em breve': 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800',
+                              'Vigente': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800',
+                              'Sem prazo': 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700',
+                            };
+                            const vigenciaClasseBadge = mapaClassesVigencia[vigenciaTexto] || 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700';
+                            const rotuloSit = globalThis?.RosUiDomain?.obterRotuloSituacao
+                              ? globalThis.RosUiDomain.obterRotuloSituacao(situacao)
+                              : { rotulo: situacao, classeBadge: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' };
                             const dataVencFormatada = globalThis?.RosUiDomain?.formatarDataCivil ? globalThis.RosUiDomain.formatarDataCivil(ro.data_vencimento) : (ro.data_vencimento || '—');
 
                             return (
@@ -1993,7 +2006,7 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                                     <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
                                       {ro.numero_ro || 'Aguardando número'}
                                     </span>
-                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${rotuloSit.badgeClass || 'bg-slate-100 text-slate-700'}`}>
+                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${rotuloSit.classeBadge || 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                                       {rotuloSit.rotulo || situacao}
                                     </span>
                                     <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/80 px-2 py-0.5 rounded-full">
@@ -2005,8 +2018,8 @@ const FichaEmpresaDrawer = ({ conta, negocios, contatos, propostasPorNegocio, on
                                     <span>
                                       Vencimento: <strong>{dataVencFormatada}</strong>
                                     </span>
-                                    <span className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${vigenciaInfo.badgeClass || ''}`}>
-                                      {vigenciaInfo.rotulo || 'Sem prazo'}
+                                    <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${vigenciaClasseBadge}`}>
+                                      {vigenciaTexto}
                                     </span>
                                     {ro.categoria && (
                                       <span>Categoria: {ro.categoria}</span>

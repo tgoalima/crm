@@ -1596,9 +1596,16 @@ test('Ficha 360º em empresas.js integra aba de R.Os estruturadas com todos os r
   assert.ok(empresasJs.includes('rel="noopener noreferrer"'));
   assert.ok(empresasJs.includes('https://app.clickup.com/t/'));
 
-  // 5. Exibe vigência, vencimento e ciclo
+  // 5. Exibe vigência, vencimento e ciclo (com ro.data_vencimento e classeBadge)
   assert.ok(empresasJs.includes('Ciclo'));
   assert.ok(empresasJs.includes('Vencimento:'));
+  assert.ok(empresasJs.includes('calcularVigenciaRo(ro.data_vencimento)'), 'Ficha deve passar ro.data_vencimento para calcularVigenciaRo');
+  assert.ok(!empresasJs.includes('calcularVigenciaRo(ro)'), 'Não deve passar o objeto ro inteiro para calcularVigenciaRo');
+  assert.ok(empresasJs.includes('rotuloSit.classeBadge'), 'Ficha deve utilizar a propriedade classeBadge retornada por obterRotuloSituacao');
+  assert.ok(!empresasJs.includes('rotuloSit.badgeClass'), 'Não deve referenciar badgeClass inexistente');
+  assert.ok(empresasJs.includes("'Vencida':"), 'Deve mapear classe para Vencida');
+  assert.ok(empresasJs.includes("'Vigente':"), 'Deve mapear classe para Vigente');
+  assert.ok(empresasJs.includes("'Sem prazo':"), 'Deve mapear classe para Sem prazo');
 
   // 6. Resultado parcial (> 200) sinalizado com banner e nunca afirmado como lista completa
   assert.ok(empresasJs.includes('listagem parcial da conta'));
