@@ -716,6 +716,10 @@ async function consultarStatusRosMcp(args: Record<string, unknown>) {
   const cliente = typeof args.cliente === "string" ? args.cliente.trim() : undefined;
   const situacao = typeof args.situacao === "string" ? args.situacao : undefined;
   const apenasVencendo = args.apenas_vencendo === true;
+  const numeroRo = typeof args.numero_ro === "string" ? args.numero_ro.trim() : undefined;
+  const oportunidade = typeof args.oportunidade === "string" ? args.oportunidade.trim() : undefined;
+  const responsavel = typeof args.responsavel === "string" ? args.responsavel.trim() : undefined;
+  const incluirHistoricas = args.incluir_historicas === true;
   const pagina = args.pagina === undefined ? 1 : Number(args.pagina);
   const limite = args.limite === undefined ? 50 : Number(args.limite);
   const hoje = hojeEmSaoPaulo();
@@ -726,6 +730,10 @@ async function consultarStatusRosMcp(args: Record<string, unknown>) {
     data_inicio: typeof args.data_inicio === "string" ? args.data_inicio : undefined,
     data_fim: typeof args.data_fim === "string" ? args.data_fim : undefined,
     pagina, limite,
+    numero_ro: numeroRo,
+    oportunidade,
+    responsavel,
+    incluir_historicas: incluirHistoricas,
   }, {
     hoje,
     buscarRos: async ({ pagina: paginaBusca, limite: limiteBusca }) => {
@@ -738,8 +746,11 @@ async function consultarStatusRosMcp(args: Record<string, unknown>) {
       `, { count: "exact" });
       if (fabricante) consulta = consulta.ilike("fabricantes_ro.nome", fabricante);
       if (situacao) consulta = consulta.eq("situacao", situacao);
-      else consulta = consulta.in("situacao", ["Backoffice", "Aguardando aprovação", "Aprovada"]);
+      else if (!incluirHistoricas) consulta = consulta.in("situacao", ["Backoffice", "Aguardando aprovação", "Aprovada"]);
       if (conta) consulta = consulta.eq("negocios.conta_id", conta.id);
+      if (numeroRo) consulta = consulta.ilike("numero_ro", `%${numeroRo}%`);
+      if (responsavel) consulta = consulta.eq("responsavel_operacional_clickup_id", responsavel);
+      if (oportunidade) consulta = consulta.ilike("negocios.nome", `%${oportunidade}%`);
       if (apenasVencendo) {
         consulta = consulta.gte("data_vencimento", hoje).lte("data_vencimento", adicionarDias(hoje, 15));
       }

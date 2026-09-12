@@ -6,8 +6,9 @@
     params.set('pagina', String(Math.max(1, Number(page) || 1)));
     params.set('limite', String(Math.max(1, Math.min(200, Number(limit) || 50))));
     for (const chave of [
-      'negocio_id', 'fabricante_id', 'situacao', 'responsavel',
+      'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
       'vence_ate', 'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
+      'data_inicio', 'data_fim',
     ]) {
       const valor = filters[chave];
       if (valor === undefined || valor === null) continue;
@@ -636,6 +637,115 @@
     return payload?.data || payload;
   };
 
+
+  const obterPeriodoMesCivilAtual = (dataRef) => {
+    const hoje = dataRef ? String(dataRef).slice(0, 10) : obterHojeSaoPaulo();
+    const inicio = `${hoje.slice(0, 7)}-01`;
+    return { data_inicio: inicio, data_fim: hoje };
+  };
+
+  const validarPeriodoEvidencias = (dataInicio, dataFim) => {
+    const padrao = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dataInicio || !padrao.test(String(dataInicio).trim())) {
+      throw new Error('Data inicial inválida: use o formato YYYY-MM-DD.');
+    }
+    if (!dataFim || !padrao.test(String(dataFim).trim())) {
+      throw new Error('Data final inválida: use o formato YYYY-MM-DD.');
+    }
+    if (String(dataInicio).trim() > String(dataFim).trim()) {
+      throw new Error('Período inválido: a data inicial é posterior à data final.');
+    }
+    return { data_inicio: String(dataInicio).trim(), data_fim: String(dataFim).trim() };
+  };
+
+  const fetchEvidenciasRos = async (filters = {}, page = 1, limit = 50, options = {}) => {
+    const fetchFn = options.fetchImpl || global.fetch;
+    if (typeof fetchFn !== 'function') throw new Error('Ambiente sem suporte a fetch disponível.');
+    const query = montarQueryRos(filters, page, limit);
+    const baseUrl = options.baseUrl || '/api/ros';
+    const getHeadersFn = options.getSupabaseHeaders || options.getHeaders;
+    const headers = typeof getHeadersFn === 'function' ? getHeadersFn() : {};
+    let response;
+    try {
+      response = await fetchFn(`${baseUrl}/evidencias?${query.toString()}`, { method: 'GET', headers });
+    } catch (error) {
+      throw new Error(`Falha de rede ao consultar evidências de R.Os: ${error?.message || error}`);
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    if (!response.ok) throw new Error(traduzirErroApiRos(response.status, payload, 'Erro ao carregar evidências de R.Os.'));
+    return {
+      data: Array.isArray(payload?.data) ? payload.data : [],
+      total: typeof payload?.total === 'number' ? payload.total : (payload?.data?.length || 0),
+      total_sem_atualizacao: typeof payload?.total_sem_atualizacao === 'number' ? payload.total_sem_atualizacao : 0,
+      total_com_atualizacao: typeof payload?.total_com_atualizacao === 'number' ? payload.total_com_atualizacao : 0,
+      cobertura_evidencias_completa: payload?.cobertura_evidencias_completa ?? true,
+      data_inicio: payload?.data_inicio || filters.data_inicio || '',
+      data_fim: payload?.data_fim || filters.data_fim || '',
+      pagina: typeof payload?.pagina === 'number' ? payload.pagina : page,
+      limite: typeof payload?.limite === 'number' ? payload.limite : limit,
+      total_paginas: typeof payload?.total_paginas === 'number' ? payload.total_paginas : 1,
+    };
+  };
+
+  const formatarRelatorioAtualizacaoFabricante = (dadosEvidencias, nomeFabricante = '') => {
+    const fabric = nomeFabricante ? nomeFabricante.trim() : (dadosEvidencias?.data?.[0]?.fabricante || 'Fabricante');
+    const inicio = dadosEvidencias?.data_inicio ? formatarDataCivil(dadosEvidencias.data_inicio) : '—';
+    const fim = dadosEvidencias?.data_fim ? formatarDataCivil(dadosEvidencias.data_fim) : '—';
+    const total = dadosEvidencias?.total ?? dadosEvidencias?.data?.length ?? 0;
+    const semAtiv = dadosEvidencias?.total_sem_atualizacao ?? 0;
+    const cobertura = dadosEvidencias?.cobertura_evidencias_completa ? 'Completa' : 'Parcial (algumas fontes com pendência de verificação)';
+
+    let texto = `# Atualização Comercial de R.Os — ${fabric}\n`;
+    texto += `Período analisado: ${inicio} a ${fim}\n`;
+    texto += `Total de R.Os: ${total} | Sem atualização no período: ${semAtiv} | Cobertura: ${cobertura}\n`;
+    texto += `Gerado a partir das evidências registradas no CRM Suprimática.\n\n`;
+    texto += `---\n\n`;
+
+    const ros = dadosEvidencias?.data || [];
+    if (ros.length === 0) {
+      texto += `Nenhum registro de oportunidade localizado para este fabricante no período.\n`;
+      return texto;
+    }
+
+    ros.forEach((ro, index) => {
+      const numRo = ro.numero_ro || 'Aguardando número';
+      const cliente = ro.cliente || 'Cliente não informado';
+      const oport = ro.oportunidade || 'Oportunidade não informada';
+      const venc = ro.data_vencimento ? `${formatarDataCivil(ro.data_vencimento)} (${ro.vigencia || '—'})` : 'Sem prazo';
+
+      texto += `### ${index + 1}. ${cliente} — ${oport}\n`;
+      texto += `• R.O.: ${numRo} | Situação: ${ro.situacao} | Vencimento: ${venc}\n`;
+
+      if (ro.atualizacao_no_periodo) {
+        const ativ = ro.atualizacao_no_periodo;
+        const autor = ativ.autor_nome || 'Autor comercial';
+        const dataAtiv = ativ.data ? formatarDataCivil(ativ.data) : 'Data não informada';
+        const textoEvid = (ativ.texto || '').replace(/\s+/g, ' ').trim();
+        texto += `• Atualização no período: "${textoEvid}" (por ${autor} em ${dataAtiv})\n`;
+      } else {
+        if (ro.ultima_atividade_humana) {
+          const ult = ro.ultima_atividade_humana;
+          const autorUlt = ult.autor_nome || 'Autor comercial';
+          const dataUlt = ult.data ? formatarDataCivil(ult.data) : 'Data não informada';
+          const textoUlt = (ult.texto || '').replace(/\s+/g, ' ').trim();
+          texto += `• Sem atualização humana no período selecionado.\n`;
+          texto += `  Última atividade anterior registrada: "${textoUlt}" (por ${autorUlt} em ${dataUlt})\n`;
+        } else {
+          texto += `• Sem atualização humana registrada no período e sem histórico anterior localizado.\n`;
+        }
+      }
+
+      if (Array.isArray(ro.alertas) && ro.alertas.length > 0) {
+        texto += `• Alertas: ${ro.alertas.join('; ')}\n`;
+      }
+
+      texto += `\n`;
+    });
+
+    return texto.trim();
+  };
+
   global.RosUiDomain = {
     montarQueryRos,
     traduzirErroApiRos,
@@ -660,6 +770,10 @@
     desambiguarOportunidade,
     criarRegistroOportunidade,
     resolverNegocioCrmParaRo,
+    obterPeriodoMesCivilAtual,
+    validarPeriodoEvidencias,
+    fetchEvidenciasRos,
+    formatarRelatorioAtualizacaoFabricante,
   };
 
 })(globalThis);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const lerArquivo = (caminho) => fs.readFileSync(new URL('../' + caminho, import.meta.url), 'utf8');
-import { interpretarComando, interpretarConsulta, calcularResumoAgregadoDominio, predicadoIlikePostgrest } from '../supabase/functions/api-ros/dominio.ts';
+import { interpretarComando, interpretarConsulta, interpretarConsultaEvidencias, enriquecerRosComEvidencias, calcularResumoAgregadoDominio, predicadoIlikePostgrest } from '../supabase/functions/api-ros/dominio.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 
@@ -428,4 +428,162 @@ test('migration 20260912f valida substituição com renovação pendente e múlt
   // Verifica idempotência por request_id
   assert.match(migration, /pg_advisory_xact_lock/);
   assert.match(migration, /Substituição iniciada/);
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task 8: Testes de Evidências Humanas no Backend de R.Os
+// ─────────────────────────────────────────────────────────────────────────
+
+test('interpretarConsultaEvidencias valida período, limites e padrão de data civil (Task 8)', () => {
+  const pValido = new URLSearchParams({
+    data_inicio: '2026-09-01',
+    data_fim: '2026-09-12',
+    pagina: '2',
+    limite: '25',
+    fabricante: 'Dell',
+  });
+  const res = interpretarConsultaEvidencias(pValido, '2026-09-12');
+  assert.equal(res.data_inicio, '2026-09-01');
+  assert.equal(res.data_fim, '2026-09-12');
+  assert.equal(res.pagina, 2);
+  assert.equal(res.limite, 25);
+  assert.equal(res.fabricante, 'Dell');
+
+  // Padrão de período quando omitido: início do mês até hoje
+  const pVazio = new URLSearchParams({});
+  const resPadrao = interpretarConsultaEvidencias(pVazio, '2026-09-12');
+  assert.equal(resPadrao.data_inicio, '2026-09-01');
+  assert.equal(resPadrao.data_fim, '2026-09-12');
+  assert.equal(resPadrao.pagina, 1);
+  assert.equal(resPadrao.limite, 50);
+
+  // Início posterior ao fim é rejeitado
+  const pInvertido = new URLSearchParams({ data_inicio: '2026-09-15', data_fim: '2026-09-10' });
+  assert.throws(() => interpretarConsultaEvidencias(pInvertido, '2026-09-12'), /período/i);
+
+  // Datas malformadas são rejeitadas
+  const pDataInvalida = new URLSearchParams({ data_inicio: 'data-errada' });
+  assert.throws(() => interpretarConsultaEvidencias(pDataInvalida, '2026-09-12'), /data_inicio/i);
+});
+
+test('duas R.Os da mesma oportunidade utilizam a mesma coleta de evidências (Task 8)', () => {
+  const ro1 = {
+    id: 'ro-1',
+    numero_ro: 'DELL-01',
+    situacao: 'Aprovada',
+    data_vencimento: '2026-10-30',
+    negocios: { id: 'neg-1', nome: 'Projeto Servidores', clickup_negocio_id: 'task-compartilhada', contas: { nome: 'Empresa Alfa' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+  const ro2 = {
+    id: 'ro-2',
+    numero_ro: 'DELL-02',
+    situacao: 'Aguardando aprovação',
+    data_vencimento: null,
+    negocios: { id: 'neg-1', nome: 'Projeto Servidores', clickup_negocio_id: 'task-compartilhada', contas: { nome: 'Empresa Alfa' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const mapa = new Map();
+  mapa.set('task-compartilhada', {
+    evidencias: [{ id: 'ev-1', autor_nome: 'Fabio', data: '2026-09-10T14:00:00Z', texto: 'Reunião técnica realizada.' }],
+    cobertura_banco_completa: true,
+    cobertura_clickup_completa: true,
+  });
+
+  const resultado = enriquecerRosComEvidencias([ro1, ro2], mapa, '2026-09-01', '2026-09-12', '2026-09-12');
+
+  assert.equal(resultado.ros.length, 2);
+  assert.equal(resultado.total_com_atualizacao, 2);
+  assert.equal(resultado.total_sem_atualizacao, 0);
+  assert.equal(resultado.cobertura_evidencias_completa, true);
+
+  // Ambas apontam para a mesma evidência
+  assert.equal(resultado.ros[0].atualizacao_no_periodo.id, 'ev-1');
+  assert.equal(resultado.ros[1].atualizacao_no_periodo.id, 'ev-1');
+  assert.equal(resultado.ros[0].oportunidade_clickup_id, 'task-compartilhada');
+  assert.equal(resultado.ros[1].oportunidade_clickup_id, 'task-compartilhada');
+});
+
+test('ausência de atividade no mês mostra a última atividade anterior com alerta explícito (Task 8)', () => {
+  const ro = {
+    id: 'ro-sem-atualizacao',
+    numero_ro: 'DELL-03',
+    situacao: 'Aprovada',
+    data_vencimento: '2026-11-15',
+    negocios: { id: 'neg-2', nome: 'Projeto Storage', clickup_negocio_id: 'task-antiga', contas: { nome: 'Beta SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const mapa = new Map();
+  mapa.set('task-antiga', {
+    evidencias: [{ id: 'ev-antiga', autor_nome: 'Carlos', data: '2026-08-20T10:00:00Z', texto: 'Validação de escopo com cliente.' }],
+    cobertura_banco_completa: true,
+    cobertura_clickup_completa: true,
+  });
+
+  const resultado = enriquecerRosComEvidencias([ro], mapa, '2026-09-01', '2026-09-12', '2026-09-12');
+
+  assert.equal(resultado.ros[0].atualizacao_no_periodo, null);
+  assert.equal(resultado.ros[0].ultima_atividade_humana.id, 'ev-antiga');
+  assert.equal(resultado.total_sem_atualizacao, 1);
+  assert.equal(resultado.total_com_atualizacao, 0);
+
+  // Alerta explícito obrigatório
+  assert.ok(resultado.ros[0].alertas.some((a) => a.includes('Sem atualização humana neste mês')));
+  assert.ok(resultado.ros[0].alertas.some((a) => a.includes('2026-08-20')));
+});
+
+test('falha em uma oportunidade marca cobertura parcial sem derrubar as demais (Task 8)', () => {
+  const roSucesso = {
+    id: 'ro-ok',
+    numero_ro: 'DELL-OK',
+    situacao: 'Aprovada',
+    negocios: { id: 'neg-ok', clickup_negocio_id: 'task-ok', contas: { nome: 'OK SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+  const roFalha = {
+    id: 'ro-erro',
+    numero_ro: 'DELL-ERR',
+    situacao: 'Aprovada',
+    negocios: { id: 'neg-erro', clickup_negocio_id: 'task-erro', contas: { nome: 'Erro SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const mapa = new Map();
+  mapa.set('task-ok', {
+    evidencias: [{ id: 'ev-ok', data: '2026-09-05T10:00:00Z', texto: 'Alinhamento ok.' }],
+    cobertura_banco_completa: true,
+    cobertura_clickup_completa: true,
+  });
+  mapa.set('task-erro', new Error('Falha simulada na API do ClickUp'));
+
+  const resultado = enriquecerRosComEvidencias([roSucesso, roFalha], mapa, '2026-09-01', '2026-09-12', '2026-09-12');
+
+  // Cobertura global é marcada como incompleta
+  assert.equal(resultado.cobertura_evidencias_completa, false);
+  assert.equal(resultado.ros.length, 2);
+
+  // A R.O. com sucesso processa normalmente
+  assert.equal(resultado.ros[0].atualizacao_no_periodo.id, 'ev-ok');
+
+  // A R.O. com erro ganha alerta sem derrubar a consulta
+  assert.ok(resultado.ros[1].alertas.some((a) => a.includes('Não foi possível consultar as evidências humanas')));
+});
+
+test('api-ros index.ts implementa a rota /evidencias com validação de usuário e sem SECURITY DEFINER (Task 8)', () => {
+  const indexTs = lerArquivo('supabase/functions/api-ros/index.ts');
+
+  // Rota evidencias está registrada
+  assert.ok(indexTs.includes('tail === "evidencias"'));
+  assert.ok(indexTs.includes('coletarEvidenciasHumanas'));
+  assert.ok(indexTs.includes('enriquecerRosComEvidencias'));
+
+  // Não usa SECURITY DEFINER
+  assert.doesNotMatch(indexTs, /SECURITY DEFINER/i);
+
+  // Autenticação obrigatória antes de processar GET
+  assert.ok(indexTs.includes('validarAutor(token'));
+  assert.ok(indexTs.includes('usuarios_clickup_registrados'));
 });

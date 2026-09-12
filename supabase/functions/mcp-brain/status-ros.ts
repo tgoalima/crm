@@ -1,4 +1,4 @@
-type Args = {
+export type ArgsStatusRos = {
   fabricante?: string;
   cliente?: string;
   situacao?: string;
@@ -7,7 +7,13 @@ type Args = {
   data_fim?: string;
   pagina?: number;
   limite?: number;
+  numero_ro?: string;
+  oportunidade?: string;
+  responsavel?: string;
+  incluir_historicas?: boolean;
 };
+
+type Args = ArgsStatusRos;
 
 type Dependencias = {
   hoje: string;

@@ -1351,3 +1351,174 @@ test('Task 7 - navegar entre anterior e sucessora troca o registro exibido sem p
   assert.ok(appJs.includes('const [roNavegada, setRoNavegada] = useState(null);'));
   assert.ok(appJs.includes('roNavegada?.id === selectedId ? roNavegada : null'));
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task 8: Testes de Evidências Humanas e Preparação por Fabricante na UI
+// ─────────────────────────────────────────────────────────────────────────
+
+test('Task 8 - obterPeriodoMesCivilAtual gera início do mês e data de hoje em SP', () => {
+  const { obterPeriodoMesCivilAtual } = carregarDominioRos();
+  const periodo = obterPeriodoMesCivilAtual('2026-09-12');
+  assert.equal(periodo.data_inicio, '2026-09-01');
+  assert.equal(periodo.data_fim, '2026-09-12');
+});
+
+test('Task 8 - validarPeriodoEvidencias aceita período válido e rejeita invertido ou inválido', () => {
+  const { validarPeriodoEvidencias } = carregarDominioRos();
+  const res = validarPeriodoEvidencias('2026-09-01', '2026-09-30');
+  assert.equal(res.data_inicio, '2026-09-01');
+  assert.equal(res.data_fim, '2026-09-30');
+
+  assert.throws(() => validarPeriodoEvidencias('2026-09-30', '2026-09-01'), /período/i);
+  assert.throws(() => validarPeriodoEvidencias('data-invalida', '2026-09-30'), /data inicial/i);
+});
+
+test('Task 8 - fetchEvidenciasRos consulta rota autenticada com parâmetros de período e fabricante', async () => {
+  let urlChamada = null;
+  let headersChamados = null;
+
+  const mockFetch = async (url, init) => {
+    urlChamada = url;
+    headersChamados = init?.headers;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [{ id: 'ro-1', numero_ro: 'D-10', cliente: 'Cliente X' }],
+        total: 1,
+        total_sem_atualizacao: 0,
+        total_com_atualizacao: 1,
+        cobertura_evidencias_completa: true,
+        data_inicio: '2026-09-01',
+        data_fim: '2026-09-12',
+      }),
+    };
+  };
+
+  const { fetchEvidenciasRos } = carregarDominioRos({ fetchImpl: mockFetch });
+  const resultado = await fetchEvidenciasRos(
+    { fabricante_id: 'fab-dell', data_inicio: '2026-09-01', data_fim: '2026-09-12' },
+    1,
+    50,
+    { getHeaders: () => ({ Authorization: 'Bearer token-teste' }) },
+  );
+
+  assert.ok(urlChamada.includes('/api/ros/evidencias'));
+  assert.ok(urlChamada.includes('fabricante_id=fab-dell'));
+  assert.ok(urlChamada.includes('data_inicio=2026-09-01'));
+  assert.ok(urlChamada.includes('data_fim=2026-09-12'));
+  assert.equal(headersChamados.Authorization, 'Bearer token-teste');
+  assert.equal(resultado.total, 1);
+  assert.equal(resultado.total_com_atualizacao, 1);
+  assert.equal(resultado.cobertura_evidencias_completa, true);
+});
+
+test('Task 8 - fetchEvidenciasRos traduz erro 403, 500 e falha de rede sem ocultar detalhes', async () => {
+  const mockFetchErro = async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({ error: 'Usuário não autorizado' }),
+  });
+  const { fetchEvidenciasRos } = carregarDominioRos({ fetchImpl: mockFetchErro });
+  await assert.rejects(
+    fetchEvidenciasRos({}, 1, 50),
+    /autorização|Acesso negado/i,
+  );
+});
+
+test('Task 8 - formatarRelatorioAtualizacaoFabricante formata dados reais e alerta sem atualização', () => {
+  const { formatarRelatorioAtualizacaoFabricante } = carregarDominioRos();
+  const dados = {
+    data: [
+      {
+        numero_ro: 'RO-DELL-100',
+        cliente: 'Empresa Alpha',
+        oportunidade: 'Modernização Datacenter',
+        situacao: 'Aprovada',
+        data_vencimento: '2026-10-15',
+        vigencia: 'Vigente',
+        atualizacao_no_periodo: {
+          autor_nome: 'Thiago',
+          data: '2026-09-10T15:00:00Z',
+          texto: 'Cliente confirmou alinhamento da proposta técnica.',
+        },
+      },
+      {
+        numero_ro: null,
+        cliente: 'Beta Tech',
+        oportunidade: 'Renovação Storage',
+        situacao: 'Aguardando aprovação',
+        data_vencimento: null,
+        vigencia: 'Sem prazo',
+        atualizacao_no_periodo: null,
+        ultima_atividade_humana: {
+          autor_nome: 'Marcos',
+          data: '2026-08-15T11:00:00Z',
+          texto: 'Envio de documentação preliminar.',
+        },
+        alertas: ['Anexo não interpretado'],
+      },
+    ],
+    data_inicio: '2026-09-01',
+    data_fim: '2026-09-12',
+    total: 2,
+    total_sem_atualizacao: 1,
+    total_com_atualizacao: 1,
+    cobertura_evidencias_completa: true,
+  };
+
+  const relatorio = formatarRelatorioAtualizacaoFabricante(dados, 'Dell Technologies');
+
+  // Cabeçalho
+  assert.ok(relatorio.includes('Atualização Comercial de R.Os — Dell Technologies'));
+  assert.ok(relatorio.includes('Total de R.Os: 2'));
+  assert.ok(relatorio.includes('Sem atualização no período: 1'));
+
+  // R.O. 1 com atualização no período
+  assert.ok(relatorio.includes('Empresa Alpha — Modernização Datacenter'));
+  assert.ok(relatorio.includes('RO-DELL-100'));
+  assert.ok(relatorio.includes('Cliente confirmou alinhamento'));
+
+  // R.O. 2 sem atualização no período com última anterior e alertas
+  assert.ok(relatorio.includes('Beta Tech — Renovação Storage'));
+  assert.ok(relatorio.includes('Aguardando número'));
+  assert.ok(relatorio.includes('Sem atualização humana no período selecionado.'));
+  assert.ok(relatorio.includes('Envio de documentação preliminar.'));
+  assert.ok(relatorio.includes('Anexo não interpretado'));
+});
+
+test('Task 8 - app.js remove placeholder reservado e inclui card real de evidências humanas', () => {
+  const appJs = lerArquivo('app.js');
+
+  // Placeholder da Task 8 foi completamente removido
+  assert.equal(appJs.includes('Disponível após integração de evidências'), false, 'Não deve mais conter texto de placeholder reservado');
+  assert.equal(appJs.includes('Integração ClickUp Brain (Task 8)'), false, 'Não deve mais conter label de integração reservada');
+
+  // Card real está presente com estados e contagem
+  assert.ok(appJs.includes('sem atualização no período'));
+  assert.ok(appJs.includes('Calculando...'));
+  assert.ok(appJs.includes('Indisponível'));
+  assert.ok(appJs.includes('parcial'));
+  assert.ok(appJs.includes('fetchEvidenciasRos'));
+});
+
+test('Task 8 - app.js inclui filtros de período e ação condicional Preparar atualização por fabricante', () => {
+  const appJs = lerArquivo('app.js');
+
+  // Filtros de período
+  assert.ok(appJs.includes('filtro-data-inicio'));
+  assert.ok(appJs.includes('filtro-data-fim'));
+  assert.ok(appJs.includes('Período Início'));
+  assert.ok(appJs.includes('Período Fim'));
+
+  // Botão condicional
+  assert.ok(appJs.includes('filters.fabricante_id'));
+  assert.ok(appJs.includes('btn-preparar-atualizacao-fabricante'));
+  assert.ok(appJs.includes('Preparar atualização por fabricante'));
+
+  // Modal de atualização
+  assert.ok(appJs.includes('function AtualizacaoFabricanteModal'));
+  assert.ok(appJs.includes('Copiar relatório'));
+  assert.ok(appJs.includes('Sem atualização humana neste mês'));
+});
