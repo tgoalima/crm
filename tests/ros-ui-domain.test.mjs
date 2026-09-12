@@ -1670,3 +1670,16 @@ test('App não acessa showToast em zona morta temporal ao inicializar callbacks 
   );
   assert.ok(!appJs.includes('const showToast = ('), 'showToast não pode ser const declarada após os callbacks de R.O.');
 });
+
+test('Painel de R.Os usa superfícies escuras válidas e inicia sem ocupar altura excedente', () => {
+  const appJs = lerArquivo('app.js');
+  const inicio = appJs.indexOf('function RegistrosOportunidadeView(');
+  const fim = appJs.indexOf('function App() {', inicio);
+  const painelRos = appJs.slice(inicio, fim);
+
+  assert.ok(inicio >= 0 && fim > inicio, 'O painel de R.Os precisa estar isolado para revisão visual');
+  assert.ok(painelRos.includes('w-full flex-none'), 'O painel deve iniciar no topo do conteúdo sem disputar altura livre do iframe');
+  assert.ok(painelRos.includes('dark:bg-slate-800'), 'Cartões e superfícies de R.Os devem ter fundo escuro válido');
+  assert.ok(!painelRos.includes('dark:bg-slate-850'), 'slate-850 não pertence à paleta Tailwind e mantém superfícies brancas no dark mode');
+  assert.ok(!painelRos.includes('dark:bg-slate-750'), 'slate-750 não pertence à paleta Tailwind e mantém controles claros no dark mode');
+});
