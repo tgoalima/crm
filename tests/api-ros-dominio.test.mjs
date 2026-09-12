@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const lerArquivo = (caminho) => fs.readFileSync(new URL('../' + caminho, import.meta.url), 'utf8');
 import { interpretarComando, interpretarConsulta, interpretarConsultaEvidencias, enriquecerRosComEvidencias, calcularResumoAgregadoDominio, predicadoIlikePostgrest } from '../supabase/functions/api-ros/dominio.ts';
+import { selecionarEvidenciasHumanas } from '../supabase/functions/mcp-brain/evidencias-humanas.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 
@@ -586,4 +587,208 @@ test('api-ros index.ts implementa a rota /evidencias com validação de usuário
   // Autenticação obrigatória antes de processar GET
   assert.ok(indexTs.includes('validarAutor(token'));
   assert.ok(indexTs.includes('usuarios_clickup_registrados'));
+});
+
+
+test('GET /api/ros/evidencias com data_inicio não passa por interpretarConsulta e esta rejeita data_inicio/data_fim (Task 8)', () => {
+  const indexTs = lerArquivo('supabase/functions/api-ros/index.ts');
+
+  // Comprova que tail === "evidencias" é interceptado ANTES de qualquer chamada a interpretarConsulta
+  const idxEvidencias = indexTs.indexOf('tail === "evidencias"');
+  const idxInterpretarConsulta = indexTs.indexOf('interpretarConsulta(url.searchParams)');
+
+  assert.ok(idxEvidencias > 0, 'tail === "evidencias" deve estar presente');
+  assert.ok(idxInterpretarConsulta > 0, 'interpretarConsulta(url.searchParams) deve estar presente');
+  assert.ok(idxEvidencias < idxInterpretarConsulta, 'tail === "evidencias" DEVE ser tratado antes de interpretarConsulta');
+
+  // Se interpretarConsulta recebesse data_inicio ou data_fim, rejeitaria com erro 400
+  const paramsInicio = new URLSearchParams({ data_inicio: '2026-09-01' });
+  assert.throws(() => interpretarConsulta(paramsInicio), /não permitido.*data_inicio/);
+
+  const paramsFim = new URLSearchParams({ data_fim: '2026-09-12' });
+  assert.throws(() => interpretarConsulta(paramsFim), /não permitido.*data_fim/);
+
+  // Já interpretarConsultaEvidencias processa com sucesso
+  const paramsEvidencias = new URLSearchParams({ data_inicio: '2026-09-01', data_fim: '2026-09-12' });
+  const parsed = interpretarConsultaEvidencias(paramsEvidencias, '2026-09-12');
+  assert.equal(parsed.data_inicio, '2026-09-01');
+  assert.equal(parsed.data_fim, '2026-09-12');
+});
+
+test('interpretarConsultaEvidencias rejeita parâmetros desconhecidos e valida UUIDs (Task 8)', () => {
+  // Parâmetro desconhecido é rejeitado
+  const pDesconhecido = new URLSearchParams({ parametro_estranho: 'valor' });
+  assert.throws(() => interpretarConsultaEvidencias(pDesconhecido, '2026-09-12'), /inválido.*parametro_estranho/);
+
+  // negocio_id inválido (não UUID) é rejeitado
+  const pNegocioInvalido = new URLSearchParams({ negocio_id: 'not-a-uuid' });
+  assert.throws(() => interpretarConsultaEvidencias(pNegocioInvalido, '2026-09-12'), /negocio_id.*inválido/);
+
+  // fabricante_id inválido (não UUID) é rejeitado
+  const pFabricanteInvalido = new URLSearchParams({ fabricante_id: '12345' });
+  assert.throws(() => interpretarConsultaEvidencias(pFabricanteInvalido, '2026-09-12'), /fabricante_id.*inválido/);
+
+  // UUIDs válidos são aceitos
+  const pValido = new URLSearchParams({
+    negocio_id: uuid,
+    fabricante_id: uuid,
+    situacao: 'Aprovada',
+    data_inicio: '2026-09-01',
+    data_fim: '2026-09-12',
+  });
+  const res = interpretarConsultaEvidencias(pValido, '2026-09-12');
+  assert.equal(res.negocio_id, uuid);
+  assert.equal(res.fabricante_id, uuid);
+  assert.equal(res.situacao, 'Aprovada');
+});
+
+test('semântica estrita: falha, autor não configurado e oportunidade sem ClickUp entram em cobertura desconhecida, nunca em ausência (Task 8)', () => {
+  const roSemClickUp = {
+    id: 'ro-sem-clickup',
+    numero_ro: 'DELL-NO-CU',
+    situacao: 'Aprovada',
+    negocios: { id: 'neg-1', clickup_negocio_id: null, contas: { nome: 'Alpha SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const roFalha = {
+    id: 'ro-falha',
+    numero_ro: 'DELL-FAIL',
+    situacao: 'Aprovada',
+    negocios: { id: 'neg-2', clickup_negocio_id: 'task-falha', contas: { nome: 'Beta SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const roAutorInvalido = {
+    id: 'ro-autor-inv',
+    numero_ro: 'DELL-AUTOR',
+    situacao: 'Aprovada',
+    negocios: { id: 'neg-3', clickup_negocio_id: 'task-autor-inv', contas: { nome: 'Gama SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const mapa = new Map();
+  // Falha na chamada
+  mapa.set('task-falha', new Error('Timeout ao consultar ClickUp'));
+  // Classificação de autor não configurada / inválida
+  mapa.set('task-autor-inv', {
+    evidencias: [],
+    cobertura_banco_completa: false,
+    cobertura_clickup_completa: false,
+    autor_classificacao_invalida: true,
+  });
+
+  const resultado = enriquecerRosComEvidencias(
+    [roSemClickUp, roFalha, roAutorInvalido],
+    mapa,
+    '2026-09-01',
+    '2026-09-12',
+    '2026-09-12'
+  );
+
+  // NENHUMA dessas pode entrar em total_sem_atualizacao_confirmada
+  assert.equal(resultado.total_sem_atualizacao_confirmada, 0, 'Não pode contabilizar ausência quando cobertura é desconhecida');
+  assert.equal(resultado.total_cobertura_desconhecida, 3, 'Todas as 3 devem entrar em total_cobertura_desconhecida');
+  assert.equal(resultado.cobertura_evidencias_completa, false);
+
+  assert.equal(resultado.ros[0].status_evidencia, 'cobertura_desconhecida');
+  assert.equal(resultado.ros[1].status_evidencia, 'cobertura_desconhecida');
+  assert.equal(resultado.ros[2].status_evidencia, 'cobertura_desconhecida');
+
+  // Alertas individuais são preservados
+  assert.ok(resultado.ros[0].alertas.some(a => a.includes('sem identificador ClickUp')));
+  assert.ok(resultado.ros[1].alertas.some(a => a.includes('Não foi possível consultar as evidências')));
+  assert.ok(resultado.ros[2].alertas.some(a => a.includes('Classificação de autoria não configurada ou inválida')));
+});
+
+test('ausência de atualização humana só é contabilizada quando a cobertura da oportunidade está confirmada (Task 8)', () => {
+  const roConfirmadaSemAtualizacao = {
+    id: 'ro-confirmada-sem-atv',
+    numero_ro: 'DELL-OK-VAZIA',
+    situacao: 'Aprovada',
+    negocios: { id: 'neg-ok', clickup_negocio_id: 'task-ok', contas: { nome: 'Delta SA' } },
+    fabricantes_ro: { nome: 'Dell' },
+  };
+
+  const mapa = new Map();
+  mapa.set('task-ok', {
+    evidencias: [],
+    cobertura_banco_completa: true,
+    cobertura_clickup_completa: true,
+  });
+
+  const resultado = enriquecerRosComEvidencias(
+    [roConfirmadaSemAtualizacao],
+    mapa,
+    '2026-09-01',
+    '2026-09-12',
+    '2026-09-12'
+  );
+
+  // Aqui a cobertura está 100% confirmada, portanto é uma ausência confirmada
+  assert.equal(resultado.total_sem_atualizacao_confirmada, 1);
+  assert.equal(resultado.total_cobertura_desconhecida, 0);
+  assert.equal(resultado.cobertura_evidencias_completa, true);
+  assert.equal(resultado.ros[0].status_evidencia, 'sem_atualizacao_confirmada');
+  assert.ok(resultado.ros[0].alertas.some(a => a.includes('Sem atualização humana neste mês')));
+});
+
+test('deduplicação determinística de comentários ClickUp e atividades CRM com exclusão de agentes (Task 8)', () => {
+  const autores = {
+    '101': 'humano',
+    '102': 'agente',
+    '103': 'sistema',
+  };
+
+  const atividades = [
+    // Registro original do CRM com vínculo ao ClickUp
+    {
+      id: 'crm-ativ-1',
+      clickup_comment_id: 'cu-comm-999',
+      autor_clickup_id: '101',
+      autor_nome: 'Thiago Humano',
+      origem: 'crm',
+      data_execucao: '2026-09-10T14:00:00Z',
+      texto: 'Comentário original no CRM.',
+    },
+    // Cópia vinda do ClickUp para o mesmo comentário
+    {
+      id: 'cu_cu-comm-999',
+      clickup_comment_id: 'cu-comm-999',
+      autor_clickup_id: '101',
+      autor_nome: 'Thiago Humano',
+      origem: 'clickup',
+      data_execucao: '2026-09-10T14:00:00Z',
+      texto: 'Comentário replicado do ClickUp.',
+    },
+    // Comentário gerado por IA/Agente
+    {
+      id: 'crm-ativ-2',
+      clickup_comment_id: 'cu-comm-agent',
+      autor_clickup_id: '102',
+      autor_nome: 'ClickUp Brain',
+      origem: 'crm',
+      data_execucao: '2026-09-11T09:00:00Z',
+      texto: 'Resumo automático gerado por agente.',
+    },
+    // Comentário do sistema
+    {
+      id: 'crm-ativ-3',
+      clickup_comment_id: 'cu-comm-sys',
+      autor_clickup_id: '103',
+      autor_nome: 'System Bot',
+      origem: 'crm',
+      data_execucao: '2026-09-11T10:00:00Z',
+      texto: 'Status alterado pelo sistema.',
+    },
+  ];
+
+  const resultado = selecionarEvidenciasHumanas(atividades, autores, 50);
+
+  // Apenas 1 evidência humana aceita (deduplicada e sem agentes/sistema)
+  assert.equal(resultado.evidencias.length, 1);
+  assert.equal(resultado.evidencias[0].clickup_comment_id, 'cu-comm-999');
+  assert.equal(resultado.evidencias[0].id, 'crm-ativ-1', 'Deve preferir o registro canônico local');
+  assert.equal(resultado.excluidas.agente, 1, 'Deve registrar 1 comentário de agente excluído');
+  assert.equal(resultado.excluidas.sistema, 1, 'Deve registrar 1 comentário de sistema excluído');
 });

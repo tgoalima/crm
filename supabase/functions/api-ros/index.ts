@@ -10,6 +10,7 @@ import {
   ErroComando,
 } from "./dominio.ts";
 import { coletarEvidenciasHumanas, lerClassificacaoAutores } from "../mcp-brain/evidencias-humanas.ts";
+import { coletarComentariosClickUp } from "../mcp-brain/comentarios.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -90,32 +91,12 @@ Deno.serve(async (req) => {
     const tail = caminho(url);
 
     if (req.method === "GET") {
-      if (tail && tail !== "resumo" && tail !== "evidencias" && !/^[0-9a-f-]{36}$/i.test(tail)) throw new ErroComando(404, "Rota não encontrada.");
-      const consulta = interpretarConsulta(url.searchParams);
-
-      if (tail === "resumo") {
-        const { data: resumoRpc, error: resumoError } = await supabase.rpc("ro_resumo_agregado", {
-          p_negocio_id: consulta.negocio_id,
-          p_fabricante_id: consulta.fabricante_id,
-          p_situacao: consulta.situacao,
-          p_responsavel: consulta.responsavel,
-          p_vence_ate: consulta.vence_ate,
-          p_cliente: consulta.cliente,
-          p_oportunidade: consulta.oportunidade,
-          p_numero_ro: consulta.numero_ro,
-          p_busca: consulta.busca,
-        });
-
-        if (resumoError || !resumoRpc) {
-          throw new ErroComando(
-            500,
-            `Falha ao calcular resumo agregado de R.Os: ${resumoError?.message || "Sem retorno da RPC"}`,
-          );
-        }
-
-        return json(resumoRpc);
+      if (tail && tail !== "resumo" && tail !== "evidencias" && !/^[0-9a-f-]{36}$/i.test(tail)) {
+        throw new ErroComando(404, "Rota não encontrada.");
       }
 
+      // Rota de Evidências Humanas (Task 8): Tratar antes de interpretarConsulta
+      // para garantir que data_inicio e data_fim nunca sejam passados para interpretarConsulta
       if (tail === "evidencias") {
         const consultaEvidencias = interpretarConsultaEvidencias(url.searchParams);
 
@@ -165,29 +146,50 @@ Deno.serve(async (req) => {
 
         if (erroRos) throw new Error(`Falha ao consultar R.Os para evidências: ${erroRos.message}`);
 
-        // Extrai oportunidades distintas
+        // Extrai oportunidades distintas (reutilização de coleta)
         const tarefasIds = [...new Set((rosBrutas || []).map((r: any) => r.negocios?.clickup_negocio_id).filter(Boolean))];
 
-        let autores: Record<string, any> = {};
+        // Carregar e validar estritamente a classificação de autores.
+        // Ausência ou erro deve tornar a coleta indisponível/parcial explicitamente.
+        let autores: Record<string, any> | null = null;
+        let erroClassificacaoAutores: Error | null = null;
         try {
           autores = lerClassificacaoAutores(Deno.env.get("CRM_AUTORES_CLASSIFICACAO_JSON"));
         } catch (errAutores) {
-          console.warn("[api-ros/evidencias] Aviso na leitura de autores:", errAutores);
-          autores = {};
+          console.warn("[api-ros/evidencias] Classificação de autores ausente ou inválida:", errAutores);
+          erroClassificacaoAutores = errAutores instanceof Error ? errAutores : new Error("Classificação de autores não configurada.");
         }
 
+        const clickupToken = Deno.env.get("CLICKUP_API_TOKEN");
         const mapaEvidencias = new Map<string, any | Error>();
+
         for (let i = 0; i < tarefasIds.length; i += 4) {
           const lote = tarefasIds.slice(i, i + 4);
           await Promise.all(lote.map(async (taskId) => {
+            if (erroClassificacaoAutores || !autores) {
+              mapaEvidencias.set(taskId, erroClassificacaoAutores || new Error("Autores não configurados"));
+              return;
+            }
+
             try {
+              const buscarClickUp = clickupToken ? () => coletarComentariosClickUp(async (cursor) => {
+                const query = cursor ? `?${new URLSearchParams(cursor)}` : "";
+                const resp = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/comment${query}`, {
+                  headers: { Authorization: clickupToken },
+                  signal: AbortSignal.timeout(10000),
+                });
+                if (!resp.ok) throw new Error(`Falha ao consultar comentários ClickUp (${resp.status})`);
+                return resp.json();
+              }) : undefined;
+
               const coleta = await coletarEvidenciasHumanas(async (inicio, fim) => {
                 const { data: ativs, error: errAtivs } = await supabase.from("atividades_negocio")
                   .select("id,clickup_comment_id,autor_clickup_id,autor_nome,origem,data_execucao,texto,anexos")
                   .eq("clickup_negocio_id", taskId).order("id", { ascending: true }).range(inicio, fim);
                 if (errAtivs) throw new Error("Falha ao consultar atividades do CRM.");
                 return ativs || [];
-              }, autores, 50);
+              }, autores, 50, buscarClickUp);
+
               mapaEvidencias.set(taskId, coleta);
             } catch (errColeta) {
               console.warn(`[api-ros/evidencias] Falha na coleta da oportunidade ${taskId}:`, errColeta);
@@ -207,8 +209,10 @@ Deno.serve(async (req) => {
         return json({
           data: resultadoEnriquecido.ros,
           total: totalCount || 0,
-          total_sem_atualizacao: resultadoEnriquecido.total_sem_atualizacao,
+          total_sem_atualizacao_confirmada: resultadoEnriquecido.total_sem_atualizacao_confirmada,
+          total_cobertura_desconhecida: resultadoEnriquecido.total_cobertura_desconhecida,
           total_com_atualizacao: resultadoEnriquecido.total_com_atualizacao,
+          total_sem_atualizacao: resultadoEnriquecido.total_sem_atualizacao_confirmada,
           cobertura_evidencias_completa: resultadoEnriquecido.cobertura_evidencias_completa,
           data_inicio: consultaEvidencias.data_inicio,
           data_fim: consultaEvidencias.data_fim,
@@ -216,6 +220,32 @@ Deno.serve(async (req) => {
           limite: consultaEvidencias.limite,
           total_paginas: Math.ceil((totalCount || 0) / consultaEvidencias.limite),
         });
+      }
+
+      // Rota de Lista e Resumo chamam interpretarConsulta estritamente
+      const consulta = interpretarConsulta(url.searchParams);
+
+      if (tail === "resumo") {
+        const { data: resumoRpc, error: resumoError } = await supabase.rpc("ro_resumo_agregado", {
+          p_negocio_id: consulta.negocio_id,
+          p_fabricante_id: consulta.fabricante_id,
+          p_situacao: consulta.situacao,
+          p_responsavel: consulta.responsavel,
+          p_vence_ate: consulta.vence_ate,
+          p_cliente: consulta.cliente,
+          p_oportunidade: consulta.oportunidade,
+          p_numero_ro: consulta.numero_ro,
+          p_busca: consulta.busca,
+        });
+
+        if (resumoError || !resumoRpc) {
+          throw new ErroComando(
+            500,
+            `Falha ao calcular resumo agregado de R.Os: ${resumoError?.message || "Sem retorno da RPC"}`,
+          );
+        }
+
+        return json(resumoRpc);
       }
 
       let query = supabase.from("registros_oportunidade").select(`

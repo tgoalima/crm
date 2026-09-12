@@ -1473,7 +1473,8 @@ test('Task 8 - formatarRelatorioAtualizacaoFabricante formata dados reais e aler
   // Cabeçalho
   assert.ok(relatorio.includes('Atualização Comercial de R.Os — Dell Technologies'));
   assert.ok(relatorio.includes('Total de R.Os: 2'));
-  assert.ok(relatorio.includes('Sem atualização no período: 1'));
+  assert.ok(relatorio.includes('Sem atualização confirmada: 1'));
+  assert.ok(relatorio.includes('Cobertura desconhecida/parcial: 0'));
 
   // R.O. 1 com atualização no período
   assert.ok(relatorio.includes('Empresa Alpha — Modernização Datacenter'));
@@ -1496,7 +1497,8 @@ test('Task 8 - app.js remove placeholder reservado e inclui card real de evidên
   assert.equal(appJs.includes('Integração ClickUp Brain (Task 8)'), false, 'Não deve mais conter label de integração reservada');
 
   // Card real está presente com estados e contagem
-  assert.ok(appJs.includes('sem atualização no período'));
+  assert.ok(appJs.includes('sem atualização confirmada'));
+  assert.ok(appJs.includes('cobertura desconhecida') || appJs.includes('Cobertura parcial'));
   assert.ok(appJs.includes('Calculando...'));
   assert.ok(appJs.includes('Indisponível'));
   assert.ok(appJs.includes('parcial'));
@@ -1521,4 +1523,43 @@ test('Task 8 - app.js inclui filtros de período e ação condicional Preparar a
   assert.ok(appJs.includes('function AtualizacaoFabricanteModal'));
   assert.ok(appJs.includes('Copiar relatório'));
   assert.ok(appJs.includes('Sem atualização humana neste mês'));
+});
+
+
+test('Task 8 - montarQueryRos NÃO inclui data_inicio/data_fim, enquanto montarQueryEvidenciasRos inclui', () => {
+  const { montarQueryRos, montarQueryEvidenciasRos } = carregarDominioRos();
+
+  const filtrosComDatas = {
+    pagina: 1,
+    limite: 20,
+    situacao: 'Aprovada',
+    data_inicio: '2026-09-01',
+    data_fim: '2026-09-12',
+  };
+
+  // montarQueryRos (usado por /api/ros e /api/ros/resumo) DEVE ignorar data_inicio e data_fim
+  const queryRosStr = montarQueryRos(filtrosComDatas).toString();
+  assert.ok(!queryRosStr.includes('data_inicio'), 'montarQueryRos não pode conter data_inicio');
+  assert.ok(!queryRosStr.includes('data_fim'), 'montarQueryRos não pode conter data_fim');
+  assert.ok(queryRosStr.includes('situacao=Aprovada'));
+
+  // montarQueryEvidenciasRos DEVE serializar data_inicio e data_fim
+  const queryEvidenciasStr = montarQueryEvidenciasRos(filtrosComDatas).toString();
+  assert.ok(queryEvidenciasStr.includes('data_inicio=2026-09-01'), 'montarQueryEvidenciasRos deve incluir data_inicio');
+  assert.ok(queryEvidenciasStr.includes('data_fim=2026-09-12'), 'montarQueryEvidenciasRos deve incluir data_fim');
+  assert.ok(queryEvidenciasStr.includes('situacao=Aprovada'));
+});
+
+test('Task 8 - UI no card e modal exibe cobertura parcial/desconhecida separadamente e nunca chama de sem atualização', () => {
+  const appJs = lerArquivo('app.js');
+
+  // No card: Cobertura parcial e quantidade desconhecida separadas
+  assert.ok(appJs.includes('cobertura parcial ('), 'Card deve informar cobertura parcial');
+  assert.ok(appJs.includes('oportunidade(s) com cobertura desconhecida'));
+  assert.ok(appJs.includes('sem atualização confirmada'), 'Card deve usar terminologia sem atualização confirmada');
+
+  // No modal: Cobertura parcial com contagem de desconhecidas separada de sem atualização
+  assert.ok(appJs.includes('Cobertura Parcial (') || appJs.includes('cobertura parcial ('));
+  assert.ok(appJs.includes('Cobertura desconhecida / parcial:') || appJs.includes('cobertura desconhecida'));
+  assert.ok(appJs.includes('Sem atualização confirmada:'));
 });

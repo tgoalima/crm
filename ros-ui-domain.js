@@ -8,7 +8,6 @@
     for (const chave of [
       'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
       'vence_ate', 'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
-      'data_inicio', 'data_fim',
     ]) {
       const valor = filters[chave];
       if (valor === undefined || valor === null) continue;
@@ -658,10 +657,27 @@
     return { data_inicio: String(dataInicio).trim(), data_fim: String(dataFim).trim() };
   };
 
+  const montarQueryEvidenciasRos = (filters = {}, page = 1, limit = 50) => {
+    const params = new URLSearchParams();
+    params.set('pagina', String(Math.max(1, Number(page) || 1)));
+    params.set('limite', String(Math.max(1, Math.min(200, Number(limit) || 50))));
+    for (const chave of [
+      'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
+      'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
+      'data_inicio', 'data_fim',
+    ]) {
+      const valor = filters[chave];
+      if (valor === undefined || valor === null) continue;
+      const texto = String(valor).trim();
+      if (texto) params.set(chave, texto);
+    }
+    return params;
+  };
+
   const fetchEvidenciasRos = async (filters = {}, page = 1, limit = 50, options = {}) => {
     const fetchFn = options.fetchImpl || global.fetch;
     if (typeof fetchFn !== 'function') throw new Error('Ambiente sem suporte a fetch disponível.');
-    const query = montarQueryRos(filters, page, limit);
+    const query = montarQueryEvidenciasRos(filters, page, limit);
     const baseUrl = options.baseUrl || '/api/ros';
     const getHeadersFn = options.getSupabaseHeaders || options.getHeaders;
     const headers = typeof getHeadersFn === 'function' ? getHeadersFn() : {};
@@ -677,7 +693,11 @@
     return {
       data: Array.isArray(payload?.data) ? payload.data : [],
       total: typeof payload?.total === 'number' ? payload.total : (payload?.data?.length || 0),
-      total_sem_atualizacao: typeof payload?.total_sem_atualizacao === 'number' ? payload.total_sem_atualizacao : 0,
+      total_sem_atualizacao_confirmada: typeof payload?.total_sem_atualizacao_confirmada === 'number'
+        ? payload.total_sem_atualizacao_confirmada
+        : (typeof payload?.total_sem_atualizacao === 'number' ? payload.total_sem_atualizacao : 0),
+      total_cobertura_desconhecida: typeof payload?.total_cobertura_desconhecida === 'number' ? payload.total_cobertura_desconhecida : 0,
+      total_sem_atualizacao: typeof payload?.total_sem_atualizacao_confirmada === 'number' ? payload.total_sem_atualizacao_confirmada : (payload?.total_sem_atualizacao || 0),
       total_com_atualizacao: typeof payload?.total_com_atualizacao === 'number' ? payload.total_com_atualizacao : 0,
       cobertura_evidencias_completa: payload?.cobertura_evidencias_completa ?? true,
       data_inicio: payload?.data_inicio || filters.data_inicio || '',
@@ -693,12 +713,13 @@
     const inicio = dadosEvidencias?.data_inicio ? formatarDataCivil(dadosEvidencias.data_inicio) : '—';
     const fim = dadosEvidencias?.data_fim ? formatarDataCivil(dadosEvidencias.data_fim) : '—';
     const total = dadosEvidencias?.total ?? dadosEvidencias?.data?.length ?? 0;
-    const semAtiv = dadosEvidencias?.total_sem_atualizacao ?? 0;
-    const cobertura = dadosEvidencias?.cobertura_evidencias_completa ? 'Completa' : 'Parcial (algumas fontes com pendência de verificação)';
+    const semAtivConf = dadosEvidencias?.total_sem_atualizacao_confirmada ?? dadosEvidencias?.total_sem_atualizacao ?? 0;
+    const cobDesc = dadosEvidencias?.total_cobertura_desconhecida ?? 0;
+    const cobertura = dadosEvidencias?.cobertura_evidencias_completa ? 'Completa' : `Parcial (${cobDesc} com cobertura pendente de verificação)`;
 
     let texto = `# Atualização Comercial de R.Os — ${fabric}\n`;
     texto += `Período analisado: ${inicio} a ${fim}\n`;
-    texto += `Total de R.Os: ${total} | Sem atualização no período: ${semAtiv} | Cobertura: ${cobertura}\n`;
+    texto += `Total de R.Os: ${total} | Sem atualização confirmada: ${semAtivConf} | Cobertura desconhecida/parcial: ${cobDesc} | Cobertura geral: ${cobertura}\n`;
     texto += `Gerado a partir das evidências registradas no CRM Suprimática.\n\n`;
     texto += `---\n\n`;
 
@@ -772,6 +793,7 @@
     resolverNegocioCrmParaRo,
     obterPeriodoMesCivilAtual,
     validarPeriodoEvidencias,
+    montarQueryEvidenciasRos,
     fetchEvidenciasRos,
     formatarRelatorioAtualizacaoFabricante,
   };

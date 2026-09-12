@@ -293,6 +293,22 @@ export function interpretarConsultaEvidencias(
   params: URLSearchParams,
   hojeSpReferencia?: string,
 ): ConsultaEvidenciasRos {
+  const permitidos = [
+    'negocio_id', 'fabricante_id', 'fabricante', 'situacao', 'responsavel',
+    'numero_ro', 'cliente', 'oportunidade', 'busca', 'q', 'pagina', 'limite',
+    'data_inicio', 'data_fim',
+  ];
+  for (const chave of params.keys()) {
+    if (!permitidos.includes(chave)) {
+      throw new ErroComando(400, `Parâmetro de consulta inválido para evidências: ${chave}.`);
+    }
+  }
+
+  const negocioId = params.get('negocio_id')?.trim();
+  const fabricanteId = params.get('fabricante_id')?.trim();
+  if (negocioId) uuid(negocioId, 'negocio_id');
+  if (fabricanteId) uuid(fabricanteId, 'fabricante_id');
+
   const hoje = hojeSpReferencia || obterHojeSp();
   const rawInicio = params.get('data_inicio')?.trim();
   const rawFim = params.get('data_fim')?.trim();
@@ -317,15 +333,15 @@ export function interpretarConsultaEvidencias(
   }
 
   return {
-    negocio_id: params.get('negocio_id') || null,
-    fabricante_id: params.get('fabricante_id') || null,
-    fabricante: params.get('fabricante') || null,
-    situacao: params.get('situacao') || null,
-    responsavel: params.get('responsavel') || null,
-    numero_ro: params.get('numero_ro') || null,
-    cliente: params.get('cliente') || null,
-    oportunidade: params.get('oportunidade') || null,
-    busca: params.get('busca') || params.get('q') || null,
+    negocio_id: negocioId || null,
+    fabricante_id: fabricanteId || null,
+    fabricante: params.get('fabricante')?.trim() || null,
+    situacao: params.get('situacao')?.trim() || null,
+    responsavel: params.get('responsavel')?.trim() || null,
+    numero_ro: params.get('numero_ro')?.trim() || null,
+    cliente: params.get('cliente')?.trim() || null,
+    oportunidade: params.get('oportunidade')?.trim() || null,
+    busca: params.get('busca')?.trim() || params.get('q')?.trim() || null,
     data_inicio: dataInicio,
     data_fim: dataFim,
     pagina,
@@ -350,23 +366,40 @@ export function enriquecerRosComEvidencias(
   hojeSp: string,
 ) {
   let coberturaCompleta = true;
-  let totalSemAtualizacao = 0;
+  let totalSemAtualizacaoConfirmada = 0;
+  let totalCoberturaDesconhecida = 0;
   let totalComAtualizacao = 0;
 
   const ros = (registros || []).map((ro) => {
     const idNegocio = ro.negocios?.clickup_negocio_id || ro.negocio?.clickup_negocio_id || null;
-    const coleta = idNegocio ? mapaEvidencias.get(idNegocio) : new Error('Oportunidade sem ID ClickUp');
+    const coleta = idNegocio ? mapaEvidencias.get(idNegocio) : null;
     const alertas: string[] = [];
     let lista: any[] = [];
+    let coberturaOportunidadeConfirmada = true;
 
-    if (!idNegocio || coleta instanceof Error || !coleta) {
+    if (!idNegocio) {
       coberturaCompleta = false;
-      alertas.push('Não foi possível consultar as evidências humanas desta oportunidade.');
+      coberturaOportunidadeConfirmada = false;
+      alertas.push('Oportunidade sem identificador ClickUp para consulta de evidências.');
+    } else if (coleta instanceof Error || !coleta) {
+      coberturaCompleta = false;
+      coberturaOportunidadeConfirmada = false;
+      const msgErro = coleta instanceof Error ? coleta.message : 'Falha na consulta';
+      alertas.push(`Não foi possível consultar as evidências humanas desta oportunidade (${msgErro}).`);
     } else {
       lista = coleta.evidencias || [];
-      if (coleta.cobertura_banco_completa === false || coleta.cobertura_clickup_completa === false) {
+      // Se a fonte for apenas banco e foi lida até o fim, a sincronização CRM está completa
+      const bancoIncompleto = coleta.cobertura_banco_completa === false;
+      const clickupIncompleto = typeof coleta.fonte === 'string' && coleta.fonte.includes('ClickUp') && coleta.cobertura_clickup_completa === false;
+      if (bancoIncompleto || clickupIncompleto) {
         coberturaCompleta = false;
+        coberturaOportunidadeConfirmada = false;
         alertas.push('A cobertura das evidências desta oportunidade está incompleta.');
+      }
+      if (coleta.autor_classificacao_invalida) {
+        coberturaCompleta = false;
+        coberturaOportunidadeConfirmada = false;
+        alertas.push('Classificação de autoria não configurada ou inválida no CRM.');
       }
     }
 
@@ -377,15 +410,22 @@ export function enriquecerRosComEvidencias(
 
     const ultima = lista[0] || null;
 
+    let statusEvidencia: 'com_atualizacao' | 'sem_atualizacao_confirmada' | 'cobertura_desconhecida' = 'cobertura_desconhecida';
+
     if (noPeriodo) {
       totalComAtualizacao++;
-    } else {
-      totalSemAtualizacao++;
+      statusEvidencia = 'com_atualizacao';
+    } else if (coberturaOportunidadeConfirmada) {
+      totalSemAtualizacaoConfirmada++;
+      statusEvidencia = 'sem_atualizacao_confirmada';
       if (ultima && ultima.data) {
         alertas.unshift(`Sem atualização humana neste mês — última atividade em ${ultima.data.slice(0, 10)}.`);
       } else {
-        alertas.unshift(`Sem atualização humana neste mês.`);
+        alertas.unshift('Sem atualização humana neste mês.');
       }
+    } else {
+      totalCoberturaDesconhecida++;
+      statusEvidencia = 'cobertura_desconhecida';
     }
 
     const clienteNome = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || ro.negocio?.conta || null;
@@ -410,14 +450,18 @@ export function enriquecerRosComEvidencias(
       atualizacao_no_periodo: noPeriodo,
       ultima_atividade_humana: ultima,
       evidencias_humanas: lista.slice(0, 3),
+      status_evidencia: statusEvidencia,
       alertas,
+      fonte_evidencias: coleta && !(coleta instanceof Error) ? (coleta.fonte || 'CRM') : null,
     };
   });
 
   return {
     ros,
-    total_sem_atualizacao: totalSemAtualizacao,
+    total_sem_atualizacao_confirmada: totalSemAtualizacaoConfirmada,
+    total_cobertura_desconhecida: totalCoberturaDesconhecida,
     total_com_atualizacao: totalComAtualizacao,
+    total_sem_atualizacao: totalSemAtualizacaoConfirmada,
     cobertura_evidencias_completa: coberturaCompleta,
   };
 }

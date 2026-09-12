@@ -3353,9 +3353,10 @@ function AtualizacaoFabricanteModal({
 
   const ros = evidenciasData?.data || [];
   const total = evidenciasData?.total ?? ros.length;
-  const semAtualizacao = evidenciasData?.total_sem_atualizacao ?? 0;
+  const semAtualizacaoConfirmada = evidenciasData?.total_sem_atualizacao_confirmada ?? evidenciasData?.total_sem_atualizacao ?? 0;
+  const coberturaDesconhecida = evidenciasData?.total_cobertura_desconhecida ?? 0;
   const comAtualizacao = evidenciasData?.total_com_atualizacao ?? 0;
-  const coberturaCompleta = evidenciasData?.cobertura_evidencias_completa ?? true;
+  const coberturaCompleta = evidenciasData?.cobertura_evidencias_completa ?? (coberturaDesconhecida === 0);
 
   const handleCopiarRelatorio = async () => {
     if (!formatarRelatorioAtualizacaoFabricante) return;
@@ -3425,14 +3426,20 @@ function AtualizacaoFabricanteModal({
               <strong className="text-emerald-600 dark:text-emerald-400">{comAtualizacao}</strong>
             </div>
             <div>
-              <span className="text-slate-400">Sem atualização no período:</span>{' '}
-              <strong className="text-rose-600 dark:text-rose-400">{semAtualizacao}</strong>
+              <span className="text-slate-400">Sem atualização confirmada:</span>{' '}
+              <strong className="text-rose-600 dark:text-rose-400">{semAtualizacaoConfirmada}</strong>
             </div>
+            {coberturaDesconhecida > 0 && (
+              <div>
+                <span className="text-slate-400">Cobertura desconhecida / parcial:</span>{' '}
+                <strong className="text-amber-600 dark:text-amber-400">{coberturaDesconhecida}</strong>
+              </div>
+            )}
           </div>
           <div>
             {!coberturaCompleta ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
-                ⚠️ Cobertura Parcial
+                ⚠️ Cobertura Parcial ({coberturaDesconhecida} pendente)
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300">
@@ -3504,7 +3511,7 @@ function AtualizacaoFabricanteModal({
                     </div>
                   </div>
 
-                  {/* Evidência no Período vs Sem Atualização */}
+                  {/* Evidência no Período vs Sem Atualização Confirmada vs Cobertura Desconhecida */}
                   {ro.atualizacao_no_periodo ? (
                     <div className="p-3 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40">
                       <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 mb-1">
@@ -3515,11 +3522,30 @@ function AtualizacaoFabricanteModal({
                         "{ro.atualizacao_no_periodo.texto || 'Evidência registrada sem texto.'}"
                       </p>
                     </div>
+                  ) : ro.status_evidencia === 'cobertura_desconhecida' ? (
+                    <div className="p-3 rounded-lg bg-slate-100/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="font-bold text-slate-700 dark:text-slate-300 text-[11px] flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>Cobertura de evidências desconhecida ou parcial</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        A consulta de evidências desta oportunidade não pôde ser confirmada integralmente. Não tratada como ausência de atividade comercial.
+                      </p>
+                      {ro.ultima_atividade_humana && (
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                          <span className="text-slate-400">Última atividade parcial:</span>{' '}
+                          <em>"{ro.ultima_atividade_humana.texto || 'Atividade registrada.'}"</em>{' '}
+                          <span className="text-slate-400">
+                            (em {formatarDataCivil ? formatarDataCivil(ro.ultima_atividade_humana.data) : ro.ultima_atividade_humana.data?.slice(0, 10)} por {ro.ultima_atividade_humana.autor_nome || 'Autor comercial'})
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <div className="p-3 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 space-y-1.5">
                       <div className="font-bold text-amber-800 dark:text-amber-400 text-[11px] flex items-center gap-1">
                         <span>⚠️</span>
-                        <span>Sem atualização humana neste mês</span>
+                        <span>Sem atualização humana neste mês (cobertura confirmada)</span>
                       </div>
                       {ro.ultima_atividade_humana ? (
                         <div className="text-[11px] text-slate-600 dark:text-slate-300">
@@ -3865,9 +3891,9 @@ function RegistrosOportunidadeView({
             ) : (
               <>
                 <span className="text-2xl font-black text-slate-900 dark:text-white">
-                  {evidenciasState.data?.total_sem_atualizacao ?? 0}
+                  {evidenciasState.data?.total_sem_atualizacao_confirmada ?? 0}
                 </span>
-                <span className="text-[11px] text-slate-400">sem atualização no período</span>
+                <span className="text-[11px] text-slate-400">sem atualização confirmada</span>
               </>
             )}
           </div>
@@ -3875,9 +3901,9 @@ function RegistrosOportunidadeView({
             <span>
               {evidenciasState.data ? `${evidenciasState.data.total_com_atualizacao ?? 0} com evidência recente` : 'Evidências no período'}
             </span>
-            {evidenciasState.data && !evidenciasState.data.cobertura_evidencias_completa && (
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded ml-1">
-                parcial
+            {evidenciasState.data && (!evidenciasState.data.cobertura_evidencias_completa || (evidenciasState.data.total_cobertura_desconhecida > 0)) && (
+              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded ml-1" title={`${evidenciasState.data.total_cobertura_desconhecida || 0} oportunidade(s) com cobertura desconhecida`}>
+                cobertura parcial ({evidenciasState.data.total_cobertura_desconhecida ?? 0} pendente)
               </span>
             )}
           </div>
