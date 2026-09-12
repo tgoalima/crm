@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { interpretarComando, interpretarConsulta } from '../supabase/functions/api-ros/dominio.ts';
+import fs from 'node:fs';
+import { interpretarComando, interpretarConsulta, calcularResumoAgregadoDominio, predicadoIlikePostgrest } from '../supabase/functions/api-ros/dominio.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 
@@ -147,4 +148,118 @@ test('comandos de mutação aceitam request_id para idempotência e versao_esper
     data_vencimento: '2026-12-11',
     versao_esperada: 'tres',
   }), /versão/i);
+});
+
+test('interpretarConsulta suporta filtros de cliente, numero_ro e busca textual mantendo semântica uniforme', () => {
+  const paramsCompletos = new URLSearchParams({
+    cliente: 'Hospital Santa Joana',
+    numero_ro: 'RO-2026-99',
+    busca: 'Projeto Nuvem',
+    situacao: 'Aprovada',
+    pagina: '1',
+    limite: '50',
+  });
+  const consulta = interpretarConsulta(paramsCompletos);
+  assert.equal(consulta.cliente, 'Hospital Santa Joana');
+  assert.equal(consulta.numero_ro, 'RO-2026-99');
+  assert.equal(consulta.busca, 'Projeto Nuvem');
+  assert.equal(consulta.situacao, 'Aprovada');
+
+  // Sinônimo 'q' mapeia para busca
+  const paramsQ = new URLSearchParams({ q: 'Dell EMC' });
+  assert.equal(interpretarConsulta(paramsQ).busca, 'Dell EMC');
+});
+
+test('interpretarConsulta aceita o filtro textual de oportunidade', () => {
+  const consulta = interpretarConsulta(new URLSearchParams({ oportunidade: 'Projeto de Modernização' }));
+  assert.equal(consulta.oportunidade, 'Projeto de Modernização');
+});
+
+test('predicado de busca PostgREST encapsula caracteres reservados do texto do usuário', () => {
+  assert.equal(
+    predicadoIlikePostgrest('numero_ro', 'RO,(Dell)."A"'),
+    'numero_ro.ilike."*RO,(Dell).\\"A\\"*"',
+  );
+});
+
+test('migration do resumo não expõe função SECURITY DEFINER ao público', () => {
+  const migration = fs.readFileSync('supabase/migrations/20260912c_ro_resumo_agregado.sql', 'utf8');
+  assert.match(migration, /SECURITY INVOKER/);
+  assert.doesNotMatch(migration, /SECURITY DEFINER/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.ro_resumo_agregado[\s\S]*FROM PUBLIC, anon, authenticated;/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.ro_resumo_agregado[\s\S]*TO service_role;/);
+});
+
+test('consulta de R.O. usa somente colunas existentes de contas', () => {
+  const migration = fs.readFileSync('supabase/migrations/20260912c_ro_resumo_agregado.sql', 'utf8');
+  const api = fs.readFileSync('supabase/functions/api-ros/index.ts', 'utf8');
+  assert.doesNotMatch(migration, /nome_fantasia/);
+  assert.doesNotMatch(api, /nome_fantasia/);
+});
+
+test('teste SQL do resumo começa uma transação antes de executar inserções e sempre faz rollback', () => {
+  const testeSql = fs.readFileSync('tests/sql/ro_resumo_agregado_assertions.sql', 'utf8').trim();
+  assert.match(testeSql, /^--[^\n]*\n[\s\S]*?BEGIN;/);
+  assert.match(testeSql, /ROLLBACK;\s*$/);
+});
+
+test('calcularResumoAgregadoDominio agrega mais de uma página, renovações em análise, vencimentos civis em até 15 dias e conjunto vazio', () => {
+  const hojeSp = '2026-09-12';
+
+  // 1. Conjunto vazio
+  const vazio = calcularResumoAgregadoDominio([], hojeSp);
+  assert.deepEqual(vazio, {
+    total: 0,
+    aguardando_aprovacao: 0,
+    renovacoes_em_analise: 0,
+    vencem_15_dias: 0,
+  });
+
+  // 2. Agregação com 120 registros (mais de duas páginas de 50)
+  const registros = [];
+  for (let i = 1; i <= 120; i++) {
+    if (i <= 20) {
+      // 20 aguardando aprovação
+      registros.push({ situacao: 'Aguardando aprovação', data_vencimento: null });
+    } else if (i <= 50) {
+      // 30 com renovação em análise
+      registros.push({
+        situacao: 'Aprovada',
+        data_vencimento: '2026-10-15',
+        renovacoes_ro: [{ situacao: 'Em análise' }],
+      });
+    } else if (i <= 65) {
+      // 15 aprovadas vencendo em até 15 dias (entre 12/09 e 27/09)
+      const dia = 12 + (i - 51); // 12 a 26
+      const diaStr = dia < 10 ? `0${dia}` : `${dia}`;
+      registros.push({
+        situacao: 'Aprovada',
+        data_vencimento: `2026-09-${diaStr}`,
+        renovacoes_ro: [],
+      });
+    } else if (i <= 70) {
+      // 5 aprovadas no limite exato de 15 dias (2026-09-27)
+      registros.push({
+        situacao: 'Aprovada',
+        data_vencimento: '2026-09-27',
+        renovacoes_ro: [],
+      });
+    } else if (i <= 80) {
+      // 10 aprovadas fora do limite (vencem em 2026-09-28 ou depois)
+      registros.push({
+        situacao: 'Aprovada',
+        data_vencimento: '2026-09-28',
+        renovacoes_ro: [],
+      });
+    } else {
+      // 40 em outras situações (Backoffice, Encerrada, Substituída)
+      registros.push({ situacao: 'Backoffice', data_vencimento: null });
+    }
+  }
+
+  const resumo = calcularResumoAgregadoDominio(registros, hojeSp);
+  assert.equal(resumo.total, 120);
+  assert.equal(resumo.aguardando_aprovacao, 20);
+  assert.equal(resumo.renovacoes_em_analise, 30);
+  assert.equal(resumo.vencem_15_dias, 20); // 15 + 5
 });

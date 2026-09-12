@@ -63,12 +63,74 @@ export type ConsultaRos = {
   situacao: string | null;
   responsavel: string | null;
   vence_ate: string | null;
+  numero_ro: string | null;
+  cliente: string | null;
+  oportunidade: string | null;
+  busca: string | null;
   pagina: number;
   limite: number;
 };
 
+// `.or()` recebe uma expressão PostgREST crua. Valores textuais precisam ficar
+// entre aspas e ter aspas e barras escapadas antes de compor essa expressão.
+export function predicadoIlikePostgrest(campo: string, valor: string): string {
+  const seguro = valor.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `${campo}.ilike."*${seguro}*"`;
+}
+
+export type ResumoRosAgregado = {
+  total: number;
+  aguardando_aprovacao: number;
+  renovacoes_em_analise: number;
+  vencem_15_dias: number;
+};
+
+export function calcularResumoAgregadoDominio(
+  registros: Array<{
+    situacao: string;
+    data_vencimento?: string | null;
+    renovacoes_ro?: Array<{ situacao: string }> | null;
+  }>,
+  hojeSp: string,
+): ResumoRosAgregado {
+  const [ano, mes, dia] = hojeSp.split('-').map(Number);
+  const dataRef = new Date(Date.UTC(ano, mes - 1, dia));
+  const data15 = new Date(Date.UTC(ano, mes - 1, dia + 15));
+  const limite15 = data15.toISOString().slice(0, 10);
+
+  let aguardando = 0;
+  let renovacoesEmAnalise = 0;
+  let vencem15 = 0;
+
+  for (const r of registros || []) {
+    if (r.situacao === 'Aguardando aprovação') {
+      aguardando++;
+    }
+    if (Array.isArray(r.renovacoes_ro) && r.renovacoes_ro.some((ren) => ren.situacao === 'Em análise')) {
+      renovacoesEmAnalise++;
+    }
+    if (r.situacao === 'Aprovada' && r.data_vencimento) {
+      const venc = String(r.data_vencimento).slice(0, 10);
+      if (venc >= hojeSp && venc <= limite15) {
+        vencem15++;
+      }
+    }
+  }
+
+  return {
+    total: registros ? registros.length : 0,
+    aguardando_aprovacao: aguardando,
+    renovacoes_em_analise: renovacoesEmAnalise,
+    vencem_15_dias: vencem15,
+  };
+}
+
 export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
-  const permitidos = ['negocio_id', 'fabricante_id', 'situacao', 'responsavel', 'vence_ate', 'pagina', 'limite'];
+  const permitidos = [
+    'negocio_id', 'fabricante_id', 'situacao', 'responsavel',
+    'vence_ate', 'numero_ro', 'cliente', 'oportunidade', 'busca', 'q',
+    'pagina', 'limite',
+  ];
   for (const chave of params.keys()) {
     if (!permitidos.includes(chave)) {
       throw new ErroComando(400, `Parâmetro de consulta não permitido: ${chave}.`);
@@ -85,6 +147,7 @@ export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
   const negocioIdRaw = params.get('negocio_id');
   const fabricanteIdRaw = params.get('fabricante_id');
   const venceAteRaw = params.get('vence_ate');
+  const buscaParam = params.get('busca') || params.get('q');
 
   return {
     negocio_id: negocioIdRaw ? uuid(negocioIdRaw, 'A oportunidade') : null,
@@ -92,6 +155,10 @@ export function interpretarConsulta(params: URLSearchParams): ConsultaRos {
     situacao: texto(params.get('situacao'), 'A situação'),
     responsavel: texto(params.get('responsavel'), 'O responsável'),
     vence_ate: venceAteRaw ? data(venceAteRaw, 'A data limite de vencimento') : null,
+    numero_ro: texto(params.get('numero_ro'), 'O número da R.O.'),
+    cliente: texto(params.get('cliente'), 'O cliente'),
+    oportunidade: texto(params.get('oportunidade'), 'A oportunidade'),
+    busca: texto(buscaParam, 'A busca'),
     pagina: paginaRaw,
     limite: limiteRaw,
   };

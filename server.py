@@ -106,7 +106,7 @@ def build_clickup_comment_segments(texto):
         segments.append({"text": texto})
     return segments
 
-def make_clickup_request(path, method, payload=None, token=None):
+def make_clickup_request(path, method, payload=None, token=None, timeout=None):
     target_url = f"https://api.clickup.com/api/v2/{path.lstrip('/')}"
     headers = {
         "Authorization": token or CLICKUP_TOKEN,
@@ -119,7 +119,7 @@ def make_clickup_request(path, method, payload=None, token=None):
         headers=headers,
         method=method
     )
-    with urllib.request.urlopen(req) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         return response.status, response.read()
 
 class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -142,6 +142,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/clickup-api/'):
             self.handle_proxy()
+        elif self.path == '/api/ros' or self.path.startswith('/api/ros?') or self.path.startswith('/api/ros/'):
+            self.handle_proxy_edge_function('api-ros', '/api/ros')
         elif self.path == '/api/config':
             self.handle_config()
         elif self.path.startswith('/api/propostas/search'):
@@ -173,6 +175,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith('/clickup-api/'):
             self.handle_proxy()
+        elif self.path == '/api/ros' or self.path.startswith('/api/ros?') or self.path.startswith('/api/ros/'):
+            self.handle_proxy_edge_function('api-ros', '/api/ros')
         elif self.path == '/api/atividades':
             self.handle_create_atividade()
         elif self.path == '/api/tarefas':
@@ -241,6 +245,51 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(500)
             self.end_headers()
             self.wfile.write(str(e).encode('utf-8'))
+
+    def handle_proxy_edge_function(self, function_name, local_prefix):
+        """Encaminha uma rota local para a Edge Function sem usar chaves no navegador."""
+        supabase_url = os.environ.get("SUPABASE_URL") or self.headers.get("x-supabase-url") or ""
+        if not supabase_url:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "SUPABASE_URL não configurada para a API local."}).encode('utf-8'))
+            return
+
+        parsed = urllib.parse.urlsplit(self.path)
+        tail = parsed.path[len(local_prefix):]
+        target_url = f"{supabase_url.rstrip('/')}/functions/v1/{function_name}{tail}"
+        if parsed.query:
+            target_url = f"{target_url}?{parsed.query}"
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length else None
+        headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
+        authorization = self.headers.get("Authorization")
+        if authorization:
+            headers["Authorization"] = authorization
+
+        try:
+            request = urllib.request.Request(target_url, data=body, headers=headers, method=self.command)
+            with urllib.request.urlopen(request, timeout=20) as response:
+                response_body = response.read()
+                self.send_response(response.status)
+                self.send_header("Content-Type", response.headers.get("Content-Type", "application/json"))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(response_body)
+        except urllib.error.HTTPError as error:
+            self.send_response(error.code)
+            self.send_header("Content-Type", error.headers.get("Content-Type", "application/json"))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(error.read())
+        except urllib.error.URLError:
+            self.send_response(502)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Não foi possível conectar à API de R.Os."}).encode('utf-8'))
 
     def handle_create_task(self):
         try:
@@ -1123,56 +1172,86 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "clickup_negocio_id e texto são obrigatórios"}).encode('utf-8'))
                 return
 
+            # Nunca atribuir uma nova atividade ao token global de fallback.
+            token_autor = (self.headers.get("Authorization") or self.headers.get("x-clickup-token") or "").strip()
+            erro_autoria = None
+            usuario = None
+            if not token_autor:
+                erro_autoria = (401, "Entre no CRM para registrar a atividade.")
+            else:
+                try:
+                    auth_status, auth_body = make_clickup_request("user", "GET", token=token_autor, timeout=10)
+                    if auth_status not in (200, 201):
+                        erro_autoria = (401 if auth_status in (401, 403) else 503, "Não foi possível validar sua sessão no ClickUp.")
+                    else:
+                        usuario = json.loads(auth_body.decode("utf-8")).get("user") or {}
+                        autor_id = str(usuario.get("id", ""))
+                        if not re.fullmatch(r"-?\d+", autor_id):
+                            erro_autoria = (503, "Resposta de identidade inválida.")
+                        elif data.get("autor_clickup_id") is not None and str(data["autor_clickup_id"]) != autor_id:
+                            erro_autoria = (403, "O autor informado não corresponde à sessão. Entre novamente no CRM.")
+                except Exception as auth_err:
+                    erro_autoria = (401 if getattr(auth_err, "code", None) in (401, 403) else 503,
+                                    "Não foi possível verificar sua identidade no ClickUp. Tente novamente.")
+            if erro_autoria:
+                self.send_response(erro_autoria[0])
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": erro_autoria[1]}).encode("utf-8"))
+                return
+
             id_clean = clickup_negocio_id.replace('#', '')
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-            # 1. Enviar como comentário no ClickUp
+            # Confirmar persistência antes de produzir efeito externo.
+            origem = data.get("origem") if data.get("origem") in ("manual", "tarefa", "clickup") else "manual"
+            payload = {
+                "clickup_negocio_id": id_clean, "clickup_comment_id": None,
+                "texto": texto, "data_execucao": now_iso, "created_at": now_iso, "updated_at": now_iso,
+                "autor_nome": usuario.get("username") or usuario.get("email"),
+                "autor_clickup_id": autor_id,
+                "origem": origem, "tarefa_id": data.get("tarefa_id"),
+                "tarefa_tipo": data.get("tarefa_tipo"), "tarefa_titulo": data.get("tarefa_titulo"),
+                "anexos": data.get("anexos") if isinstance(data.get("anexos"), list) else [],
+            }
+            sb_status, sb_res = make_supabase_request(self.headers, "/rest/v1/atividades_negocio", "POST", payload)
+            if sb_status not in (200, 201):
+                raise Exception("Não foi possível confirmar a gravação da atividade no CRM.")
+            sb_res_data = json.loads(sb_res.decode('utf-8'))
+            if not isinstance(sb_res_data, list) or not sb_res_data or not sb_res_data[0].get("id"):
+                raise Exception("Banco não confirmou a gravação da atividade.")
+            registro = sb_res_data[0]
+            registro["sincronizacao"] = "pendente"
             clickup_comment_id = None
+            clickup_texto = texto
+            if origem == "tarefa" and (payload["tarefa_tipo"] or payload["tarefa_titulo"]):
+                selo = ": ".join(str(v) for v in (payload["tarefa_tipo"], payload["tarefa_titulo"]) if v)
+                clickup_texto = f"✅ Tarefa concluída ({selo}) — {texto}"
             try:
-                comment_payload = {
-                    "comment": build_clickup_comment_segments(f"[SPA Gestão Comercial] {texto}"),
-                    "notify_all": False
-                }
                 cu_status, cu_res = make_clickup_request(
-                    f"task/{id_clean}/comment",
-                    "POST",
-                    comment_payload,
-                    token=self.get_client_token()
-                )
+                    f"task/{id_clean}/comment", "POST",
+                    {"comment": build_clickup_comment_segments(f"[SPA Gestão Comercial] {clickup_texto}"), "notify_all": False},
+                    token=self.get_client_token())
                 if cu_status in (200, 201):
                     cu_data = json.loads(cu_res.decode('utf-8'))
-                    clickup_comment_id = str(cu_data.get("id") or cu_data.get("comment", {}).get("id") or "")
-                    print(f"[LOG] Comentário criado no ClickUp: {clickup_comment_id}")
-                else:
-                    print(f"[WARN] ClickUp comment creation returned status {cu_status}: {cu_res.decode('utf-8')}")
-                sys.stdout.flush()
-            except Exception as cu_err:
-                print(f"[WARN] Falha ao criar comentário no ClickUp: {str(cu_err)}")
-                sys.stdout.flush()
-
-            # 2. Salvar no Supabase (não fatal se a tabela ainda não foi criada)
-            supabase_payload = {
-                "clickup_negocio_id": id_clean,
-                "clickup_comment_id": clickup_comment_id,
-                "texto": texto,
-                "data_execucao": now_iso,
-                "created_at": now_iso,
-                "updated_at": now_iso
-            }
-
-            sb_res_data = [supabase_payload]
-            try:
-                sb_status, sb_res = make_supabase_request(
-                    self.headers,
-                    "/rest/v1/atividades_negocio",
-                    "POST",
-                    supabase_payload
-                )
-                if sb_status in (200, 201):
-                    sb_res_data = json.loads(sb_res.decode('utf-8'))
-            except Exception as sb_err:
-                print(f"[WARN] Falha ao salvar atividade no Supabase (comentário foi criado no ClickUp): {str(sb_err)}")
-                sys.stdout.flush()
+                    clickup_comment_id = str(cu_data.get("id") or (cu_data.get("comment") or {}).get("id") or "") or None
+            except Exception:
+                print("[WARN] Atividade salva; espelhamento requer verificação.")
+            if clickup_comment_id:
+                registro["clickup_comment_id"] = clickup_comment_id
+                registro["sincronizacao"] = "requer_conciliacao"
+                try:
+                    status, resposta = make_supabase_request(self.headers,
+                        f"/rest/v1/atividades_negocio?id=eq.{registro['id']}", "PATCH",
+                        {"clickup_comment_id": clickup_comment_id})
+                    confirmado = json.loads(resposta.decode('utf-8')) if status in (200, 201) else []
+                    if confirmado:
+                        registro["sincronizacao"] = "sincronizado"
+                except Exception:
+                    pass
+                if registro["sincronizacao"] != "sincronizado":
+                    print(f"[WARN] Requer conciliação: atividade={registro['id']} comentario={clickup_comment_id}")
 
             self.send_response(201)
             self.send_header("Content-Type", "application/json")

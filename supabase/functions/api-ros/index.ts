@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { validarAutor, ErroAutoria } from "../api-atividades/autoria.ts";
-import { interpretarComando, interpretarConsulta, ErroComando } from "./dominio.ts";
+import { interpretarComando, interpretarConsulta, predicadoIlikePostgrest, ErroComando } from "./dominio.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -23,6 +23,37 @@ function caminho(url: URL) {
     .replace(/^functions\/v1\/?/, "")
     .replace(/^api-ros\/?/, "")
     .replace(/^\/+|\/+$/g, "");
+}
+
+const UUID_NULO = "00000000-0000-0000-0000-000000000000";
+
+function idsUnicos(registros: Array<{ id: string }> | null): string[] {
+  return [...new Set((registros || []).map((registro) => registro.id).filter(Boolean))];
+}
+
+async function buscarIdsContas(supabase: any, termo: string): Promise<string[]> {
+  const padrao = `%${termo}%`;
+  const resultados = await Promise.all([
+    supabase.from("contas").select("id").ilike("nome", padrao),
+    supabase.from("contas").select("id").ilike("razao_social", padrao),
+  ]);
+  const falha = resultados.find(({ error }) => error)?.error;
+  if (falha) throw new Error(`Falha ao pesquisar clientes: ${falha.message}`);
+  return idsUnicos(resultados.flatMap(({ data }) => data || []));
+}
+
+async function buscarIdsNegocios(supabase: any, termo: string, incluirConta: boolean): Promise<string[]> {
+  const consultas: any[] = [
+    supabase.from("negocios").select("id").ilike("nome", `%${termo}%`),
+  ];
+  if (incluirConta) {
+    const contaIds = await buscarIdsContas(supabase, termo);
+    if (contaIds.length) consultas.push(supabase.from("negocios").select("id").in("conta_id", contaIds));
+  }
+  const resultados = await Promise.all(consultas);
+  const falha = resultados.find(({ error }) => error)?.error;
+  if (falha) throw new Error(`Falha ao pesquisar oportunidades: ${falha.message}`);
+  return idsUnicos(resultados.flatMap(({ data }) => data || []));
 }
 
 Deno.serve(async (req) => {
@@ -50,11 +81,35 @@ Deno.serve(async (req) => {
     const tail = caminho(url);
 
     if (req.method === "GET") {
-      if (tail && !/^[0-9a-f-]{36}$/i.test(tail)) throw new ErroComando(404, "Rota não encontrada.");
+      if (tail && tail !== "resumo" && !/^[0-9a-f-]{36}$/i.test(tail)) throw new ErroComando(404, "Rota não encontrada.");
       const consulta = interpretarConsulta(url.searchParams);
+
+      if (tail === "resumo") {
+        const { data: resumoRpc, error: resumoError } = await supabase.rpc("ro_resumo_agregado", {
+          p_negocio_id: consulta.negocio_id,
+          p_fabricante_id: consulta.fabricante_id,
+          p_situacao: consulta.situacao,
+          p_responsavel: consulta.responsavel,
+          p_vence_ate: consulta.vence_ate,
+          p_cliente: consulta.cliente,
+          p_oportunidade: consulta.oportunidade,
+          p_numero_ro: consulta.numero_ro,
+          p_busca: consulta.busca,
+        });
+
+        if (resumoError || !resumoRpc) {
+          throw new ErroComando(
+            500,
+            `Falha ao calcular resumo agregado de R.Os: ${resumoError?.message || "Sem retorno da RPC"}`,
+          );
+        }
+
+        return json(resumoRpc);
+      }
+
       let query = supabase.from("registros_oportunidade").select(`
         *, fabricantes_ro(id,nome,prazo_inicial_sugerido_dias,limite_renovacoes),
-        negocios(id,nome,conta_id,clickup_negocio_id),
+        negocios(id,nome,conta_id,clickup_negocio_id,contas(id,nome,razao_social)),
         renovacoes_ro(*), eventos_ro(*)
       `, { count: "exact" });
       if (tail) query = query.eq("id", tail);
@@ -63,6 +118,32 @@ Deno.serve(async (req) => {
       if (consulta.situacao) query = query.eq("situacao", consulta.situacao);
       if (consulta.responsavel) query = query.eq("responsavel_operacional_clickup_id", consulta.responsavel);
       if (consulta.vence_ate) query = query.lte("data_vencimento", consulta.vence_ate);
+      if (consulta.numero_ro) query = query.ilike("numero_ro", `%${consulta.numero_ro}%`);
+
+      if (consulta.cliente) {
+        const contaIds = await buscarIdsContas(supabase, consulta.cliente);
+        const { data: negsMatch } = await supabase
+          .from("negocios")
+          .select("id")
+          .in("conta_id", contaIds.length > 0 ? contaIds : [UUID_NULO]);
+        const negIds = idsUnicos(negsMatch);
+        query = query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
+      }
+
+      if (consulta.oportunidade) {
+        const negIds = await buscarIdsNegocios(supabase, consulta.oportunidade, false);
+        query = query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
+      }
+
+      if (consulta.busca) {
+        const negIds = await buscarIdsNegocios(supabase, consulta.busca, true);
+
+        if (negIds.length > 0) {
+          query = query.or(`${predicadoIlikePostgrest("numero_ro", consulta.busca)},negocio_id.in.(${negIds.join(",")})`);
+        } else {
+          query = query.ilike("numero_ro", `%${consulta.busca}%`);
+        }
+      }
 
       const offset = (consulta.pagina - 1) * consulta.limite;
       const { data, error, count } = await query.order("data_vencimento", { ascending: true, nullsFirst: false })
@@ -100,4 +181,3 @@ Deno.serve(async (req) => {
     return json({ error: error instanceof Error ? error.message : "Erro inesperado." }, status);
   }
 });
-

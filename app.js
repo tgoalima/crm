@@ -406,103 +406,18 @@ const uploadAtividadeAnexo = async ({ clickupNegocioId, file }) => {
   };
 };
 
-// ─────────────────────────────────────────────────────────────────────────
-// CLIENTE HTTP E HELPERS PARA REGISTROS DE OPORTUNIDADE (R.O.)
-// ─────────────────────────────────────────────────────────────────────────
-const montarQueryRos = (filters = {}, page = 1, limit = 50) => {
-  const params = new URLSearchParams();
-  params.set('pagina', String(Math.max(1, Number(page) || 1)));
-  params.set('limite', String(Math.max(1, Math.min(200, Number(limit) || 50))));
-
-  const chavesPermitidas = ['negocio_id', 'fabricante_id', 'situacao', 'responsavel', 'vence_ate'];
-  for (const chave of chavesPermitidas) {
-    const valor = filters[chave];
-    if (valor !== undefined && valor !== null) {
-      const str = String(valor).trim();
-      if (str) {
-        params.set(chave, str);
-      }
-    }
-  }
-  return params;
-};
-
-const traduzirErroApiRos = (status, responseData, fallback) => {
-  if (status === 401) {
-    return 'Sessão expirada ou não autenticada. Faça login novamente no CRM.';
-  }
-  if (status === 403) {
-    return 'Acesso negado: seu usuário não possui autorização registrada no CRM.';
-  }
-  if (status === 409) {
-    return (
-      responseData?.error ||
-      'Conflito de versão ou duplicidade: o registro foi alterado por outro usuário.'
-    );
-  }
-  if (status === 422) {
-    return responseData?.error || 'Dados da solicitação inválidos para esta operação de R.O.';
-  }
-  if (status === 500) {
-    return (
-      responseData?.error ||
-      'Erro inesperado na comunicação com o servidor ao consultar R.Os.'
-    );
-  }
-  if (responseData?.error && typeof responseData.error === 'string') {
-    return responseData.error;
-  }
-  if (fallback && typeof fallback === 'string') {
-    return fallback;
-  }
-  return 'Erro inesperado na comunicação com o servidor ao consultar R.Os.';
-};
-
-const fetchRegistrosOportunidade = async (filters = {}, page = 1, limit = 50, options = {}) => {
-  const fetchFn = options.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-  if (!fetchFn) {
-    throw new Error('Ambiente sem suporte a fetch disponível.');
-  }
-
-  const query = montarQueryRos(filters, page, limit);
-  const baseUrl = options.baseUrl || '/api/ros';
-  const queryString = query.toString();
-  const url = queryString ? `${baseUrl}?${queryString}` : baseUrl;
-
-  const headers = {
-    ...getSupabaseHeaders(),
-    ...(options.headers || (typeof options.getHeaders === 'function' ? options.getHeaders() : {}))
-  };
-
-  let res;
-  try {
-    res = await fetchFn(url, {
-      method: 'GET',
-      headers
-    });
-  } catch (err) {
-    throw new Error(`Falha de rede ao consultar R.Os: ${err?.message || err}`);
-  }
-
-  let payload = null;
-  try {
-    payload = await res.json();
-  } catch {
-    payload = null;
-  }
-
-  if (!res.ok) {
-    const msg = traduzirErroApiRos(res.status, payload, 'Erro ao carregar lista de R.Os.');
-    throw new Error(msg);
-  }
-
-  return {
-    data: Array.isArray(payload?.data) ? payload.data : [],
-    total: typeof payload?.total === 'number' ? payload.total : (payload?.data?.length || 0),
-    pagina: typeof payload?.pagina === 'number' ? payload.pagina : page,
-    limite: typeof payload?.limite === 'number' ? payload.limite : limit,
-  };
-};
+// O mesmo domínio carregado pelo navegador é executado pelos testes de R.O.
+const {
+  fetchRegistrosOportunidade,
+  fetchResumoRos,
+  formatarDataCivil,
+  formatarCategoriaRo,
+  obterLinkOportunidade,
+  tratarEstadoResumo,
+  calcularVigenciaRo,
+  obterRotuloSituacao,
+  calcularPaginacao,
+} = window.RosUiDomain || {};
 
 // ─────────────────────────────────────────────────────────────────────────
 // PILHA DE CAMADAS MODAIS (Fase 2 do upgrade de navegação por teclado).
@@ -2061,6 +1976,681 @@ const SegmentosSettings = ({ client }) => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// VISTA PRINCIPAL DE REGISTROS DE OPORTUNIDADE (R.O. - Task 3.1)
+// ─────────────────────────────────────────────────────────────────────────
+function RegistrosOportunidadeView({
+  rosState,
+  rosResumo,
+  fabricantes = [],
+  vendedores = [],
+  onSelect,
+  onFilterChange,
+  onPageChange,
+  onRefresh,
+}) {
+  const { rows = [], filters = {}, page = 1, total = 0, loading, error, selectedId } = rosState;
+  const filtroBusca = filters.busca || filters.q || '';
+  const [buscaDigitada, setBuscaDigitada] = useState(filtroBusca);
+
+  // A busca ampla pode consultar contas, oportunidades e R.Os. Esperar uma
+  // pausa curta evita uma chamada ao CRM para cada tecla digitada.
+  useEffect(() => {
+    setBuscaDigitada(filtroBusca);
+  }, [filtroBusca]);
+
+  useEffect(() => {
+    if (buscaDigitada === filtroBusca) return undefined;
+    const temporizador = setTimeout(() => {
+      const novos = { ...filters };
+      const valor = buscaDigitada.trim();
+      delete novos.q;
+      if (valor) novos.busca = valor;
+      else delete novos.busca;
+      onFilterChange(novos);
+    }, 350);
+    return () => clearTimeout(temporizador);
+  }, [buscaDigitada, filtroBusca, filters, onFilterChange]);
+
+  const paginacao = calcularPaginacao ? calcularPaginacao(total, page, 50) : {
+    totalPaginas: Math.max(1, Math.ceil(total / 50)),
+    inicio: total === 0 ? 0 : (page - 1) * 50 + 1,
+    fim: Math.min(total, page * 50),
+    temAnterior: page > 1,
+    temProximo: page < Math.max(1, Math.ceil(total / 50)),
+  };
+
+  const estadoResumo = tratarEstadoResumo
+    ? tratarEstadoResumo(rosResumo, rosResumo?.error, rosResumo?.loading)
+    : {
+        carregando: Boolean(rosResumo?.loading),
+        disponivel: Boolean(!rosResumo?.error && rosResumo),
+        textoExibicao: rosResumo?.error ? 'Indisponível' : null,
+        valores: rosResumo || {},
+      };
+
+  const handleMudarFiltro = (campo, valor) => {
+    const novos = { ...filters };
+    if (valor === undefined || valor === null || valor === '' || valor === 'all') {
+      delete novos[campo];
+    } else {
+      novos[campo] = valor;
+    }
+    onFilterChange(novos);
+  };
+
+  const handleLimparFiltros = () => {
+    onFilterChange({});
+  };
+
+  const temFiltrosAtivos = Object.keys(filters).some(
+    (k) => filters[k] !== undefined && filters[k] !== '' && filters[k] !== 'all',
+  );
+
+  const obterClasseVigencia = (tipo) => {
+    switch (tipo) {
+      case 'Vencida':
+        return 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-300 dark:border-rose-800';
+      case 'Vence hoje':
+        return 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 border-amber-400 dark:border-amber-700 font-bold';
+      case 'A vencer':
+        return 'bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 border-orange-300 dark:border-orange-800';
+      case 'Vigente':
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800';
+      default:
+        return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-300 dark:border-slate-700';
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 bg-slate-50 dark:bg-slate-900 overflow-y-auto">
+      {/* 1. Header do Módulo */}
+      <div className="px-6 py-5 bg-white dark:bg-slate-850 border-b border-slate-200/80 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+              RO
+            </span>
+            <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+              Registros de Oportunidade (R.O.)
+            </h1>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Central operacional de acompanhamento de R.Os, prazos com fabricantes e ciclos de renovação.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-750 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+            title="Atualizar lista de R.Os"
+          >
+            <span className={`inline-block ${loading ? 'animate-spin' : ''}`}>🔄</span>
+            <span>Atualizar</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Cards de Indicadores Agregados do Banco */}
+      <div className="p-6 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Total Filtrado */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+            <span>Total Filtrado</span>
+            <span className="text-slate-400">📋</span>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-slate-900 dark:text-slate-100">
+              {estadoResumo.carregando ? (
+                <span className="text-sm font-medium text-slate-400 animate-pulse">Carregando...</span>
+              ) : !estadoResumo.disponivel ? (
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">Indisponível</span>
+              ) : (
+                estadoResumo.valores.total
+              )}
+            </span>
+            <span className="text-[11px] text-slate-400">R.Os</span>
+          </div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            {temFiltrosAtivos ? 'No conjunto filtrado no banco' : 'Total de R.Os cadastradas'}
+          </div>
+        </div>
+
+        {/* Aguardando Aprovação */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-blue-600 dark:text-blue-400">
+            <span>Aguardando Aprovação</span>
+            <span>⏳</span>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-blue-700 dark:text-blue-300">
+              {estadoResumo.carregando ? (
+                <span className="text-sm font-medium text-slate-400 animate-pulse">Carregando...</span>
+              ) : !estadoResumo.disponivel ? (
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">Indisponível</span>
+              ) : (
+                estadoResumo.valores.aguardando_aprovacao
+              )}
+            </span>
+            <span className="text-[11px] text-slate-400">pendentes</span>
+          </div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            Enviadas ao fabricante/portal
+          </div>
+        </div>
+
+        {/* Renovações em Análise */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-amber-600 dark:text-amber-400">
+            <span>Renovações em Análise</span>
+            <span>🔄</span>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-amber-700 dark:text-amber-300">
+              {estadoResumo.carregando ? (
+                <span className="text-sm font-medium text-slate-400 animate-pulse">Carregando...</span>
+              ) : !estadoResumo.disponivel ? (
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">Indisponível</span>
+              ) : (
+                estadoResumo.valores.renovacoes_em_analise
+              )}
+            </span>
+            <span className="text-[11px] text-slate-400">solicitações</span>
+          </div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            Ciclo solicitado sob avaliação
+          </div>
+        </div>
+
+        {/* Vencem em até 15 dias */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-rose-600 dark:text-rose-400">
+            <span>Vencem em até 15 dias</span>
+            <span>🚨</span>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-rose-700 dark:text-rose-300">
+              {estadoResumo.carregando ? (
+                <span className="text-sm font-medium text-slate-400 animate-pulse">Carregando...</span>
+              ) : !estadoResumo.disponivel ? (
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">Indisponível</span>
+              ) : (
+                estadoResumo.valores.vencem_15_dias
+              )}
+            </span>
+            <span className="text-[11px] text-slate-400">atenção</span>
+          </div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            Aprovadas próximas do prazo civil
+          </div>
+        </div>
+
+        {/* Atualização Humana no Mês (Reservado Task 8) */}
+        <div className="p-4 rounded-xl bg-slate-100/70 dark:bg-slate-800/40 border border-dashed border-slate-300 dark:border-slate-700 shadow-xs flex flex-col justify-between opacity-85">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+            <span>Atualização Humana</span>
+            <span>🧠</span>
+          </div>
+          <div className="mt-2">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+              Disponível após integração de evidências
+            </span>
+          </div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            Integração ClickUp Brain (Task 8)
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Barra de Filtros Estruturados e Consistentes */}
+      <div className="p-6 pt-3 pb-4">
+        <div className="bg-white dark:bg-slate-850 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-wrap items-center gap-3">
+          {/* Busca Textual Ampla */}
+          <div className="flex flex-col min-w-[200px] flex-1">
+            <label htmlFor="filtro-busca" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Busca (Cliente, Oportunidade ou Número)
+            </label>
+            <div className="relative flex items-center">
+              <input
+                type="text"
+                id="filtro-busca"
+                placeholder="Pesquise por cliente, oportunidade ou número..."
+                value={buscaDigitada}
+                onChange={(e) => setBuscaDigitada(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none pr-7"
+              />
+              {buscaDigitada && (
+                <button
+                  type="button"
+                  onClick={() => setBuscaDigitada('')}
+                  className="absolute right-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold cursor-pointer"
+                  title="Limpar busca"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col min-w-[170px]">
+            <label htmlFor="filtro-cliente" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Cliente
+            </label>
+            <input
+              type="text"
+              id="filtro-cliente"
+              value={filters.cliente || ''}
+              onChange={(e) => handleMudarFiltro('cliente', e.target.value)}
+              placeholder="Nome ou razão social"
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex flex-col min-w-[170px]">
+            <label htmlFor="filtro-oportunidade" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Oportunidade / projeto
+            </label>
+            <input
+              type="text"
+              id="filtro-oportunidade"
+              value={filters.oportunidade || ''}
+              onChange={(e) => handleMudarFiltro('oportunidade', e.target.value)}
+              placeholder="Nome da oportunidade"
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex flex-col min-w-[135px]">
+            <label htmlFor="filtro-numero-ro" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Número da R.O.
+            </label>
+            <input
+              type="text"
+              id="filtro-numero-ro"
+              value={filters.numero_ro || ''}
+              onChange={(e) => handleMudarFiltro('numero_ro', e.target.value)}
+              placeholder="Ex.: RO-1024"
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Filtro Fabricante */}
+          <div className="flex flex-col min-w-[160px]">
+            <label htmlFor="filtro-fabricante" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Fabricante
+            </label>
+            <select
+              id="filtro-fabricante"
+              value={filters.fabricante_id || ''}
+              onChange={(e) => handleMudarFiltro('fabricante_id', e.target.value)}
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            >
+              <option value="">Todos os fabricantes</option>
+              {fabricantes.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filtro Situação */}
+          <div className="flex flex-col min-w-[160px]">
+            <label htmlFor="filtro-situacao" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Situação
+            </label>
+            <select
+              id="filtro-situacao"
+              value={filters.situacao || ''}
+              onChange={(e) => handleMudarFiltro('situacao', e.target.value)}
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            >
+              <option value="">Todas as situações</option>
+              <option value="Backoffice">Backoffice</option>
+              <option value="Aguardando aprovação">Aguardando aprovação</option>
+              <option value="Aprovada">Aprovada</option>
+              <option value="Reprovada">Reprovada</option>
+              <option value="Encerrada">Encerrada</option>
+              <option value="Substituída">Substituída</option>
+            </select>
+          </div>
+
+          {/* Filtro Responsável Operacional */}
+          <div className="flex flex-col min-w-[160px]">
+            <label htmlFor="filtro-responsavel" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Responsável
+            </label>
+            <select
+              id="filtro-responsavel"
+              value={filters.responsavel || ''}
+              onChange={(e) => handleMudarFiltro('responsavel', e.target.value)}
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            >
+              <option value="">Todos os responsáveis</option>
+              {vendedores.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filtro Vence até (Data civil YYYY-MM-DD) */}
+          <div className="flex flex-col min-w-[140px]">
+            <label htmlFor="filtro-vence-ate" className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+              Vence até
+            </label>
+            <input
+              type="date"
+              id="filtro-vence-ate"
+              value={filters.vence_ate || ''}
+              onChange={(e) => handleMudarFiltro('vence_ate', e.target.value)}
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none h-[30px]"
+            />
+          </div>
+
+          {/* Filtro Oportunidade ativa (se houver) */}
+          {filters.negocio_id && (
+            <div className="flex flex-col min-w-[150px]">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                Oportunidade
+              </span>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-xs text-indigo-700 dark:text-indigo-300 font-semibold">
+                <span className="truncate max-w-[120px]" title={filters.negocio_id}>Negócio #{filters.negocio_id.slice(0, 8)}</span>
+                <button
+                  type="button"
+                  onClick={() => handleMudarFiltro('negocio_id', '')}
+                  className="hover:text-rose-600 cursor-pointer font-bold"
+                  title="Remover filtro de negócio"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Botão Limpar Filtros */}
+          {temFiltrosAtivos && (
+            <div className="flex flex-col justify-end self-end">
+              <button
+                type="button"
+                onClick={handleLimparFiltros}
+                className="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer border border-rose-200 dark:border-rose-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
+              >
+                Limpar filtros
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 4. Tabela de R.Os com Colunas Segregadas */}
+      <div className="px-6 flex-1 flex flex-col min-h-0 mb-6">
+        <div className="bg-white dark:bg-slate-850 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col flex-1 overflow-hidden">
+          {/* Mensagem de Erro */}
+          {error && (
+            <div className="m-4 p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span>⚠️</span>
+                <span>{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={onRefresh}
+                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Tentar novamente
+              </button>
+            </div>
+          )}
+
+          {/* Skeleton de Carregamento */}
+          {loading && rows.length === 0 && (
+            <div className="p-8 flex flex-col items-center justify-center space-y-4 flex-1">
+              <div className="w-8 h-8 border-3 border-slate-200 dark:border-slate-700 border-t-indigo-500 rounded-full animate-spin"></div>
+              <p className="text-xs text-slate-400 font-medium animate-pulse">Carregando Registros de Oportunidade...</p>
+            </div>
+          )}
+
+          {/* Estado Vazio */}
+          {!loading && !error && rows.length === 0 && (
+            <div className="p-12 flex flex-col items-center justify-center text-center flex-1">
+              <span className="text-4xl mb-3">📁</span>
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                Nenhum Registro de Oportunidade encontrado
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
+                {temFiltrosAtivos
+                  ? 'Nenhum resultado corresponde aos filtros selecionados. Tente remover filtros para visualizar outras R.Os.'
+                  : 'Nenhuma R.O. cadastrada no momento.'}
+              </p>
+              {temFiltrosAtivos && (
+                <button
+                  type="button"
+                  onClick={handleLimparFiltros}
+                  className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  Limpar todos os filtros
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Tabela com Resultados: 8 Colunas Segregadas */}
+          {rows.length > 0 && (
+            <div className="flex-1 overflow-auto">
+              <table className="w-full text-left border-collapse" aria-label="Tabela de Registros de Oportunidade">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider sticky top-0 z-10 backdrop-blur-xs">
+                    <th scope="col" className="py-3 px-4">Cliente</th>
+                    <th scope="col" className="py-3 px-4">Oportunidade</th>
+                    <th scope="col" className="py-3 px-3">Fabricante</th>
+                    <th scope="col" className="py-3 px-3">Número da R.O.</th>
+                    <th scope="col" className="py-3 px-3">Situação</th>
+                    <th scope="col" className="py-3 px-3">Vencimento</th>
+                    <th scope="col" className="py-3 px-3">Ciclo Renovação</th>
+                    <th scope="col" className="py-3 px-3">Última movimentação da R.O.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
+                  {rows.map((ro) => {
+                    const isSelected = selectedId === ro.id;
+                    const situacaoInfo = obterRotuloSituacao
+                      ? obterRotuloSituacao(ro.situacao)
+                      : { rotulo: ro.situacao, classeBadge: '' };
+                    const vigencia = calcularVigenciaRo ? calcularVigenciaRo(ro.data_vencimento) : 'Sem prazo';
+                    const dataVencFormatada = formatarDataCivil ? formatarDataCivil(ro.data_vencimento) : (ro.data_vencimento || '-');
+
+                    // Cliente vinculado à oportunidade
+                    const nomeCliente = ro.negocios?.contas?.nome ||
+                      ro.negocios?.contas?.razao_social ||
+                      '—';
+
+                    // Oportunidade com link seguro
+                    const opInfo = obterLinkOportunidade ? obterLinkOportunidade(ro.negocios) : {
+                      temLink: false,
+                      url: null,
+                      label: ro.negocios?.nome || `Oportunidade #${String(ro.negocio_id || '').slice(0, 8)}`,
+                    };
+
+                    const categoriaExibida = formatarCategoriaRo ? formatarCategoriaRo(ro.categoria) : (ro.categoria || '—');
+
+                    // Ciclo de renovação
+                    let infoCiclo = 'Inicial';
+                    if (Array.isArray(ro.renovacoes_ro) && ro.renovacoes_ro.length > 0) {
+                      const temEmAnalise = ro.renovacoes_ro.find((r) => r.situacao === 'Em análise');
+                      if (temEmAnalise) {
+                        infoCiclo = `Ciclo ${temEmAnalise.ciclo || 1} (Em análise)`;
+                      } else {
+                        const maxCiclo = Math.max(...ro.renovacoes_ro.map((r) => r.ciclo || 1));
+                        infoCiclo = `Ciclo ${maxCiclo} aprovado`;
+                      }
+                    }
+
+                    // Última movimentação da R.O.
+                    let dataMovimentacao = ro.updated_at || ro.created_at;
+                    if (Array.isArray(ro.eventos_ro) && ro.eventos_ro.length > 0) {
+                      const ultimoEvento = ro.eventos_ro[ro.eventos_ro.length - 1];
+                      if (ultimoEvento?.created_at) dataMovimentacao = ultimoEvento.created_at;
+                    }
+                    const dataMovimentacaoFormatada = formatarDataCivil
+                      ? formatarDataCivil(dataMovimentacao ? String(dataMovimentacao).slice(0, 10) : '')
+                      : '-';
+
+                    return (
+                      <tr
+                        key={ro.id}
+                        tabIndex={0}
+                        onClick={() => onSelect(ro.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onSelect(ro.id);
+                          }
+                        }}
+                        className={`transition-colors cursor-pointer focus:outline-none focus:bg-indigo-50/50 dark:focus:bg-indigo-950/30 ${
+                          isSelected
+                            ? 'bg-indigo-50/80 dark:bg-indigo-950/40 font-medium'
+                            : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50 text-slate-800 dark:text-slate-200'
+                        }`}
+                        title="Clique para selecionar o registro"
+                      >
+                        {/* 1. Cliente */}
+                        <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
+                          <span className="line-clamp-1" title={nomeCliente}>
+                            {nomeCliente}
+                          </span>
+                        </td>
+
+                        {/* 2. Oportunidade com Link Seguro */}
+                        <td className="py-3 px-4">
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-900 dark:text-slate-100 line-clamp-1">
+                                {opInfo.label}
+                              </span>
+                              {opInfo.temLink && (
+                                <a
+                                  href={opInfo.url}
+                                  target={opInfo.target}
+                                  rel={opInfo.rel}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 underline inline-flex items-center gap-0.5"
+                                  title="Abrir oportunidade no ClickUp"
+                                >
+                                  <span>↗</span> ClickUp
+                                </a>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500 line-clamp-1 mt-0.5">
+                              {categoriaExibida} {ro.cenario ? `· ${ro.cenario}` : ''}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* 3. Fabricante */}
+                        <td className="py-3 px-3">
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {ro.fabricantes_ro?.nome || '—'}
+                          </span>
+                        </td>
+
+                        {/* 4. Número da R.O. */}
+                        <td className="py-3 px-3 font-mono">
+                          {ro.numero_ro ? (
+                            <span className="font-bold text-slate-900 dark:text-slate-100">
+                              {ro.numero_ro}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                              Aguardando número
+                            </span>
+                          )}
+                        </td>
+
+                        {/* 5. Situação */}
+                        <td className="py-3 px-3">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${situacaoInfo.classeBadge}`}>
+                            {situacaoInfo.rotulo}
+                          </span>
+                        </td>
+
+                        {/* 6. Vencimento e Vigência */}
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-medium text-slate-700 dark:text-slate-300">
+                              {dataVencFormatada}
+                            </span>
+                            {ro.data_vencimento && (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${obterClasseVigencia(vigencia)}`}>
+                                {vigencia}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 7. Ciclo de Renovação */}
+                        <td className="py-3 px-3">
+                          <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
+                            {infoCiclo}
+                          </span>
+                        </td>
+
+                        {/* 8. Última movimentação da R.O. */}
+                        <td className="py-3 px-3">
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400" title="Data da última movimentação do registro da R.O.">
+                            {dataMovimentacaoFormatada}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Rodapé de Paginação */}
+          {total > 0 && (
+            <div className="p-3 px-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="text-slate-500 dark:text-slate-400">
+                Exibindo <strong className="text-slate-800 dark:text-slate-200">{paginacao.inicio}</strong> a{' '}
+                <strong className="text-slate-800 dark:text-slate-200">{paginacao.fim}</strong> de{' '}
+                <strong className="text-slate-800 dark:text-slate-200">{total}</strong> registros (Página{' '}
+                <strong className="text-slate-800 dark:text-slate-200">{page}</strong> de{' '}
+                <strong className="text-slate-800 dark:text-slate-200">{paginacao.totalPaginas}</strong>)
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={!paginacao.temAnterior || loading}
+                  onClick={() => onPageChange(page - 1)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  ← Anterior
+                </button>
+                <button
+                  type="button"
+                  disabled={!paginacao.temProximo || loading}
+                  onClick={() => onPageChange(page + 1)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  Próxima →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [config, setConfig] = useState(getInitialConfig);
   // Mapa clickup_negocio_id -> estagio real do negócio, usado pra blindar os
@@ -2253,6 +2843,15 @@ function App() {
     selectedId: null,
   });
   const rosFetchIdRef = useRef(0);
+  const [rosResumo, setRosResumo] = useState({
+    total: 0,
+    aguardando_aprovacao: 0,
+    renovacoes_em_analise: 0,
+    vencem_15_dias: 0,
+    loading: false,
+    error: null,
+  });
+  const [fabricantesRo, setFabricantesRo] = useState([]);
 
   // Autenticação e Token do Usuário no ClickUp
   const [userClickUpToken, setUserClickUpToken] = useState(() => localStorage.getItem('crm_user_clickup_token') || '');
@@ -4786,33 +5385,82 @@ function App() {
     }
   }, [activeTab, supabaseClient]);
 
-  // R.O. (Task 2) - Carrega a lista somente quando activeTab for 'ros', protegendo contra respostas obsoletas
+  // Carrega lista de fabricantes ativos cadastrados para o filtro de R.O.
   useEffect(() => {
-    if (activeTab !== 'ros') return;
+    if (activeTab === 'ros' && supabaseClient) {
+      supabaseClient
+        .from('fabricantes_ro')
+        .select('id, nome')
+        .eq('ativo', true)
+        .order('nome')
+        .then(({ data }) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setFabricantesRo(data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeTab, supabaseClient]);
 
+  // R.O. (Task 3) - Carrega a lista e o resumo agregado simultaneamente com proteção contra respostas obsoletas
+  const loadRegistrosOportunidade = useCallback(async (filtersToUse = rosState.filters, pageToUse = rosState.page) => {
     const fetchId = ++rosFetchIdRef.current;
     setRosState((prev) => ({ ...prev, loading: true, error: null }));
+    setRosResumo((prev) => ({ ...prev, loading: true, error: null }));
 
-    fetchRegistrosOportunidade(rosState.filters, rosState.page)
-      .then((resultado) => {
-        if (fetchId !== rosFetchIdRef.current) return;
-        setRosState((prev) => ({
-          ...prev,
-          rows: resultado.data,
-          total: resultado.total,
-          loading: false,
-          error: null,
-        }));
-      })
-      .catch((err) => {
-        if (fetchId !== rosFetchIdRef.current) return;
-        setRosState((prev) => ({
-          ...prev,
-          loading: false,
-          error: err?.message || 'Erro ao carregar Registros de Oportunidade.',
-        }));
+    const getHeaders = typeof getSupabaseHeaders === 'function' ? getSupabaseHeaders : () => ({});
+    const fetchLista = fetchRegistrosOportunidade
+      ? fetchRegistrosOportunidade(filtersToUse, pageToUse, 50, { getHeaders })
+      : Promise.resolve({ data: [], total: 0, pagina: pageToUse, limite: 50 });
+    const fetchResumo = fetchResumoRos
+      ? fetchResumoRos(filtersToUse, { getHeaders })
+      : Promise.resolve(null);
+
+    const [resLista, resResumo] = await Promise.allSettled([fetchLista, fetchResumo]);
+    if (fetchId !== rosFetchIdRef.current) return;
+
+    if (resLista.status === 'fulfilled') {
+      const val = resLista.value;
+      setRosState((prev) => ({
+        ...prev,
+        rows: val.data,
+        total: val.total,
+        page: val.pagina,
+        loading: false,
+        error: null,
+      }));
+    } else {
+      setRosState((prev) => ({
+        ...prev,
+        loading: false,
+        error: resLista.reason?.message || 'Erro ao carregar lista de R.Os.',
+      }));
+    }
+
+    if (resResumo.status === 'fulfilled' && resResumo.value) {
+      const valResumo = resResumo.value;
+      setRosResumo({
+        total: valResumo.total,
+        aguardando_aprovacao: valResumo.aguardando_aprovacao,
+        renovacoes_em_analise: valResumo.renovacoes_em_analise,
+        vencem_15_dias: valResumo.vencem_15_dias,
+        loading: false,
+        error: null,
       });
-  }, [activeTab, rosState.filters, rosState.page]);
+    } else {
+      setRosResumo((prev) => ({
+        ...prev,
+        loading: false,
+        error: resResumo.status === 'rejected' ? (resResumo.reason?.message || 'Indisponível') : null,
+      }));
+    }
+  }, [rosState.filters, rosState.page]);
+
+  useEffect(() => {
+    if (activeTab === 'ros') {
+      loadRegistrosOportunidade(rosState.filters, rosState.page);
+    }
+  }, [activeTab, rosState.filters, rosState.page, loadRegistrosOportunidade]);
 
   // Armazenamento em memória para filtros instantâneos sem atraso
   const rawProposalsRef = useRef([]);
@@ -8558,7 +9206,18 @@ function App() {
             Pipeline de Vendas
           </button>
           <button
+            onClick={() => setActiveTab('ros')}
+            className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
+              activeTab === 'ros'
+                ? 'bg-slate-900 text-white shadow-sm font-semibold'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-600/50'
+            }`}
+          >
+            R.Os
+          </button>
+          <button
             onClick={() => setActiveTab('empresas')}
+
             className={`font-medium px-4 py-2 text-xs rounded-md transition-all cursor-pointer ${
               activeTab === 'empresas' 
                 ? 'bg-slate-900 text-white shadow-sm font-semibold' 
@@ -10863,22 +11522,24 @@ function App() {
         );
       })()}
 
-      {/* 5. Aba de Registros de Oportunidade (Task 2 - Container Shell de estado) */}
+      {/* 5. Aba de Registros de Oportunidade (Task 3) */}
       {activeTab === 'ros' && (
-        <div className="flex-1 flex flex-col min-h-0 p-6 overflow-auto">
-          {rosState.loading && (
-            <div className="flex items-center justify-center p-12 text-slate-500 dark:text-slate-400 text-sm">
-              <span className="inline-block w-4 h-4 mr-2 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-              <span>Carregando Registros de Oportunidade...</span>
-            </div>
-          )}
-          {rosState.error && (
-            <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-red-700 dark:text-red-300 text-sm">
-              {rosState.error}
-            </div>
-          )}
-        </div>
+        <RegistrosOportunidadeView
+          rosState={rosState}
+          rosResumo={rosResumo}
+          fabricantes={fabricantesRo}
+          vendedores={vendedoresVisiveis}
+          onSelect={(id) => setRosState((prev) => ({ ...prev, selectedId: id }))}
+          onFilterChange={(novosFiltros) => {
+            setRosState((prev) => ({ ...prev, filters: novosFiltros, page: 1 }));
+          }}
+          onPageChange={(novaPagina) => {
+            setRosState((prev) => ({ ...prev, page: novaPagina }));
+          }}
+          onRefresh={() => loadRegistrosOportunidade(rosState.filters, rosState.page)}
+        />
       )}
+
 
       {/* Lightbox de anexo (imagem) — Fase 4. z-[120]: acima de tudo,
           inclusive do drawer (que abre por baixo dele). */}

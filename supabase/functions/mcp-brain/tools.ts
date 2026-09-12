@@ -2,8 +2,11 @@
 // Todas são somente leitura sobre o Supabase (+ ClickUp para resolver clientes
 // e estágio do negócio no funil).
 
+import { coletarComentariosClickUp } from "./comentarios.ts";
 import { supabase } from "./supabase.ts";
+import { coletarEvidenciasHumanas, lerClassificacaoAutores } from "./evidencias-humanas.ts";
 import { ESTAGIOS_FORA_DO_PIPELINE, clickupGet } from "./clickup.ts";
+import { consultarStatusRos } from "./status-ros.ts";
 
 // Pasta técnica onde sync-proposta-tecnica-clickup cria a lista/tarefa
 // "Enviar Proposta vX" (ver supabase/functions/sync-proposta-tecnica-clickup).
@@ -42,6 +45,37 @@ const PROPOSTA_SELECT = `
 `;
 
 export const TOOLS = [
+  {
+    name: "consultar_atividades_humanas",
+    description: "Consulta evidências comerciais humanas registradas no CRM para uma oportunidade. Exclui autores classificados como agentes/sistema e desconhecidos. Retorna fontes e limitações; anexos não são interpretados. Inclui comentários principais do ClickUp com cobertura explícita; não lê respostas em threads ou anexos externos. Não representa ainda relatório de R.Os por fabricante.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clickup_task_id: { type: "string", description: "ID ClickUp da oportunidade" },
+        limite: { type: "integer", minimum: 1, maximum: 200, description: "Máximo de evidências retornadas, padrão 50" },
+      },
+      required: ["clickup_task_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "consultar_status_ros",
+    description: "Consulta em lote o status das R.Os e une cada registro às últimas evidências humanas da oportunidade no CRM/ClickUp. Indicada para a atualização mensal dos portais e perguntas como 'todas as R.Os Dell'. Por padrão retorna apenas R.Os operacionais; encerradas, reprovadas e substituídas exigem filtro explícito. Informa vigência, paginação, fontes, ausência de atualização no período e cobertura incompleta, sem interpretar anexos.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fabricante: { type: "string", description: "Nome do fabricante, sem diferenciar maiúsculas e minúsculas (ex.: Dell ou Fortinet)" },
+        cliente: { type: "string", description: "Nome exato ou parte não ambígua do cliente" },
+        situacao: { type: "string", enum: ["Backoffice", "Aguardando aprovação", "Aprovada", "Reprovada", "Encerrada", "Substituída"] },
+        apenas_vencendo: { type: "boolean", description: "Quando true, restringe a vencimentos entre hoje e os próximos 15 dias" },
+        data_inicio: { type: "string", description: "Início do período das atualizações humanas, YYYY-MM-DD; padrão: primeiro dia do mês atual" },
+        data_fim: { type: "string", description: "Fim do período das atualizações humanas, YYYY-MM-DD; padrão: hoje" },
+        pagina: { type: "integer", minimum: 1, description: "Página das R.Os, padrão 1" },
+        limite: { type: "integer", minimum: 1, maximum: 200, description: "R.Os por página, padrão 50" },
+      },
+      additionalProperties: false,
+    },
+  },
   {
     name: "buscar_proposta_por_negocio",
     description:
@@ -172,6 +206,10 @@ export const TOOLS = [
 
 export async function callTool(name: string, args: Record<string, unknown>) {
   switch (name) {
+    case "consultar_status_ros":
+      return consultarStatusRosMcp(args);
+    case "consultar_atividades_humanas":
+      return consultarAtividadesHumanas(args);
     case "buscar_proposta_por_negocio":
       return buscarPropostaPorNegocio(String(args.clickup_task_id || ""));
     case "listar_propostas_por_situacao":
@@ -601,4 +639,135 @@ async function detalhesVersaoProposta(identificador: string, versao: string) {
     },
     clickup_tecnico: clickupTecnico,
   };
+}
+
+
+async function consultarAtividadesHumanas(args: Record<string, unknown>) {
+  const taskId = typeof args.clickup_task_id === "string" ? args.clickup_task_id.trim() : "";
+  if (!/^[a-zA-Z0-9_-]+$/.test(taskId)) throw new Error("ID da oportunidade inválido.");
+  const limite = args.limite === undefined ? 50 : args.limite;
+  if (typeof limite !== "number" || !Number.isInteger(limite) || limite < 1 || limite > 200) {
+    throw new Error("Limite deve estar entre 1 e 200.");
+  }
+  // Cadastro operacional explícito no servidor; nunca aceitar classificação
+  // enviada pela IA. Ausência de configuração bloqueia a consulta.
+  const autores = lerClassificacaoAutores(Deno.env.get("CRM_AUTORES_CLASSIFICACAO_JSON"));
+  const resultado = await coletarEvidenciasHumanas(async (inicio, fim) => {
+    const { data, error } = await supabase.from("atividades_negocio")
+      .select("id,clickup_comment_id,autor_clickup_id,autor_nome,origem,data_execucao,texto,anexos")
+      .eq("clickup_negocio_id", taskId).order("id", { ascending: true }).range(inicio, fim);
+    if (error) throw new Error("Não foi possível consultar as atividades do CRM.");
+    return data || [];
+  }, autores, limite, () => coletarComentariosClickUp(async (cursor) => {
+    const token = Deno.env.get("CLICKUP_API_TOKEN");
+    if (!token) throw new Error("ClickUp não configurado.");
+    const query = cursor ? `?${new URLSearchParams(cursor)}` : "";
+    const response = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/comment${query}`, {
+      headers: { Authorization: token }, signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error("Falha ao consultar comentários.");
+    return response.json();
+  }));
+  return {
+    ...resultado, clickup_task_id: taskId, oportunidade_url: `https://app.clickup.com/t/${taskId}`,
+    consultado_em: new Date().toISOString(),
+    orientacao: "Use apenas estas evidências para a atualização humana. Não invente próximos passos, datas ou conteúdo dos anexos. Se a cobertura estiver incompleta, informe. Autoria é a registrada no CRM; validação histórica ainda requer homologação.",
+  };
+}
+
+function hojeEmSaoPaulo() {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const valor = Object.fromEntries(partes.map((p) => [p.type, p.value]));
+  return `${valor.year}-${valor.month}-${valor.day}`;
+}
+
+function adicionarDias(data: string, dias: number) {
+  const valor = new Date(`${data}T12:00:00Z`);
+  valor.setUTCDate(valor.getUTCDate() + dias);
+  return valor.toISOString().slice(0, 10);
+}
+
+function relacaoUnica(valor: any): any | null {
+  return Array.isArray(valor) ? (valor[0] || null) : (valor || null);
+}
+
+async function resolverContaRo(nomeCliente: string) {
+  const termo = nomeCliente.trim();
+  if (!termo) throw new Error("Cliente inválido.");
+  const { data: exatas, error: erroExato } = await supabase.from("contas")
+    .select("id,nome").ilike("nome", termo).limit(2);
+  if (erroExato) throw new Error("Não foi possível localizar o cliente.");
+  if ((exatas || []).length === 1) return exatas![0];
+
+  const { data: parciais, error: erroParcial } = await supabase.from("contas")
+    .select("id,nome").ilike("nome", `%${termo}%`).order("nome").limit(6);
+  if (erroParcial) throw new Error("Não foi possível localizar o cliente.");
+  if (!parciais?.length) return null;
+  if (parciais.length > 1) {
+    throw new Error(`Cliente ambíguo. Informe um nome mais específico: ${parciais.map((c) => c.nome).join(", ")}.`);
+  }
+  return parciais[0];
+}
+
+async function consultarStatusRosMcp(args: Record<string, unknown>) {
+  const fabricante = typeof args.fabricante === "string" ? args.fabricante.trim() : undefined;
+  const cliente = typeof args.cliente === "string" ? args.cliente.trim() : undefined;
+  const situacao = typeof args.situacao === "string" ? args.situacao : undefined;
+  const apenasVencendo = args.apenas_vencendo === true;
+  const pagina = args.pagina === undefined ? 1 : Number(args.pagina);
+  const limite = args.limite === undefined ? 50 : Number(args.limite);
+  const hoje = hojeEmSaoPaulo();
+  const conta = cliente ? await resolverContaRo(cliente) : null;
+
+  return consultarStatusRos({
+    fabricante, cliente, situacao, apenas_vencendo: apenasVencendo,
+    data_inicio: typeof args.data_inicio === "string" ? args.data_inicio : undefined,
+    data_fim: typeof args.data_fim === "string" ? args.data_fim : undefined,
+    pagina, limite,
+  }, {
+    hoje,
+    buscarRos: async ({ pagina: paginaBusca, limite: limiteBusca }) => {
+      if (cliente && !conta) return { registros: [], total: 0 };
+      let consulta = supabase.from("registros_oportunidade").select(`
+        id, numero_ro, categoria, cenario, situacao, data_vencimento,
+        fabricantes_ro!inner(id,nome),
+        negocios!inner(id,nome,clickup_negocio_id,conta_id,contas(id,nome)),
+        renovacoes_ro(ciclo,situacao)
+      `, { count: "exact" });
+      if (fabricante) consulta = consulta.ilike("fabricantes_ro.nome", fabricante);
+      if (situacao) consulta = consulta.eq("situacao", situacao);
+      else consulta = consulta.in("situacao", ["Backoffice", "Aguardando aprovação", "Aprovada"]);
+      if (conta) consulta = consulta.eq("negocios.conta_id", conta.id);
+      if (apenasVencendo) {
+        consulta = consulta.gte("data_vencimento", hoje).lte("data_vencimento", adicionarDias(hoje, 15));
+      }
+      const inicio = (paginaBusca - 1) * limiteBusca;
+      const { data, error, count } = await consulta
+        .order("data_vencimento", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .range(inicio, inicio + limiteBusca - 1);
+      if (error) throw new Error(`Não foi possível consultar as R.Os: ${error.message}`);
+      const registros = (data || []).map((item: any) => {
+        const negocio = relacaoUnica(item.negocios);
+        const fabricanteRo = relacaoUnica(item.fabricantes_ro);
+        const contaRo = relacaoUnica(negocio?.contas);
+        const ciclos = (item.renovacoes_ro || []).map((r: any) => Number(r.ciclo) || 0);
+        return {
+          id: item.id, numero_ro: item.numero_ro, categoria: item.categoria,
+          cenario: item.cenario, situacao: item.situacao, data_vencimento: item.data_vencimento,
+          fabricante: fabricanteRo?.nome || null,
+          ciclo_renovacao: ciclos.length ? Math.max(...ciclos) : 0,
+          negocio: {
+            id: negocio?.id || null, nome: negocio?.nome || null,
+            clickup_negocio_id: negocio?.clickup_negocio_id || null,
+            conta: contaRo?.nome || null,
+          },
+        };
+      });
+      return { registros, total: count ?? registros.length };
+    },
+    buscarEvidencias: (clickupTaskId) => consultarAtividadesHumanas({ clickup_task_id: clickupTaskId, limite: 50 }),
+  });
 }

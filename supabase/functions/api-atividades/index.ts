@@ -20,9 +20,12 @@
 // Autenticação: o header Authorization aqui carrega o Personal Token do
 // ClickUp do vendedor logado (não um JWT do Supabase) — mesmo contrato que
 // server.py's get_client_token() já usa. Cai pro CLICKUP_API_TOKEN global
-// se ausente.
+// se ausente nas operações legadas; POST exige token explícito e valida autoria.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+
+import { validarAutor, ErroAutoria } from "./autoria.ts";
+import { persistirAtividade } from "./persistencia.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -203,8 +206,12 @@ Deno.serve(async (req) => {
       // não quebrar nenhum chamador antigo que só manda clickup_negocio_id
       // e texto. `anexos` são só ponteiros pro ClickUp (ver migração
       // 20260904), nunca bytes de arquivo.
-      const autorNome = typeof data.autor_nome === "string" ? data.autor_nome.trim() || null : null;
-      const autorClickupId = data.autor_clickup_id != null ? String(data.autor_clickup_id) : null;
+      const autor = await validarAutor(req.headers.get("Authorization"), data.autor_clickup_id,
+        (token) => fetch("https://api.clickup.com/api/v2/user", {
+          headers: { Authorization: token }, signal: AbortSignal.timeout(10000),
+        }));
+      const autorNome = autor.nome;
+      const autorClickupId = autor.id;
       const origem = ["manual", "tarefa", "clickup"].includes(data.origem) ? data.origem : "manual";
       const tarefaId = typeof data.tarefa_id === "string" ? data.tarefa_id : null;
       const tarefaTipo = typeof data.tarefa_tipo === "string" ? data.tarefa_tipo : null;
@@ -221,26 +228,9 @@ Deno.serve(async (req) => {
         clickupTexto = `✅ Tarefa concluída (${selo}) — ${texto}`;
       }
 
-      let clickupCommentId: string | null = null;
-      try {
-        const commentPayload = {
-          comment: buildClickUpCommentSegments(`[SPA Gestão Comercial] ${clickupTexto}`),
-          notify_all: false,
-        };
-        const cuRes = await clickupFetch(`task/${idClean}/comment`, "POST", clickupToken, commentPayload);
-        if (cuRes.ok) {
-          const cuData = await cuRes.json();
-          clickupCommentId = String(cuData.id || cuData.comment?.id || "") || null;
-        } else {
-          console.warn(`[api-atividades] Falha ao criar comentário no ClickUp: ${cuRes.status} ${await cuRes.text()}`);
-        }
-      } catch (cuErr) {
-        console.warn("[api-atividades] Erro ao criar comentário no ClickUp:", cuErr.message);
-      }
-
       const supabasePayload = {
         clickup_negocio_id: idClean,
-        clickup_comment_id: clickupCommentId,
+        clickup_comment_id: null,
         texto,
         data_execucao: nowIso,
         created_at: nowIso,
@@ -254,11 +244,29 @@ Deno.serve(async (req) => {
         anexos,
       };
 
-      let sbResData: unknown[] = [supabasePayload];
-      const { data: inserted, error: sbErr } = await supabase.from("atividades_negocio").insert(supabasePayload).select();
-      if (!sbErr && inserted) sbResData = inserted;
-      else if (sbErr) console.warn("[api-atividades] Falha ao salvar atividade no Supabase:", sbErr.message);
-
+      const sbResData = await persistirAtividade({
+        salvar: async () => {
+          const { data: inserted, error } = await supabase.from("atividades_negocio").insert(supabasePayload).select().single();
+          if (error || !inserted?.id) throw new Error("Não foi possível confirmar a gravação da atividade no CRM.");
+          return inserted;
+        },
+        publicar: async () => {
+          const response = await clickupFetch(`task/${idClean}/comment`, "POST", clickupToken, {
+            comment: buildClickUpCommentSegments(`[SPA Gestão Comercial] ${clickupTexto}`), notify_all: false,
+          });
+          if (!response.ok) throw new Error("Falha no espelhamento ClickUp.");
+          const comment = await response.json();
+          return String(comment.id || comment.comment?.id || "");
+        },
+        vincular: async (id, comentarioId) => {
+          const { data: updated, error } = await supabase.from("atividades_negocio")
+            .update({ clickup_comment_id: comentarioId }).eq("id", id).select("id").single();
+          if (error || !updated) {
+            console.warn("[api-atividades] Requer conciliação", { atividade_id: id, clickup_comment_id: comentarioId });
+            throw new Error("Vínculo não persistido.");
+          }
+        },
+      });
       return json(sbResData, 201);
     }
 
@@ -350,6 +358,6 @@ Deno.serve(async (req) => {
     return json({ error: "Método não suportado" }, 405);
   } catch (error) {
     console.error("[api-atividades] Erro:", error.message);
-    return json({ error: error.message }, 500);
+    return json({ error: error.message }, error instanceof ErroAutoria ? error.status : 500);
   }
 });
