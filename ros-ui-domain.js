@@ -229,6 +229,24 @@
     };
   };
 
+  const ordenarEventosRo = (eventos = []) => [...(Array.isArray(eventos) ? eventos : [])]
+    .sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+
+  const resumirCiclosRo = (renovacoes = []) => {
+    const lista = Array.isArray(renovacoes) ? renovacoes : [];
+    return {
+      aprovados: lista.filter((renovacao) => renovacao?.situacao === 'Aprovada').length,
+      pendente: lista.find((renovacao) => renovacao?.situacao === 'Em análise') || null,
+    };
+  };
+
+  const obterAcoesPermitidasRo = (situacao) => {
+    if (situacao === 'Backoffice') return ['enviar', 'aprovar', 'encerrar'];
+    if (situacao === 'Aguardando aprovação') return ['aprovar', 'encerrar'];
+    if (situacao === 'Aprovada') return ['renovar', 'substituir', 'encerrar'];
+    return [];
+  };
+
   global.RosUiDomain = {
     montarQueryRos,
     traduzirErroApiRos,
@@ -242,5 +260,8 @@
     calcularVigenciaRo,
     obterRotuloSituacao,
     calcularPaginacao,
+    ordenarEventosRo,
+    resumirCiclosRo,
+    obterAcoesPermitidasRo,
   };
 })(globalThis);

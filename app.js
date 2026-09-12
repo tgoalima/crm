@@ -417,6 +417,9 @@ const {
   calcularVigenciaRo,
   obterRotuloSituacao,
   calcularPaginacao,
+  ordenarEventosRo,
+  resumirCiclosRo,
+  obterAcoesPermitidasRo,
 } = window.RosUiDomain || {};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1978,6 +1981,27 @@ const SegmentosSettings = ({ client }) => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────
+function RegistroOportunidadeDrawer({ ro, onClose }) {
+  useEffect(() => {
+    const aoTeclar = (evento) => { if (evento.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', aoTeclar);
+    return () => window.removeEventListener('keydown', aoTeclar);
+  }, [onClose]);
+
+  const eventos = ordenarEventosRo ? ordenarEventosRo(ro.eventos_ro) : [];
+  const ciclos = resumirCiclosRo ? resumirCiclosRo(ro.renovacoes_ro) : { aprovados: 0, pendente: null };
+  const acoes = obterAcoesPermitidasRo ? obterAcoesPermitidasRo(ro.situacao) : [];
+  const cliente = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || '—';
+  const vigencia = calcularVigenciaRo ? calcularVigenciaRo(ro.data_vencimento) : 'Sem prazo';
+
+  return <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <aside role="dialog" aria-modal="true" aria-label="Detalhe da R.O." className="h-full w-full max-w-xl overflow-y-auto bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-200 dark:border-slate-700">
+      <header className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800"><div><p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Registro de oportunidade</p><h2 className="mt-1 text-lg font-extrabold">{ro.numero_ro || 'Aguardando número'}</h2><p className="text-xs text-slate-500 mt-1">{ro.fabricantes_ro?.nome || 'Fabricante não informado'} · {ro.situacao}</p></div><button type="button" autoFocus onClick={onClose} className="rounded-lg px-3 py-2 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800">Fechar ✕</button></header>
+      <div className="p-5 space-y-5 text-sm"><section className="grid grid-cols-2 gap-3"><div><p className="text-xs text-slate-500">Cliente</p><p className="font-semibold">{cliente}</p></div><div><p className="text-xs text-slate-500">Oportunidade</p><p className="font-semibold">{ro.negocios?.nome || '—'}</p></div><div><p className="text-xs text-slate-500">Vencimento</p><p className="font-semibold">{formatarDataCivil ? formatarDataCivil(ro.data_vencimento) : '—'} · {vigencia}</p></div><div><p className="text-xs text-slate-500">Categoria</p><p className="font-semibold">{formatarCategoriaRo ? formatarCategoriaRo(ro.categoria) : '—'}</p></div></section><section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4"><h3 className="font-bold">Renovações</h3><p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{ciclos.aprovados} ciclo(s) aprovado(s){ciclos.pendente ? ` · Ciclo ${ciclos.pendente.ciclo || 1} em análise` : ''}</p></section><section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4"><h3 className="font-bold">Sucessão</h3><p className="mt-1 text-xs text-slate-500">{ro.ro_anterior_id || ro.ro_sucessora_id ? 'Há vínculo de substituição nesta R.O.' : 'Sem substituição vinculada.'}</p></section><section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4"><h3 className="font-bold">Histórico da R.O.</h3><div className="mt-3 space-y-3">{eventos.length ? eventos.map((evento, indice) => <div key={`${evento.id || evento.created_at}-${indice}`} className="border-l-2 border-indigo-300 pl-3"><p className="font-semibold text-xs">{evento.tipo || evento.evento || 'Movimentação'}</p><p className="text-xs text-slate-500">{formatarDataCivil ? formatarDataCivil(evento.created_at) : evento.created_at || 'Data não informada'}</p></div>) : <p className="text-xs text-slate-500">Nenhum evento registrado ainda.</p>}</div></section><section className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4"><h3 className="font-bold">Sincronização e atualização humana</h3><p className="mt-1 text-xs text-slate-500">Evidências comerciais e sincronização com ClickUp serão incluídas na próxima etapa.</p></section>{acoes.length > 0 && <section><h3 className="font-bold mb-2">Ações disponíveis</h3><div className="flex flex-wrap gap-2">{acoes.map((acao) => <span key={acao} className="rounded-lg bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-xs font-bold text-indigo-700 dark:text-indigo-300">{acao}</span>)}</div></section>}</div>
+    </aside>
+  </div>;
+}
+
 // VISTA PRINCIPAL DE REGISTROS DE OPORTUNIDADE (R.O. - Task 3.1)
 // ─────────────────────────────────────────────────────────────────────────
 function RegistrosOportunidadeView({
@@ -1986,6 +2010,7 @@ function RegistrosOportunidadeView({
   fabricantes = [],
   vendedores = [],
   onSelect,
+  onCloseSelection,
   onFilterChange,
   onPageChange,
   onRefresh,
@@ -1993,6 +2018,7 @@ function RegistrosOportunidadeView({
   const { rows = [], filters = {}, page = 1, total = 0, loading, error, selectedId } = rosState;
   const filtroBusca = filters.busca || filters.q || '';
   const [buscaDigitada, setBuscaDigitada] = useState(filtroBusca);
+  const roSelecionada = rows.find((ro) => ro.id === selectedId) || null;
 
   // A busca ampla pode consultar contas, oportunidades e R.Os. Esperar uma
   // pausa curta evita uma chamada ao CRM para cada tecla digitada.
@@ -2647,6 +2673,7 @@ function RegistrosOportunidadeView({
           )}
         </div>
       </div>
+      {roSelecionada && <RegistroOportunidadeDrawer ro={roSelecionada} onClose={onCloseSelection} />}
     </div>
   );
 }
@@ -11530,6 +11557,7 @@ function App() {
           fabricantes={fabricantesRo}
           vendedores={vendedoresVisiveis}
           onSelect={(id) => setRosState((prev) => ({ ...prev, selectedId: id }))}
+          onCloseSelection={() => setRosState((prev) => ({ ...prev, selectedId: null }))}
           onFilterChange={(novosFiltros) => {
             setRosState((prev) => ({ ...prev, filters: novosFiltros, page: 1 }));
           }}

@@ -280,3 +280,25 @@ test('tratarEstadoResumo assegura que falha de consulta nunca exibe zero e sim I
   assert.equal(carregando.carregando, true);
   assert.equal(carregando.disponivel, false);
 });
+
+test('painel ordena eventos recentes primeiro e separa vigência, ciclo e ações permitidas', () => {
+  const { ordenarEventosRo, resumirCiclosRo, obterAcoesPermitidasRo } = carregarDominioRos();
+  const eventos = ordenarEventosRo([
+    { tipo: 'Criada', created_at: '2026-09-01T10:00:00Z' },
+    { tipo: 'Aprovada', created_at: '2026-09-12T12:00:00Z' },
+    { tipo: 'Renovação solicitada', created_at: '2026-09-08T09:00:00Z' },
+  ]);
+  assert.deepEqual(Array.from(eventos, (evento) => evento.tipo), ['Aprovada', 'Renovação solicitada', 'Criada']);
+
+  const ciclos = resumirCiclosRo([
+    { ciclo: 1, situacao: 'Aprovada' },
+    { ciclo: 2, situacao: 'Em análise' },
+  ]);
+  assert.equal(ciclos.aprovados, 1);
+  assert.equal(ciclos.pendente?.ciclo, 2);
+
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Backoffice')), ['enviar', 'aprovar', 'encerrar']);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aguardando aprovação')), ['aprovar', 'encerrar']);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada')), ['renovar', 'substituir', 'encerrar']);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
+});
