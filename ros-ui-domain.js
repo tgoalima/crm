@@ -259,11 +259,17 @@
     return limpo;
   };
 
-  const obterAcoesPermitidasRo = (situacao, temPendente = false) => {
+  const obterAcoesPermitidasRo = (situacao, temPendente = false, options = {}) => {
+    const temSucessoraAtiva = !!options.temSucessoraAtiva;
     if (situacao === 'Backoffice') return ['enviar', 'aprovar', 'encerrar'];
     if (situacao === 'Aguardando aprovação') return ['aprovar', 'encerrar'];
     if (situacao === 'Aprovada') {
-      return [temPendente ? 'responder_renovacao' : 'solicitar_renovacao', 'encerrar'];
+      const acoes = [temPendente ? 'responder_renovacao' : 'solicitar_renovacao'];
+      if (!temPendente && !temSucessoraAtiva) {
+        acoes.push('substituir');
+      }
+      acoes.push('encerrar');
+      return acoes;
     }
     return [];
   };
@@ -386,6 +392,16 @@
           situacao,
           data_encerramento: dataEncerramento,
           motivo,
+          versao_esperada: versaoEsperada,
+          request_id: requestId,
+        },
+      };
+    }
+
+    if (acao === 'substituir') {
+      return {
+        rota: 'substituir',
+        payload: {
           versao_esperada: versaoEsperada,
           request_id: requestId,
         },

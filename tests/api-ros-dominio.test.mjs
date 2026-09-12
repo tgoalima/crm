@@ -366,3 +366,66 @@ test('teste SQL do fluxo de R.O. inclui validação de versão e retry idempoten
   assert.match(testeSql, /Conflito de versão na resposta de renovação/);
   assert.match(testeSql, /P0001/);
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task 7: Testes de substituição na API
+// ─────────────────────────────────────────────────────────────────────────
+
+test('substituição aceita apenas versao_esperada e request_id, sem campos extras (Task 7)', () => {
+  const result = interpretarComando('POST', `${uuid}/substituir`, {
+    versao_esperada: 5,
+    request_id: 'req-sub-001',
+  });
+  assert.equal(result.rpc, 'ro_substituir');
+  assert.equal(result.params.p_ro_anterior_id, uuid);
+  assert.equal(result.params.p_versao_esperada, 5);
+  assert.equal(result.params.p_request_id, 'req-sub-001');
+});
+
+test('substituição rejeita campos não permitidos no corpo (Task 7)', () => {
+  assert.throws(() => interpretarComando('POST', `${uuid}/substituir`, {
+    versao_esperada: 5,
+    request_id: 'req-sub-002',
+    numero_ro: 'DELL-999', // campo não permitido
+  }), /não reconhecido|não permitido/i);
+});
+
+test('substituição sem request_id funciona (p_request_id fica null)', () => {
+  const result = interpretarComando('POST', `${uuid}/substituir`, {
+    versao_esperada: 3,
+  });
+  assert.equal(result.rpc, 'ro_substituir');
+  assert.equal(result.params.p_request_id, null);
+});
+
+test('substituição com versão negativa rejeita', () => {
+  assert.throws(() => interpretarComando('POST', `${uuid}/substituir`, {
+    versao_esperada: -1,
+  }), /versão/i);
+});
+
+test('migration 20260912f valida substituição com renovação pendente e múltiplos sucessores (Task 7)', () => {
+  const migration = lerArquivo('supabase/migrations/20260912f_ro_substituir_validacoes.sql');
+
+  // Verifica que a migration usa SECURITY INVOKER
+  assert.match(migration, /SECURITY INVOKER/);
+  assert.doesNotMatch(migration, /SECURITY DEFINER/);
+
+  // Verifica que a migration tem as validações de renovação pendente
+  assert.match(migration, /renovação pendente/i);
+  assert.match(migration, /renovacoes_ro/);
+  assert.match(migration, /Em análise/);
+
+  // Verifica que a migration verifica múltiplos sucessores
+  assert.match(migration, /substituição em andamento/i);
+  assert.match(migration, /ro_anterior_id/);
+
+  // Verifica que revoga e concede grants corretamente
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.ro_substituir/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.ro_substituir[\s\S]*TO service_role/);
+
+  // Verifica idempotência por request_id
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /Substituição iniciada/);
+});

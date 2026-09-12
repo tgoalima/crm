@@ -2045,6 +2045,9 @@ function RoActionModal({
         setDataSolicitacao(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
       } else if (acao === 'responder_renovacao') {
         setDataResposta(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
+      } else if (acao === 'substituir') {
+        // Substituição não exige campos adicionais;
+        // a R.O. sucessora nasce em Backoffice sem número/vencimento.
       } else if (acao === 'encerrar') {
         setSituacaoFinal('Encerrada');
         setDataEncerramento(obterHojeSaoPaulo ? obterHojeSaoPaulo() : '');
@@ -2108,6 +2111,8 @@ function RoActionModal({
       else if (acao === 'solicitar_renovacao') msg = 'Renovação solicitada com sucesso!';
       else if (acao === 'responder_renovacao') {
         msg = tipoResposta === 'aprovar' ? 'Renovação aprovada com sucesso!' : 'Negativa de renovação registrada.';
+      } else if (acao === 'substituir') {
+        msg = 'Substituição iniciada! A R.O. sucessora foi criada em Backoffice.';
       } else if (acao === 'encerrar') {
         msg = situacaoFinal === 'Reprovada' ? 'R.O. reprovada com sucesso.' : 'R.O. encerrada com sucesso.';
       }
@@ -2166,6 +2171,10 @@ function RoActionModal({
     titulo = `Responder renovação (Ciclo ${numCiclo})`;
     subtitulo = 'Registre o retorno oficial do fabricante quanto à solicitação de renovação desta R.O.';
     labelBotaoConfirmar = 'Confirmar resposta';
+  } else if (acao === 'substituir') {
+    titulo = 'Iniciar substituição de R.O.';
+    subtitulo = 'Cria uma nova R.O. em Backoffice para substituir esta, com mesmo fabricante e oportunidade. A R.O. atual permanece válida até a aprovação da sucessora.';
+    labelBotaoConfirmar = 'Confirmar substituição';
   } else if (acao === 'encerrar') {
     titulo = 'Encerrar ou reprovar R.O.';
     subtitulo = 'Finaliza o ciclo comercial ativo desta R.O. Não altera o estágio nem dados da oportunidade no CRM.';
@@ -2461,6 +2470,18 @@ function RoActionModal({
             </>
           )}
 
+          {acao === 'substituir' && (
+            <div className="rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20 p-4 space-y-2">
+              <p className="text-xs font-semibold text-purple-800 dark:text-purple-200">O que vai acontecer:</p>
+              <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-1 list-disc pl-4">
+                <li>Uma nova R.O. será criada em <strong>Backoffice</strong>, vinculada a esta R.O. atual.</li>
+                <li>O fabricante (<strong>{ro?.fabricantes_ro?.nome || '—'}</strong>) e a oportunidade serão mantidos automaticamente.</li>
+                <li>Esta R.O. permanece <strong>Aprovada</strong> e válida até que a nova seja oficialmente aprovada pelo fabricante.</li>
+                <li>Somente após a aprovação da nova R.O. é que esta será marcada como <strong>Substituída</strong>.</li>
+              </ul>
+            </div>
+          )}
+
           <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
             <button
               type="button"
@@ -2473,7 +2494,7 @@ function RoActionModal({
             <button
               type="submit"
               disabled={salvando}
-              className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
+              className={`rounded-lg ${acao === 'substituir' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 px-4 py-2 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm`}
             >
               {salvando && (
                 <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
@@ -2502,10 +2523,47 @@ function RegistroOportunidadeDrawer({
 }) {
   const [ro, setRo] = useState(roInicial);
   const [acaoAtiva, setAcaoAtiva] = useState(null);
+  const [sucessoraAtiva, setSucessoraAtiva] = useState(null);
+  const [roAnterior, setRoAnterior] = useState(null);
 
   useEffect(() => {
     setRo(roInicial);
   }, [roInicial]);
+
+  // Buscar sucessora ativa e R.O. anterior para cadeia de substituição
+  useEffect(() => {
+    if (!ro?.id) return;
+    const buscarRelacoes = async () => {
+      try {
+        const supabase = typeof globalThis.supabaseClient !== 'undefined' ? globalThis.supabaseClient : null;
+        if (!supabase) return;
+
+        // Buscar se existe uma R.O. que aponta para esta como ro_anterior_id
+        const { data: sucessoras } = await supabase
+          .from('registros_oportunidade')
+          .select('id, numero_ro, situacao, fabricantes_ro(nome)')
+          .eq('ro_anterior_id', ro.id)
+          .not('situacao', 'in', '("Reprovada","Encerrada")')
+          .limit(1);
+        setSucessoraAtiva(sucessoras?.length > 0 ? sucessoras[0] : null);
+
+        // Buscar a R.O. anterior se houver
+        if (ro.ro_anterior_id) {
+          const { data: anterior } = await supabase
+            .from('registros_oportunidade')
+            .select('id, numero_ro, situacao, fabricantes_ro(nome)')
+            .eq('id', ro.ro_anterior_id)
+            .maybeSingle();
+          setRoAnterior(anterior || null);
+        } else {
+          setRoAnterior(null);
+        }
+      } catch (err) {
+        console.warn('[RegistroOportunidadeDrawer] Falha ao buscar relações de substituição:', err);
+      }
+    };
+    buscarRelacoes();
+  }, [ro?.id, ro?.ro_anterior_id, ro?.situacao]);
 
   useEffect(() => {
     const aoTeclar = (evento) => { if (evento.key === 'Escape' && !acaoAtiva) onClose(); };
@@ -2515,7 +2573,9 @@ function RegistroOportunidadeDrawer({
 
   const eventos = ordenarEventosRo ? ordenarEventosRo(ro.eventos_ro) : [];
   const ciclos = resumirCiclosRo ? resumirCiclosRo(ro.renovacoes_ro) : { aprovados: 0, pendente: null };
-  const acoes = obterAcoesPermitidasRo ? obterAcoesPermitidasRo(ro.situacao, !!ciclos.pendente) : [];
+  const acoes = obterAcoesPermitidasRo
+    ? obterAcoesPermitidasRo(ro.situacao, !!ciclos.pendente, { temSucessoraAtiva: !!sucessoraAtiva })
+    : [];
   const cliente = ro.negocios?.contas?.nome || ro.negocios?.contas?.razao_social || '—';
   const vigencia = calcularVigenciaRo ? calcularVigenciaRo(ro.data_vencimento) : 'Sem prazo';
 
@@ -2594,6 +2654,7 @@ function RegistroOportunidadeDrawer({
                       aprovar: { label: 'Aprovar R.O.', classe: 'bg-emerald-600 hover:bg-emerald-700 text-white' },
                       solicitar_renovacao: { label: 'Solicitar renovação', classe: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
                       responder_renovacao: { label: 'Responder renovação pendente', classe: 'bg-amber-600 hover:bg-amber-700 text-white' },
+                      substituir: { label: 'Iniciar substituição', classe: 'bg-purple-600 hover:bg-purple-700 text-white' },
                       encerrar: { label: 'Encerrar / Reprovar', classe: 'bg-rose-600 hover:bg-rose-700 text-white' },
                     };
                     const conf = mapConfig[acaoId] || { label: acaoId, classe: 'bg-slate-700 text-white' };
@@ -2619,11 +2680,34 @@ function RegistroOportunidadeDrawer({
               </p>
             </section>
 
-            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+            <section className="rounded-xl border border-purple-200 dark:border-purple-900/60 p-4 bg-purple-50/30 dark:bg-purple-950/10">
               <h3 className="font-bold text-slate-900 dark:text-white">Sucessão</h3>
-              <p className="mt-1 text-xs text-slate-500">
-                {ro.ro_anterior_id || ro.ro_sucessora_id ? 'Há vínculo de substituição nesta R.O.' : 'Sem substituição vinculada.'}
-              </p>
+              {!ro.ro_anterior_id && !sucessoraAtiva ? (
+                <p className="mt-1 text-xs text-slate-500">Sem substituição vinculada.</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {roAnterior && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-purple-600 dark:text-purple-400 font-semibold">← Anterior:</span>
+                      <span className="text-slate-700 dark:text-slate-200">{roAnterior.numero_ro || 'Sem número'}</span>
+                      <span className="text-slate-500">({roAnterior.situacao})</span>
+                    </div>
+                  )}
+                  {ro.ro_anterior_id && !roAnterior && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-purple-600 dark:text-purple-400 font-semibold">← Anterior:</span>
+                      <span className="text-slate-500 italic">Carregando...</span>
+                    </div>
+                  )}
+                  {sucessoraAtiva && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-purple-600 dark:text-purple-400 font-semibold">→ Sucessora:</span>
+                      <span className="text-slate-700 dark:text-slate-200">{sucessoraAtiva.numero_ro || 'Aguardando número'}</span>
+                      <span className="text-slate-500">({sucessoraAtiva.situacao})</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
 
             <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">

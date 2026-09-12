@@ -300,7 +300,7 @@ test('painel ordena eventos recentes primeiro e separa vigência, ciclo e açõe
 
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Backoffice')), ['enviar', 'aprovar', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aguardando aprovação')), ['aprovar', 'encerrar']);
-  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada', false)), ['solicitar_renovacao', 'encerrar']);
+  assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada', false)), ['solicitar_renovacao', 'substituir', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aprovada', true)), ['responder_renovacao', 'encerrar']);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
 });
@@ -632,27 +632,36 @@ test('busca de clientes e oportunidades protege caracteres reservados e não uti
   }
 });
 
-test('obterAcoesPermitidasRo bloqueia nova solicitação se houver ciclo pendente e nunca oferece substituir na Task 6', () => {
+test('obterAcoesPermitidasRo inclui substituir para Aprovada sem pendente e sem sucessora ativa (Task 7)', () => {
   const { obterAcoesPermitidasRo } = carregarDominioRos();
 
-  // Backoffice: enviar, aprovar, encerrar
+  // Backoffice: enviar, aprovar, encerrar (nunca substituir)
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Backoffice')), ['enviar', 'aprovar', 'encerrar']);
 
-  // Aguardando aprovação: aprovar, encerrar
+  // Aguardando aprovação: aprovar, encerrar (nunca substituir)
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Aguardando aprovação')), ['aprovar', 'encerrar']);
 
-  // Aprovada sem renovação pendente: solicitar_renovacao, encerrar (NUNCA substituir)
+  // Aprovada sem renovação pendente e sem sucessora: solicitar_renovacao, substituir, encerrar
   const acoesSemPendente = Array.from(obterAcoesPermitidasRo('Aprovada', false));
-  assert.deepEqual(acoesSemPendente, ['solicitar_renovacao', 'encerrar']);
-  assert.equal(acoesSemPendente.includes('substituir'), false);
+  assert.deepEqual(acoesSemPendente, ['solicitar_renovacao', 'substituir', 'encerrar']);
 
-  // Aprovada com renovação pendente: responder_renovacao, encerrar (NUNCA solicitar_renovacao, NUNCA substituir)
+  // Aprovada com renovação pendente: responder_renovacao, encerrar (NUNCA substituir)
   const acoesComPendente = Array.from(obterAcoesPermitidasRo('Aprovada', true));
   assert.deepEqual(acoesComPendente, ['responder_renovacao', 'encerrar']);
-  assert.equal(acoesComPendente.includes('solicitar_renovacao'), false);
   assert.equal(acoesComPendente.includes('substituir'), false);
+  assert.equal(acoesComPendente.includes('solicitar_renovacao'), false);
 
-  // Inativas
+  // Aprovada sem pendente mas COM sucessora ativa: solicitar_renovacao, encerrar (NUNCA substituir)
+  const acoesComSucessora = Array.from(obterAcoesPermitidasRo('Aprovada', false, { temSucessoraAtiva: true }));
+  assert.deepEqual(acoesComSucessora, ['solicitar_renovacao', 'encerrar']);
+  assert.equal(acoesComSucessora.includes('substituir'), false);
+
+  // Aprovada com pendente E com sucessora: responder_renovacao, encerrar (NUNCA substituir)
+  const acoesAmbasFlags = Array.from(obterAcoesPermitidasRo('Aprovada', true, { temSucessoraAtiva: true }));
+  assert.deepEqual(acoesAmbasFlags, ['responder_renovacao', 'encerrar']);
+  assert.equal(acoesAmbasFlags.includes('substituir'), false);
+
+  // Inativas: nenhuma ação
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Reprovada')), []);
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Substituída')), []);
@@ -1143,4 +1152,131 @@ test('app.js conecta onConflitoRoAtualizada entre RegistroOportunidadeDrawer e R
   assert.ok(appJs.includes('onConflitoRoAtualizada={handleConflitoRoAtualizada}'));
   assert.ok(appJs.includes('const handleConflitoRoAtualizada = useCallback((roFresca) => {'));
   assert.ok(appJs.includes('setRo(roFresca)'));
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task 7: Testes de substituição
+// ─────────────────────────────────────────────────────────────────────────
+
+test('validarPayloadAcaoRo valida a ação substituir corretamente (Task 7)', () => {
+  const { validarPayloadAcaoRo } = carregarDominioRos();
+
+  // Substituir sem dados adicionais funciona (somente versao_esperada e request_id)
+  const resultado = validarPayloadAcaoRo('substituir', {
+    versao_esperada: 3,
+    request_id: 'req-sub-001',
+  });
+  assert.equal(resultado.rota, 'substituir');
+  assert.equal(resultado.payload.versao_esperada, 3);
+  assert.equal(resultado.payload.request_id, 'req-sub-001');
+
+  // Substituir com dados mínimos (sem versao_esperada explícita, usa do contexto)
+  const resCtx = validarPayloadAcaoRo('substituir', {}, { versao: 5 });
+  assert.equal(resCtx.payload.versao_esperada, 5);
+
+  // Substituir sem nenhum dado funciona
+  const resVazio = validarPayloadAcaoRo('substituir', {});
+  assert.equal(resVazio.rota, 'substituir');
+  assert.equal(resVazio.payload.versao_esperada, null);
+});
+
+test('executarAcaoRo para substituir envia POST correto (Task 7)', async () => {
+  let ultimaReq = null;
+  const mockFetch = async (url, init) => {
+    ultimaReq = { url, init };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          id: 'nova-ro-uuid',
+          situacao: 'Backoffice',
+          ro_anterior_id: 'ro-original',
+          versao: 1,
+        },
+      }),
+    };
+  };
+
+  const { executarAcaoRo, validarPayloadAcaoRo } = carregarDominioRos({ fetchImpl: mockFetch });
+  const validado = validarPayloadAcaoRo('substituir', { versao_esperada: 3, request_id: 'req-sub-002' });
+  const resultado = await executarAcaoRo('ro-original', validado.rota, validado.payload, {
+    requestId: 'req-sub-002',
+  });
+
+  assert.equal(resultado.id, 'nova-ro-uuid');
+  assert.equal(resultado.situacao, 'Backoffice');
+  assert.equal(resultado.ro_anterior_id, 'ro-original');
+  assert.ok(ultimaReq.url.endsWith('/ro-original/substituir'));
+  const body = JSON.parse(ultimaReq.init.body);
+  assert.equal(body.versao_esperada, 3);
+  assert.equal(body.request_id, 'req-sub-002');
+});
+
+test('executarAcaoRo para substituir trata 409 (conflito de versão) sem apagar o formulário (Task 7)', async () => {
+  const mockFetch409 = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: 'Conflito de versão da R.O. anterior (esperada: 3, atual: 4)' }),
+  });
+
+  const { executarAcaoRo } = carregarDominioRos({ fetchImpl: mockFetch409 });
+  try {
+    await executarAcaoRo('ro-original', 'substituir', { versao_esperada: 3 });
+    assert.fail('Deveria ter lançado erro');
+  } catch (err) {
+    assert.equal(err.status, 409);
+    assert.ok(err.message.includes('Conflito') || err.message.includes('conflito') || err.message.includes('outra pessoa'));
+  }
+});
+
+test('obterAcoesPermitidasRo nunca oferece substituir para Backoffice, Aguardando, Encerrada, Reprovada ou Substituída (Task 7)', () => {
+  const { obterAcoesPermitidasRo } = carregarDominioRos();
+
+  const estados = ['Backoffice', 'Aguardando aprovação', 'Encerrada', 'Reprovada', 'Substituída'];
+  for (const estado of estados) {
+    const acoes = Array.from(obterAcoesPermitidasRo(estado));
+    assert.equal(acoes.includes('substituir'), false, `substituir não deveria estar em ${estado}`);
+  }
+});
+
+test('cadeia de substituição: R.O. anterior preserva situação até aprovação da sucessora (Task 7 - simulação)', () => {
+  // Este teste simula a lógica do banco: ao iniciar substituição, a anterior permanece Aprovada.
+  // A transição para Substituída só ocorre na RPC ro_aprovar quando a sucessora é aprovada.
+  const roAnterior = { id: 'ro-1', situacao: 'Aprovada', numero_ro: 'DELL-001', versao: 5, data_vencimento: '2026-12-31' };
+  const roSucessora = { id: 'ro-2', situacao: 'Backoffice', ro_anterior_id: 'ro-1', numero_ro: null, versao: 1 };
+
+  // Anterior permanece Aprovada enquanto sucessora está em Backoffice
+  const { obterAcoesPermitidasRo } = carregarDominioRos();
+
+  // Anterior tem uma sucessora ativa → não deve oferecer substituir novamente
+  const acoesAnterior = Array.from(obterAcoesPermitidasRo(roAnterior.situacao, false, { temSucessoraAtiva: true }));
+  assert.equal(acoesAnterior.includes('substituir'), false);
+  // Mas a anterior ainda permite solicitar renovação e encerrar
+  assert.ok(acoesAnterior.includes('solicitar_renovacao'));
+  assert.ok(acoesAnterior.includes('encerrar'));
+
+  // Sucessora em Backoffice permite enviar, aprovar, encerrar
+  const acoesSucessora = Array.from(obterAcoesPermitidasRo(roSucessora.situacao));
+  assert.deepEqual(acoesSucessora, ['enviar', 'aprovar', 'encerrar']);
+});
+
+test('app.js contém os elementos de UI de substituição (Task 7)', () => {
+  const appJs = lerArquivo('app.js');
+
+  // Botão "Iniciar substituição" no mapConfig
+  assert.ok(appJs.includes("substituir: { label: 'Iniciar substituição'"));
+
+  // Formulário de substituição no RoActionModal
+  assert.ok(appJs.includes("acao === 'substituir'"));
+  assert.ok(appJs.includes("Iniciar substituição de R.O."));
+  assert.ok(appJs.includes("Confirmar substituição"));
+  assert.ok(appJs.includes("permanece"));
+
+  // Seção de Sucessão enriquecida
+  assert.ok(appJs.includes('sucessoraAtiva'));
+  assert.ok(appJs.includes('roAnterior'));
+  assert.ok(appJs.includes('← Anterior:'));
+  assert.ok(appJs.includes('→ Sucessora:'));
 });
