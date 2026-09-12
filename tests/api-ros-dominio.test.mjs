@@ -51,12 +51,16 @@ test('solicitação e resposta de renovação são comandos distintos', () => {
   }).params.p_situacao, 'Negada');
 });
 
-test('substituição exige novo número e mantém referência da anterior', () => {
+test('substituição cria sucessora pendente e não exige número antecipado', () => {
   const result = interpretarComando('POST', `${uuid}/substituir`, {
-    numero_ro: 'NOVA-2', data_aprovacao: '2026-09-12', data_vencimento: '2026-12-11',
+    versao_esperada: 2, request_id: '11111111-1111-4111-8111-111111111112',
   });
   assert.equal(result.rpc, 'ro_substituir');
   assert.equal(result.params.p_ro_anterior_id, uuid);
+  assert.equal(result.params.p_versao_esperada, 2);
+  assert.throws(() => interpretarComando('POST', `${uuid}/substituir`, {
+    numero_ro: 'NOVA-2',
+  }), /campo/i);
 });
 
 test('encerramento exige situação final e data', () => {
@@ -103,6 +107,13 @@ test('interpretarConsulta valida paginação, filtros e rejeita parâmetros inv�
   assert.throws(() => interpretarConsulta(new URLSearchParams({ parametro_desconhecido: '123' })), /parâmetro/i);
 });
 
+test('datas civis inexistentes são rejeitadas antes de chegar ao banco', () => {
+  assert.throws(() => interpretarComando('POST', `${uuid}/aprovar`, {
+    numero_ro: 'RO-999', data_aprovacao: '2026-02-30', data_vencimento: '2026-12-11',
+  }), /data/i);
+  assert.throws(() => interpretarConsulta(new URLSearchParams({ vence_ate: '2026-04-31' })), /data/i);
+});
+
 test('comandos de mutação aceitam request_id para idempotência e versao_esperada para controle de concorrência', () => {
   const criacao = interpretarComando('POST', '', {
     negocio_id: uuid,
@@ -137,4 +148,3 @@ test('comandos de mutação aceitam request_id para idempotência e versao_esper
     versao_esperada: 'tres',
   }), /versão/i);
 });
-

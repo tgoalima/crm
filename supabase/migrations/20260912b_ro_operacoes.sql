@@ -1,5 +1,12 @@
 -- Operações transacionais usadas exclusivamente pela Edge Function api-ros.
 
+-- A chave de reenvio é global: uma mesma operação do cliente só pode gerar
+-- um evento de auditoria. O lock por chave nas RPCs evita a corrida entre o
+-- SELECT de idempotência e a primeira gravação.
+CREATE UNIQUE INDEX eventos_ro_request_id_unico
+    ON public.eventos_ro ((dados->>'request_id'))
+    WHERE dados ? 'request_id' AND dados->>'request_id' IS NOT NULL;
+
 CREATE FUNCTION public.ro_criar(
     p_negocio_id uuid,
     p_fabricante_id uuid,
@@ -18,6 +25,7 @@ BEGIN
 
     -- Idempotência por request_id
     IF p_request_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(p_request_id, 0));
         SELECT r.* INTO resultado
           FROM public.registros_oportunidade r
           JOIN public.eventos_ro e ON e.registro_oportunidade_id = r.id
@@ -47,12 +55,13 @@ CREATE FUNCTION public.ro_aprovar(
     p_autor_clickup_id text DEFAULT NULL, p_autor_nome text DEFAULT NULL
 ) RETURNS public.registros_oportunidade
 LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
-DECLARE ro public.registros_oportunidade; resultado public.registros_oportunidade;
+DECLARE ro public.registros_oportunidade; anterior public.registros_oportunidade; resultado public.registros_oportunidade;
 BEGIN
     IF p_autor_clickup_id IS NULL THEN RAISE EXCEPTION 'Autor obrigatório'; END IF;
 
     -- Idempotência por request_id
     IF p_request_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(p_request_id, 0));
         SELECT r.* INTO resultado
           FROM public.registros_oportunidade r
           JOIN public.eventos_ro e ON e.registro_oportunidade_id = r.id
@@ -77,6 +86,21 @@ BEGIN
            data_vencimento = p_data_vencimento, situacao = 'Aprovada'
      WHERE id = p_id
      RETURNING * INTO resultado;
+    IF ro.ro_anterior_id IS NOT NULL THEN
+        SELECT * INTO anterior FROM public.registros_oportunidade
+         WHERE id = ro.ro_anterior_id FOR UPDATE;
+        IF NOT FOUND OR anterior.situacao <> 'Aprovada' THEN
+            RAISE EXCEPTION 'A R.O. anterior não está disponível para substituição';
+        END IF;
+        UPDATE public.registros_oportunidade
+           SET situacao = 'Substituída', data_encerramento = p_data_aprovacao,
+               motivo_encerramento = 'Substituída pela R.O. ' || resultado.numero_ro
+         WHERE id = anterior.id;
+        INSERT INTO public.eventos_ro
+            (registro_oportunidade_id, tipo, autor_clickup_id, autor_nome, origem, dados)
+        VALUES (anterior.id, 'Substituída', p_autor_clickup_id, p_autor_nome, 'CRM',
+                jsonb_build_object('nova_ro_id', resultado.id, 'novo_numero', resultado.numero_ro));
+    END IF;
     INSERT INTO public.eventos_ro
         (registro_oportunidade_id, tipo, autor_clickup_id, autor_nome, origem, dados)
     VALUES (resultado.id, 'Aprovada', p_autor_clickup_id, p_autor_nome, 'CRM',
@@ -99,6 +123,7 @@ BEGIN
 
     -- Idempotência por request_id
     IF p_request_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(p_request_id, 0));
         SELECT ren.* INTO resultado
           FROM public.renovacoes_ro ren
           JOIN public.eventos_ro e ON e.registro_oportunidade_id = ren.registro_oportunidade_id
@@ -148,10 +173,13 @@ BEGIN
 
     -- Idempotência por request_id
     IF p_request_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(p_request_id, 0));
         SELECT ren.* INTO resultado
           FROM public.renovacoes_ro ren
           JOIN public.eventos_ro e ON e.registro_oportunidade_id = ren.registro_oportunidade_id
-         WHERE e.registro_oportunidade_id = p_id AND e.dados->>'request_id' = p_request_id
+         WHERE e.registro_oportunidade_id = p_id
+           AND e.dados->>'request_id' = p_request_id
+           AND e.tipo = 'Renovação ' || lower(p_situacao)
          LIMIT 1;
         IF FOUND THEN
             RETURN resultado;
@@ -176,25 +204,22 @@ BEGIN
 END; $$;
 
 CREATE FUNCTION public.ro_substituir(
-    p_ro_anterior_id uuid, p_numero_ro text, p_data_aprovacao date, p_data_vencimento date,
-    p_versao_esperada integer DEFAULT NULL, p_request_id text DEFAULT NULL,
-    p_autor_clickup_id text DEFAULT NULL, p_autor_nome text DEFAULT NULL
+    p_ro_anterior_id uuid, p_versao_esperada integer DEFAULT NULL,
+    p_request_id text DEFAULT NULL, p_autor_clickup_id text DEFAULT NULL,
+    p_autor_nome text DEFAULT NULL
 ) RETURNS public.registros_oportunidade
 LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
 DECLARE anterior public.registros_oportunidade; resultado public.registros_oportunidade;
 BEGIN
     IF p_autor_clickup_id IS NULL THEN RAISE EXCEPTION 'Autor obrigatório'; END IF;
-
-    -- Idempotência por request_id
     IF p_request_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(p_request_id, 0));
         SELECT r.* INTO resultado
           FROM public.registros_oportunidade r
           JOIN public.eventos_ro e ON e.registro_oportunidade_id = r.id
-         WHERE e.dados->>'request_id' = p_request_id AND e.tipo = 'Criada por substituição'
+         WHERE e.dados->>'request_id' = p_request_id AND e.tipo = 'Substituição iniciada'
          LIMIT 1;
-        IF FOUND THEN
-            RETURN resultado;
-        END IF;
+        IF FOUND THEN RETURN resultado; END IF;
     END IF;
 
     SELECT * INTO anterior FROM public.registros_oportunidade
@@ -207,25 +232,16 @@ BEGIN
     END IF;
 
     INSERT INTO public.registros_oportunidade
-        (negocio_id, fabricante_id, numero_ro, categoria, titulo, cenario,
-         situacao, data_solicitacao, data_aprovacao, data_vencimento,
+        (negocio_id, fabricante_id, categoria, titulo, cenario,
          responsavel_operacional_clickup_id, ro_anterior_id)
-    VALUES (anterior.negocio_id, anterior.fabricante_id, p_numero_ro,
-            anterior.categoria, anterior.titulo, anterior.cenario, 'Aprovada',
-            p_data_aprovacao, p_data_aprovacao, p_data_vencimento,
-            anterior.responsavel_operacional_clickup_id, anterior.id)
+    VALUES (anterior.negocio_id, anterior.fabricante_id, anterior.categoria,
+            anterior.titulo, anterior.cenario, anterior.responsavel_operacional_clickup_id,
+            anterior.id)
     RETURNING * INTO resultado;
-    UPDATE public.registros_oportunidade
-       SET situacao = 'Substituída', data_encerramento = p_data_aprovacao,
-           motivo_encerramento = 'Substituída pela R.O. ' || p_numero_ro
-     WHERE id = anterior.id;
     INSERT INTO public.eventos_ro
         (registro_oportunidade_id, tipo, autor_clickup_id, autor_nome, origem, dados)
-    VALUES
-        (anterior.id, 'Substituída', p_autor_clickup_id, p_autor_nome, 'CRM',
-         jsonb_build_object('nova_ro_id', resultado.id, 'novo_numero', p_numero_ro, 'request_id', p_request_id)),
-        (resultado.id, 'Criada por substituição', p_autor_clickup_id, p_autor_nome, 'CRM',
-         jsonb_build_object('ro_anterior_id', anterior.id, 'request_id', p_request_id));
+    VALUES (resultado.id, 'Substituição iniciada', p_autor_clickup_id, p_autor_nome, 'CRM',
+            jsonb_build_object('ro_anterior_id', anterior.id, 'request_id', p_request_id));
     RETURN resultado;
 END; $$;
 
@@ -242,6 +258,7 @@ BEGIN
 
     -- Idempotência por request_id
     IF p_request_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(p_request_id, 0));
         SELECT r.* INTO resultado
           FROM public.registros_oportunidade r
           JOIN public.eventos_ro e ON e.registro_oportunidade_id = r.id
@@ -277,13 +294,12 @@ REVOKE ALL ON FUNCTION public.ro_criar(uuid, uuid, text, text, text, text, text,
 REVOKE ALL ON FUNCTION public.ro_aprovar(uuid, text, date, date, integer, text, text, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ro_solicitar_renovacao(uuid, date, jsonb, integer, text, text, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ro_responder_renovacao(uuid, integer, text, date, date, text, jsonb, text, text, text) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.ro_substituir(uuid, text, date, date, integer, text, text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ro_substituir(uuid, integer, text, text, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ro_encerrar(uuid, text, date, text, integer, text, text, text) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.ro_criar(uuid, uuid, text, text, text, text, text, text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ro_aprovar(uuid, text, date, date, integer, text, text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ro_solicitar_renovacao(uuid, date, jsonb, integer, text, text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ro_responder_renovacao(uuid, integer, text, date, date, text, jsonb, text, text, text) TO service_role;
-GRANT EXECUTE ON FUNCTION public.ro_substituir(uuid, text, date, date, integer, text, text, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.ro_substituir(uuid, integer, text, text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ro_encerrar(uuid, text, date, text, integer, text, text, text) TO service_role;
-

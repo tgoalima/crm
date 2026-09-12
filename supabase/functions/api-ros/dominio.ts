@@ -30,8 +30,16 @@ function uuid(valor: unknown, nome: string): string {
 
 function data(valor: unknown, nome: string): string {
   const result = texto(valor, nome, true)!;
-  if (!DATA.test(result) || Number.isNaN(Date.parse(`${result}T00:00:00Z`))) {
+  const partes = result.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!DATA.test(result) || !partes) {
     throw new ErroComando(400, `${nome} deve usar o formato YYYY-MM-DD.`);
+  }
+  const ano = Number(partes[1]);
+  const mes = Number(partes[2]);
+  const dia = Number(partes[3]);
+  const civil = new Date(Date.UTC(ano, mes - 1, dia));
+  if (civil.getUTCFullYear() !== ano || civil.getUTCMonth() !== mes - 1 || civil.getUTCDate() !== dia) {
+    throw new ErroComando(400, `${nome} deve ser uma data válida.`);
   }
   return result;
 }
@@ -151,12 +159,9 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
   }
   match = rota.match(new RegExp(`^(${UUID_PATTERN})/substituir$`, 'i'));
   if (match) {
-    somente(corpo, ['numero_ro', 'data_aprovacao', 'data_vencimento', 'versao_esperada', 'request_id']);
+    somente(corpo, ['versao_esperada', 'request_id']);
     return { rpc: 'ro_substituir', params: {
       p_ro_anterior_id: match[1],
-      p_numero_ro: texto(corpo.numero_ro, 'O novo número da R.O.', true),
-      p_data_aprovacao: data(corpo.data_aprovacao, 'A data de aprovação'),
-      p_data_vencimento: data(corpo.data_vencimento, 'A data de vencimento'),
       p_versao_esperada: versaoEsperada(corpo.versao_esperada),
       p_request_id: texto(corpo.request_id, 'O request_id'),
     } };
@@ -177,4 +182,3 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
   }
   throw new ErroComando(404, 'Rota não encontrada.');
 }
-
