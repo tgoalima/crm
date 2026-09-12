@@ -8386,7 +8386,7 @@ function App() {
   // 'info'/'warning' já usados em vários lugares, ex.: "Negócio Congelado")
   // caía direto no branch de erro (toast vermelho), fazendo mensagens
   // neutras/informativas aparecerem como se fosse uma falha.
-  const showToast = (msg, type = 'success') => {
+  function showToast(msg, type = 'success') {
     if (type === 'success') {
       setSuccessMsg(msg);
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -8400,7 +8400,7 @@ function App() {
       setErrorMsg(msg);
       setTimeout(() => setErrorMsg(''), 4000);
     }
-  };
+  }
 
   // 4. Verificação de Apenas Leitura (Read-Only)
   const isReadOnly = false;

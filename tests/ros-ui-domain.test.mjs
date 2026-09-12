@@ -1659,3 +1659,14 @@ test('Campos legados de R.O. em empresas.js são marcados como dados legados e p
   // Não são enviados para a rota /api/ros
   assert.ok(!empresasJs.includes('/api/ros/legado'));
 });
+
+test('App não acessa showToast em zona morta temporal ao inicializar callbacks de R.O.', () => {
+  const appJs = lerArquivo('app.js');
+
+  assert.ok(appJs.includes('const handleNovaRoSucesso = useCallback('));
+  assert.ok(
+    appJs.includes('function showToast('),
+    'showToast precisa ser declaração de função içada, pois callbacks de R.O. a referenciam antes da sua posição textual',
+  );
+  assert.ok(!appJs.includes('const showToast = ('), 'showToast não pode ser const declarada após os callbacks de R.O.');
+});
