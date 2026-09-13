@@ -414,6 +414,7 @@ const {
   formatarCategoriaRo,
   obterLinkOportunidade,
   tratarEstadoResumo,
+  obterHojeSaoPaulo,
   calcularVigenciaRo,
   obterRotuloSituacao,
   calcularPaginacao,
