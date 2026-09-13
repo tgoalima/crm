@@ -43,6 +43,15 @@ function texto(valor: unknown, nome: string, obrigatorio = false): string | null
   return valor.trim();
 }
 
+function textoDescricao(valor: unknown): string | null {
+  if (valor === undefined || valor === null) return null;
+  if (typeof valor !== 'string') throw new ErroComando(400, 'A descrição é inválida.');
+  const descricao = valor.trim();
+  if (!descricao) return null;
+  if (descricao.length > 6000) throw new ErroComando(422, 'A descrição pode ter no máximo 6.000 caracteres.');
+  return descricao;
+}
+
 function uuid(valor: unknown, nome: string): string {
   const result = texto(valor, nome, true)!;
   if (!UUID.test(result)) throw new ErroComando(400, `${nome} é inválido.`);
@@ -195,7 +204,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
   const rota = path.replace(/^\/+|\/+$/g, '');
   if (!rota) {
     somente(corpo, [
-      'negocio_id', 'fabricante_id', 'categoria', 'titulo', 'cenario',
+      'negocio_id', 'fabricante_id', 'categoria', 'titulo', 'descricao', 'cenario',
       'responsavel_operacional_clickup_id', 'request_id',
     ]);
     return {
@@ -205,6 +214,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
         p_fabricante_id: uuid(corpo.fabricante_id, 'O fabricante'),
         p_categoria: texto(corpo.categoria, 'A categoria', true),
         p_titulo: texto(corpo.titulo, 'O título'),
+        p_descricao: textoDescricao(corpo.descricao),
         p_cenario: texto(corpo.cenario, 'O cenário'),
         p_responsavel_operacional_clickup_id: texto(corpo.responsavel_operacional_clickup_id, 'O responsável'),
         p_request_id: texto(corpo.request_id, 'O request_id'),
@@ -212,7 +222,21 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
     };
   }
 
-  let match = rota.match(new RegExp(`^(${UUID_PATTERN})/enviar$`, 'i'));
+  let match = rota.match(new RegExp(`^(${UUID_PATTERN})/descricao$`, 'i'));
+  if (match) {
+    somente(corpo, ['descricao', 'versao_esperada', 'request_id']);
+    return {
+      rpc: 'ro_atualizar_descricao',
+      params: {
+        p_id: match[1],
+        p_descricao: textoDescricao(corpo.descricao),
+        p_versao_esperada: versaoEsperada(corpo.versao_esperada),
+        p_request_id: texto(corpo.request_id, 'O request_id'),
+      },
+    };
+  }
+
+  match = rota.match(new RegExp(`^(${UUID_PATTERN})/enviar$`, 'i'));
   if (match) {
     somente(corpo, ['data_solicitacao', 'observacao', 'versao_esperada', 'request_id']);
     return {

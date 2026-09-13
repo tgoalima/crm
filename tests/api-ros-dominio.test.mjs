@@ -23,6 +23,7 @@ test('criação exige oportunidade, fabricante e categoria', () => {
         p_fabricante_id: uuid,
         p_categoria: 'Infraestrutura',
         p_titulo: 'Datacenter',
+        p_descricao: null,
         p_cenario: null,
         p_responsavel_operacional_clickup_id: null,
         p_request_id: null,
@@ -30,6 +31,30 @@ test('criação exige oportunidade, fabricante e categoria', () => {
     },
   );
   assert.throws(() => interpretarComando('POST', '', { fabricante_id: uuid, categoria: 'Infra' }), /oportunidade/i);
+});
+
+test('descrição operacional é enviada na criação, possui limite e pode ser atualizada', () => {
+  const descricao = 'Contato: Ana\nItens: servidores\nValor estimado: R$ 50.000';
+  const criacao = interpretarComando('POST', '', {
+    negocio_id: uuid,
+    fabricante_id: uuid,
+    categoria: 'Infraestrutura',
+    descricao,
+  });
+  assert.equal(criacao.params.p_descricao, descricao);
+
+  const atualizacao = interpretarComando('POST', `${uuid}/descricao`, {
+    descricao,
+    versao_esperada: 3,
+    request_id: 'descricao-1',
+  });
+  assert.equal(atualizacao.rpc, 'ro_atualizar_descricao');
+  assert.equal(atualizacao.params.p_descricao, descricao);
+  assert.equal(atualizacao.params.p_versao_esperada, 3);
+  assert.throws(() => interpretarComando('POST', `${uuid}/descricao`, {
+    descricao: 'x'.repeat(6001),
+    versao_esperada: 3,
+  }), /6\.000 caracteres/i);
 });
 
 test('estágio Ganho ou Perdido não permite criar R.O., mas etapas ativas e Congelado permitem', () => {
@@ -209,6 +234,16 @@ test('migration do resumo não expõe função SECURITY DEFINER ao público', ()
   assert.doesNotMatch(migration, /SECURITY DEFINER/);
   assert.match(migration, /REVOKE ALL ON FUNCTION public\.ro_resumo_agregado[\s\S]*FROM PUBLIC, anon, authenticated;/);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.ro_resumo_agregado[\s\S]*TO service_role;/);
+});
+
+test('migration da descrição limita conteúdo, usa SECURITY INVOKER e restringe RPCs ao service_role', () => {
+  const migration = lerArquivo('supabase/migrations/20260914b_ro_descricao_operacional.sql');
+  assert.match(migration, /char_length\(descricao\) <= 6000/);
+  assert.match(migration, /CREATE FUNCTION public\.ro_atualizar_descricao/);
+  assert.match(migration, /SECURITY INVOKER/);
+  assert.doesNotMatch(migration, /SECURITY DEFINER/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.ro_atualizar_descricao[\s\S]*TO service_role;/);
+  assert.match(migration, /registros_oportunidade_herdar_descricao_sucessora/);
 });
 
 test('consulta de R.O. usa somente colunas existentes de contas', () => {

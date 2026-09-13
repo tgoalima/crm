@@ -2536,10 +2536,19 @@ function RegistroOportunidadeDrawer({
   const [roAnterior, setRoAnterior] = useState(null);
   const [statusRelacoes, setStatusRelacoes] = useState(supabaseClient ? 'carregando' : 'indisponivel');
   const [carregandoNavegacao, setCarregandoNavegacao] = useState(false);
+  const [descricaoEditada, setDescricaoEditada] = useState(roInicial?.descricao || '');
+  const [salvandoDescricao, setSalvandoDescricao] = useState(false);
+  const [erroDescricao, setErroDescricao] = useState(null);
 
   useEffect(() => {
     setRo(roInicial);
+    setDescricaoEditada(roInicial?.descricao || '');
+    setErroDescricao(null);
   }, [roInicial]);
+
+  useEffect(() => {
+    setDescricaoEditada(ro?.descricao || '');
+  }, [ro?.id, ro?.descricao]);
 
   // Buscar sucessora ativa e R.O. anterior para cadeia de substituição usando apenas o prop supabaseClient
   const buscarRelacoes = useCallback(async () => {
@@ -2684,6 +2693,27 @@ function RegistroOportunidadeDrawer({
     await buscarRelacoes();
   };
 
+  const salvarDescricao = async () => {
+    if (!ro?.id || !executarAcaoRo) return;
+    setErroDescricao(null);
+    setSalvandoDescricao(true);
+    try {
+      await executarAcaoRo(ro.id, 'descricao', {
+        descricao: descricaoEditada,
+        versao_esperada: ro.versao,
+      }, {
+        getSupabaseHeaders,
+        gerarRequestId: gerarRequestIdRo,
+      });
+      await recarregarRoCompleta();
+      if (showToast) showToast('Descrição operacional atualizada.', 'success');
+    } catch (err) {
+      setErroDescricao(err?.message || 'Não foi possível salvar a descrição. Tente novamente.');
+    } finally {
+      setSalvandoDescricao(false);
+    }
+  };
+
   return (
     <>
       <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -2716,6 +2746,36 @@ function RegistroOportunidadeDrawer({
               <div>
                 <p className="text-xs text-slate-500">Categoria</p>
                 <p className="font-semibold text-slate-900 dark:text-white">{formatarCategoriaRo ? formatarCategoriaRo(ro.categoria) : '—'}</p>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white">Descrição operacional</h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Contexto para o registro no fabricante: contatos, itens, valores, resumo e próximos passos.</p>
+                </div>
+                <span className="shrink-0 text-[11px] font-medium text-slate-400">{descricaoEditada.length}/6000</span>
+              </div>
+              <textarea
+                value={descricaoEditada}
+                onChange={(e) => setDescricaoEditada(e.target.value)}
+                maxLength={6000}
+                rows={10}
+                disabled={salvandoDescricao}
+                placeholder="Ex.: Contato: nome e cargo. Itens e quantidades. Valor estimado. O que está sendo trabalhado e próximo passo."
+                className="mt-3 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+              {erroDescricao && <p className="mt-2 text-xs font-medium text-rose-600 dark:text-rose-400">{erroDescricao}</p>}
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={salvarDescricao}
+                  disabled={salvandoDescricao}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {salvandoDescricao ? 'Salvando...' : 'Salvar descrição'}
+                </button>
               </div>
             </section>
 
@@ -2892,6 +2952,7 @@ function NovaRoModal({
   const [fabricanteId, setFabricanteId] = useState("");
   const [categoria, setCategoria] = useState("");
   const [titulo, setTitulo] = useState("");
+  const [descricao, setDescricao] = useState("");
   const [cenario, setCenario] = useState("");
   const [responsavelId, setResponsavelId] = useState("");
 
@@ -3024,6 +3085,7 @@ function NovaRoModal({
       fabricante_id: fabricanteId,
       categoria: categoria,
       titulo: titulo,
+      descricao: descricao,
       cenario: cenario,
       responsavel_operacional_clickup_id: responsavelId,
       request_id: requestIdRef.current,
@@ -3281,6 +3343,24 @@ function NovaRoModal({
               placeholder="Ex: Switches Core Data Center, Firewall Perímetro..."
               className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
             />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Descrição operacional da R.O. (opcional)
+              </label>
+              <span className="text-[11px] text-slate-400">{descricao.length}/6000</span>
+            </div>
+            <textarea
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+              maxLength={6000}
+              rows={7}
+              placeholder="Contato e cargo; itens e quantidades; valor estimado; resumo do que está sendo trabalhado e próximos passos."
+              className="w-full resize-y px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+            />
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Este é o contexto da R.O. para o fabricante; ele não substitui as atualizações comerciais da oportunidade.</p>
           </div>
 
           {/* Cenário e Responsável Operacional (Opcionais) */}

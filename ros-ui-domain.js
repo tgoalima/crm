@@ -437,12 +437,19 @@
     if (!categoria) {
       throw new Error('A categoria é obrigatória.');
     }
+    const descricao = payload.descricao === undefined || payload.descricao === null
+      ? null
+      : String(payload.descricao).trim() || null;
+    if (descricao && descricao.length > 6000) {
+      throw new Error('A descrição pode ter no máximo 6.000 caracteres.');
+    }
 
     return {
       negocio_id: negocioId,
       fabricante_id: fabricanteId,
       categoria,
       titulo: payload.titulo ? String(payload.titulo).trim() : null,
+      descricao,
       cenario: payload.cenario ? String(payload.cenario).trim() : null,
       responsavel_operacional_clickup_id: payload.responsavel_operacional_clickup_id ? String(payload.responsavel_operacional_clickup_id).trim() : null,
       request_id: payload.request_id ? String(payload.request_id).trim() : null,

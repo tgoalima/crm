@@ -363,6 +363,7 @@ test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cen
   assert.equal(limpoMinimo.cenario, null);
   assert.equal(limpoMinimo.responsavel_operacional_clickup_id, null);
   assert.equal(limpoMinimo.titulo, null);
+  assert.equal(limpoMinimo.descricao, null);
 
   // Sucesso com todos os campos preenchidos
   const limpoCompleto = validarPayloadCriacaoRo({
@@ -370,11 +371,13 @@ test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cen
     fabricante_id: 'fab-2',
     categoria: 'Nuvem',
     titulo: 'Expansão Datacenter',
+    descricao: 'Contato: Ana\nItens: servidores\nValor: R$ 50.000',
     cenario: 'Migração de servidores legados',
     responsavel_operacional_clickup_id: '90848927',
     request_id: 'req-stable-1',
   });
   assert.equal(limpoCompleto.titulo, 'Expansão Datacenter');
+  assert.match(limpoCompleto.descricao, /Valor/);
   assert.equal(limpoCompleto.cenario, 'Migração de servidores legados');
   assert.equal(limpoCompleto.responsavel_operacional_clickup_id, '90848927');
   assert.equal(limpoCompleto.request_id, 'req-stable-1');
@@ -1703,4 +1706,20 @@ test('Painel de R.Os usa superfícies escuras válidas e inicia sem ocupar altur
   assert.ok(painelRos.includes('dark:bg-slate-800'), 'Cartões e superfícies de R.Os devem ter fundo escuro válido');
   assert.ok(!painelRos.includes('dark:bg-slate-850'), 'slate-850 não pertence à paleta Tailwind e mantém superfícies brancas no dark mode');
   assert.ok(!painelRos.includes('dark:bg-slate-750'), 'slate-750 não pertence à paleta Tailwind e mantém controles claros no dark mode');
+});
+
+test('cadastro e painel lateral oferecem descrição operacional editável da R.O.', () => {
+  const appJs = fs.readFileSync(path.resolve('app.js'), 'utf8');
+  const drawerInicio = appJs.indexOf('function RegistroOportunidadeDrawer');
+  const drawerFim = appJs.indexOf('function NovaRoModal');
+  const drawer = appJs.slice(drawerInicio, drawerFim);
+  const modalInicio = appJs.indexOf('function NovaRoModal');
+  const modalFim = appJs.indexOf('function RegistrosOportunidadeView');
+  const modal = appJs.slice(modalInicio, modalFim);
+
+  assert.match(modal, /Descrição operacional da R\.O\./);
+  assert.match(modal, /descricao:\s*descricao/);
+  assert.match(drawer, /Descrição operacional/);
+  assert.match(drawer, /Salvar descrição/);
+  assert.match(drawer, /'descricao'/);
 });
