@@ -606,30 +606,6 @@ const formatMaskedCurrency = (value) => {
   }).format(num);
 };
 
-const getNextVersionLetter = (currentVersao) => {
-  if (!currentVersao || currentVersao.length < 2) return 'vA';
-  const prefix = 'v';
-  const letters = currentVersao.substring(1);
-  let charArray = letters.split('');
-  let carry = true;
-  for (let i = charArray.length - 1; i >= 0; i--) {
-    if (carry) {
-      let code = charArray[i].charCodeAt(0) + 1;
-      if (code > 90) {
-        charArray[i] = 'A';
-        carry = true;
-      } else {
-        charArray[i] = String.fromCharCode(code);
-        carry = false;
-      }
-    }
-  }
-  if (carry) {
-    charArray.unshift('A');
-  }
-  return prefix + charArray.join('');
-};
-
 // ─────────────────────────────────────────────
 // ABA ATIVIDADES REPAGINADA — helpers puros (Fase 3).
 // ─────────────────────────────────────────────
@@ -8989,95 +8965,21 @@ function App() {
         await handleSaveProposal();
       }
 
-      // 2. Busca os dados reais e atualizados da proposta base (vA) direto do banco
-      const { data: dbBaseProp, error: dbPropErr } = await supabaseClient
-        .from('propostas')
-        .select('*')
-        .eq('id', currentProposta.id)
-        .single();
-
-      if (dbPropErr) {
-        console.error('Erro ao buscar proposta base atualizada, usando dados em memória:', dbPropErr);
-      }
-
-      const basePropData = dbBaseProp || currentProposta;
-
-      // 3. Busca os itens da proposta base (vA) direto do banco
-      const { data: dbBaseItems } = await supabaseClient
-        .from('itens_proposta')
-        .select('*')
-        .eq('proposta_id', currentProposta.id);
-
-      const itemsToClone = (dbBaseItems && dbBaseItems.length > 0) ? dbBaseItems : (itens || []);
-
-      // 4. Calcula o valor total real da proposta base com base nos itens
-      let calculatedBaseTotal = 0;
-      if (itemsToClone.length > 0) {
-        calculatedBaseTotal = itemsToClone.reduce((acc, item) => {
-          const q = parseInt(item.quantidade) || 1;
-          const p = parseFloat(item.preco_unitario) || 0;
-          return acc + (q * p);
-        }, 0);
-      }
-      
-      const finalBaseTotal = calculatedBaseTotal > 0 
-        ? calculatedBaseTotal 
-        : (parseFloat(basePropData.total_proposta) || (realTimeGrandTotal > 0 ? realTimeGrandTotal : 0));
-
-      // Garante que o valor da proposta base (vA) fique preservado intacto no banco Supabase
-      if (finalBaseTotal > 0 && parseFloat(basePropData.total_proposta) !== finalBaseTotal) {
-        const { error: baseUpdateErr } = await supabaseClient
-          .from('propostas')
-          .update({ total_proposta: finalBaseTotal })
-          .eq('id', currentProposta.id);
-        if (baseUpdateErr) {
-          console.error('Erro ao atualizar valor da proposta base:', baseUpdateErr);
-        }
-      }
-
-      // 5. Calcula a próxima versão (ex: vA -> vB)
-      const nextVersao = getNextVersionLetter(basePropData.versao || currentProposta.versao);
-
-      // 6. Insere a nova proposta (vB) mantendo o valor base herdado e a situação como 'Ativa'
-      const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : (basePropData.criado_por || '');
-      const authorUserId = userProfile?.id ? String(userProfile.id) : (basePropData.criado_por_user_id || null);
-      const { data: newProp, error: propErr } = await supabaseClient
-        .from('propostas')
-        .insert({
-          clickup_negocio_id: clickupTaskId,
-          versao: nextVersao,
-          cenario: basePropData.cenario || '',
-          situacao: 'Ativa',
-          total_proposta: finalBaseTotal,
-          criado_por: currentResponsavel,
-          criado_por_user_id: authorUserId,
-          data_inicio: basePropData.data_inicio || currentProposta?.data_inicio || clickupTaskDates?.start_date || null,
-          // Nunca herda due_date do ClickUp como data_fechamento (ver comentário em loadProposalDetails).
-          data_fechamento: null
-        })
-        .select()
-        .single();
+      // A sequência e a clonagem acontecem no banco, sob lock por oportunidade.
+      // Assim a versão aberta no drawer jamais decide a próxima letra.
+      const currentResponsavel = selectedTask ? selectedTask.responsavel_negocio : (currentProposta.criado_por || '');
+      const authorUserId = userProfile?.id ? String(userProfile.id) : (currentProposta.criado_por_user_id || null);
+      const { data: novaVersao, error: propErr } = await supabaseClient.rpc('gerar_proxima_versao_proposta', {
+        p_clickup_negocio_id: clickupTaskId,
+        p_criado_por: currentResponsavel,
+        p_criado_por_user_id: authorUserId
+      });
 
       if (propErr) throw propErr;
+      const newProp = Array.isArray(novaVersao) ? novaVersao[0] : novaVersao;
+      if (!newProp?.id || !newProp?.versao) throw new Error('A criação da nova versão não retornou os dados esperados.');
 
-      // 7. Duplica os itens da base (vA) para a nova versão (vB) sem tocar na base
-      if (itemsToClone.length > 0) {
-        const clonedItens = itemsToClone.map(item => ({
-          proposta_id: newProp.id,
-          produto_id: item.produto_id,
-          quantidade: Math.max(1, parseInt(item.quantidade) || 1),
-          preco_unitario: Math.max(0, parseFloat(item.preco_unitario) || 0),
-          distribuidor_id: item.distribuidor_id || null
-        }));
-
-        const { error: itemsErr } = await supabaseClient
-          .from('itens_proposta')
-          .insert(clonedItens);
-
-        if (itemsErr) throw itemsErr;
-      }
-
-      showToast(`Nova versão ${nextVersao} gerada preservando o histórico de ${basePropData.versao}!`, 'success');
+      showToast(`Nova versão ${newProp.versao} gerada a partir da última versão da oportunidade.`, 'success');
       await loadPropostas(newProp.id);
     } catch (err) {
       console.error("Erro ao gerar nova versão:", err);

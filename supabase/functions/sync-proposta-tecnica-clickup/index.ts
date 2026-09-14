@@ -74,24 +74,36 @@ function rankToLetters(rank: number): string {
 }
 
 // Maior letra de versão já existente entre as tarefas "Enviar Proposta vX"
-// da lista técnica (0 se a lista estiver vazia ou não tiver nenhuma).
+// da lista técnica. Erro de leitura não é lista vazia: o chamador deve parar
+// a sincronização para nunca criar uma versão inicial por engano.
 async function getMaxVersionRankInList(listaId: string, token: string): Promise<number> {
-  const res = await clickupFetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true`, {
-    headers: { Authorization: token },
-  });
-  if (!res.ok) return 0;
-  const data = await res.json();
-  const tasks = data.tasks || [];
   const re = /^Enviar Proposta\s+v([A-Za-z]+)/i;
   let maxRank = 0;
-  for (const t of tasks) {
-    const m = (t.name || "").match(re);
-    if (m) {
-      const rank = letterRank(m[1]);
-      if (rank > maxRank) maxRank = rank;
+  const limite = 100;
+
+  for (let pagina = 0; pagina < 1000; pagina += 1) {
+    const res = await clickupFetch(`https://api.clickup.com/api/v2/list/${listaId}/task?include_closed=true&limit=${limite}&page=${pagina}`, {
+      headers: { Authorization: token },
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`GET tarefas da lista ${listaId}: ${res.status} ${errText}`);
     }
+
+    const data = await res.json();
+    if (!Array.isArray(data?.tasks)) {
+      throw new Error(`GET tarefas da lista ${listaId}: resposta inválida`);
+    }
+    for (const t of data.tasks) {
+      const m = (t.name || "").match(re);
+      if (m) {
+        const rank = letterRank(m[1]);
+        if (rank > maxRank) maxRank = rank;
+      }
+    }
+    if (data.tasks.length < limite) return maxRank;
   }
-  return maxRank;
+  throw new Error(`GET tarefas da lista ${listaId}: paginação excedeu o limite de segurança`);
 }
 
 // Comparação sem diferenciar maiúsculas/minúsculas: negócios legados (lista
@@ -259,7 +271,20 @@ Deno.serve(async (req) => {
     // controlados manualmente pelo ClickUp antes do CRM existir).
     const versaoLetrasCrm = String(record.versao || "").replace(/^v/i, "");
     const rankCrm = letterRank(versaoLetrasCrm) || 1;
-    const maxRankClickUp = await getMaxVersionRankInList(listaId, clickupToken);
+    let maxRankClickUp: number;
+    try {
+      maxRankClickUp = await getMaxVersionRankInList(listaId, clickupToken);
+    } catch (error) {
+      const detalhe = error instanceof Error ? error.message : String(error);
+      console.error(`[sync-proposta-tecnica-clickup] Falha ao ler versões técnicas: ${detalhe}`);
+      await supabase.from("propostas").update({
+        sync_status: "failed",
+        sync_error: `Não foi possível ler as versões técnicas no ClickUp. Nenhuma tarefa foi criada: ${detalhe}`,
+      }).eq("id", record.id);
+      return new Response(JSON.stringify({ success: false, error: "Falha ao ler versões técnicas no ClickUp" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200,
+      });
+    }
     const rankFinal = maxRankClickUp >= rankCrm ? maxRankClickUp + 1 : rankCrm;
     const versaoFinal = "v" + rankToLetters(rankFinal);
 
