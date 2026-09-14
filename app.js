@@ -2087,6 +2087,7 @@ function RoActionModal({
 
     const contexto = {
       versao: versaoEsperada,
+      data_solicitacao: ro?.data_solicitacao,
       data_vencimento: ro?.data_vencimento,
       ciclo: cicloPendente?.ciclo || 1,
     };

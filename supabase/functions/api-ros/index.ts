@@ -8,6 +8,7 @@ import {
   obterHojeSp,
   predicadoIlikePostgrest,
   ErroComando,
+  classificarErroRpcRo,
 } from "./dominio.ts";
 import { coletarEvidenciasHumanas, lerClassificacaoAutores } from "../mcp-brain/evidencias-humanas.ts";
 import { coletarComentariosClickUp } from "../mcp-brain/comentarios.ts";
@@ -323,8 +324,9 @@ Deno.serve(async (req) => {
     });
     if (error) {
       console.error("[api-ros] RPC falhou", { rpc: comando.rpc, code: error.code, message: error.message });
-      const conflito = error.code === "23505" || error.code === "23514" || error.code === "P0001";
-      return json({ error: conflito ? error.message : "Não foi possível concluir a operação da R.O." }, conflito ? 409 : 500);
+      const erroClassificado = classificarErroRpcRo(error.code, error.message);
+      if (erroClassificado) return json({ error: erroClassificado.error }, erroClassificado.status);
+      return json({ error: "Não foi possível concluir a operação da R.O." }, 500);
     }
     return json({ data }, comando.rpc === "ro_criar" ? 201 : 200);
   } catch (error) {

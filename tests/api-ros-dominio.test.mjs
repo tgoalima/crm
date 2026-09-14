@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const lerArquivo = (caminho) => fs.readFileSync(new URL('../' + caminho, import.meta.url), 'utf8');
-import { interpretarComando, interpretarConsulta, interpretarConsultaEvidencias, enriquecerRosComEvidencias, calcularResumoAgregadoDominio, predicadoIlikePostgrest } from '../supabase/functions/api-ros/dominio.ts';
+import { interpretarComando, interpretarConsulta, interpretarConsultaEvidencias, enriquecerRosComEvidencias, calcularResumoAgregadoDominio, predicadoIlikePostgrest, classificarErroRpcRo } from '../supabase/functions/api-ros/dominio.ts';
 import { selecionarEvidenciasHumanas } from '../supabase/functions/mcp-brain/evidencias-humanas.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -41,6 +41,17 @@ test('aprovação exige número, aprovação e vencimento confirmados', () => {
   assert.throws(() => interpretarComando('POST', `${uuid}/aprovar`, {
     numero_ro: '1', data_aprovacao: '12/09/2026', data_vencimento: '2026-12-11',
   }), /data/i);
+});
+
+test('violação de sequência de datas retorna validação, não conflito de concorrência', () => {
+  assert.deepEqual(
+    classificarErroRpcRo('23514', 'new row violates check constraint "registros_oportunidade_datas_aprovacao"'),
+    { status: 422, error: 'A data de aprovação não pode ser anterior à data de envio ao fabricante.' },
+  );
+  assert.deepEqual(
+    classificarErroRpcRo('P0001', 'Conflito de versão'),
+    { status: 409, error: 'Conflito de versão' },
+  );
 });
 
 test('solicitação e resposta de renovação são comandos distintos', () => {

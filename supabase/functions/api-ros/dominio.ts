@@ -6,6 +6,22 @@ export class ErroComando extends Error {
   }
 }
 
+export function classificarErroRpcRo(codigo: string | undefined, mensagem: string | undefined) {
+  if (codigo === "23514") {
+    if (mensagem?.includes("registros_oportunidade_datas_aprovacao")) {
+      return {
+        status: 422,
+        error: "A data de aprovação não pode ser anterior à data de envio ao fabricante.",
+      };
+    }
+    return { status: 422, error: "Os dados informados não atendem às regras da R.O." };
+  }
+  if (codigo === "23505" || codigo === "P0001") {
+    return { status: 409, error: mensagem || "Conflito de versão ou duplicidade na R.O." };
+  }
+  return null;
+}
+
 type Corpo = Record<string, unknown>;
 type Comando = { rpc: string; params: Record<string, unknown> };
 

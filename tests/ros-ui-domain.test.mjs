@@ -56,6 +56,18 @@ test('traduzirErroApiRos mapeia códigos HTTP e mensagens sem expor detalhes int
   assert.equal(traduzirErroApiRos(503, null, 'Serviço temporariamente indisponível.'), 'Serviço temporariamente indisponível.');
 });
 
+test('aprovação não é enviada quando sua data é anterior ao envio registrado', () => {
+  const { validarPayloadAcaoRo } = carregarDominioRos();
+  assert.throws(
+    () => validarPayloadAcaoRo('aprovar', {
+      numero_ro: 'RO-2026-001',
+      data_aprovacao: '2026-09-13',
+      data_vencimento: '2026-12-13',
+    }, { data_solicitacao: '2026-09-14' }),
+    /aprovação não pode ser anterior.*14\/09\/2026/i,
+  );
+});
+
 test('fetchRegistrosOportunidade envia Authorization, monta query e processa resposta com sucesso', async () => {
   let urlChamada = '';
   let headersChamados = {};

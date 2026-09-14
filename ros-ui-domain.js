@@ -306,6 +306,10 @@
       }
       const dataAprovacao = validarDataCivil(dados.data_aprovacao, 'A data de aprovação');
       const dataVencimento = validarDataCivil(dados.data_vencimento, 'A data de vencimento');
+      const dataSolicitacao = contexto.data_solicitacao;
+      if (dataSolicitacao && dataAprovacao < dataSolicitacao) {
+        throw new Error(`A data de aprovação não pode ser anterior à data de envio ao fabricante (${formatarDataCivil(dataSolicitacao)}).`);
+      }
       return {
         rota: 'aprovar',
         payload: {
