@@ -1093,23 +1093,6 @@ const NovaOportunidadeModal = ({ supabaseClient, contaFixa, contas = [], contato
             </div>
           </div>
 
-          {/* SEÇÃO 5: REGISTROS DE OPORTUNIDADE (R.O.) */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
-            <SectionTitle>Registros de Oportunidade (R.O.) — Dados legados</SectionTitle>
-            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/60 mt-2 mb-3">
-              Estes campos são legados e mantidos apenas para histórico. Novas R.Os devem ser criadas pela seção estruturada vinculada à oportunidade.
-            </p>
-            <div className="space-y-2.5 mt-2">
-              <CRMInput label="R.O: Infraestrutura (legado)" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <CRMInput label="R.O: Software 1" name="roSw1" value={form.roSw1} onChange={handleChange} placeholder="Ex: Veeam RO #98765" />
-                <CRMInput label="R.O: Software 2" name="roSw2" value={form.roSw2} onChange={handleChange} placeholder="Ex: Fortinet RO #54321" />
-                <CRMInput label="R.O: Software 3" name="roSw3" value={form.roSw3} onChange={handleChange} placeholder="Ex: VMware RO #11223" />
-                <CRMInput label="R.O: Software 4" name="roSw4" value={form.roSw4} onChange={handleChange} placeholder="Ex: Red Hat RO #44556" />
-              </div>
-            </div>
-          </div>
-
           {/* FOOTER */}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 shadow-xs transition-colors cursor-pointer">Cancelar</button>
@@ -1345,23 +1328,6 @@ const EditarOportunidadeModal = ({ supabaseClient, negocio, contatos = [], vende
                 rows={3}
                 className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 shadow-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
               />
-            </div>
-          </div>
-
-          {/* SEÇÃO 5: REGISTROS DE OPORTUNIDADE (R.O.) */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm shadow-slate-200/50 p-4">
-            <SectionTitle>Registros de Oportunidade (R.O.) — Dados legados</SectionTitle>
-            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/60 mt-2 mb-3">
-              Estes campos são legados e mantidos apenas para histórico. Novas R.Os devem ser criadas pela seção estruturada vinculada à oportunidade.
-            </p>
-            <div className="space-y-2.5 mt-2">
-              <CRMInput label="R.O: Infraestrutura (legado)" name="roInfra" value={form.roInfra} onChange={handleChange} placeholder="Ex: Dell RO #123456" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <CRMInput label="R.O: Software 1" name="roSw1" value={form.roSw1} onChange={handleChange} placeholder="Ex: Veeam RO #98765" />
-                <CRMInput label="R.O: Software 2" name="roSw2" value={form.roSw2} onChange={handleChange} placeholder="Ex: Fortinet RO #54321" />
-                <CRMInput label="R.O: Software 3" name="roSw3" value={form.roSw3} onChange={handleChange} placeholder="Ex: VMware RO #11223" />
-                <CRMInput label="R.O: Software 4" name="roSw4" value={form.roSw4} onChange={handleChange} placeholder="Ex: Red Hat RO #44556" />
-              </div>
             </div>
           </div>
 

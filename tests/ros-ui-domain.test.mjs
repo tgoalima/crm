@@ -1665,23 +1665,15 @@ test('Ação Nova R.O. na Ficha 360º comunica com app.js reutilizando o mesmo m
   assert.ok(empresasJs.includes("window.addEventListener('ro-criada'"));
 });
 
-test('Campos legados de R.O. em empresas.js são marcados como dados legados e preservados', () => {
+test('Ficha da empresa não exibe mais campos legados de R.O.', () => {
   const empresasJs = lerArquivo('empresas.js');
 
-  // Título e aviso explicativo dos dados legados
-  assert.ok(empresasJs.includes('Registros de Oportunidade (R.O.) — Dados legados'));
-  assert.ok(empresasJs.includes('Estes campos são legados e mantidos apenas para histórico'));
-  assert.ok(empresasJs.includes('Novas R.Os devem ser criadas pela seção estruturada vinculada à oportunidade'));
-
-  // Campos continuam existindo e não foram apagados
-  assert.ok(empresasJs.includes('name="roInfra"'));
-  assert.ok(empresasJs.includes('name="roSw1"'));
-  assert.ok(empresasJs.includes('name="roSw2"'));
-  assert.ok(empresasJs.includes('name="roSw3"'));
-  assert.ok(empresasJs.includes('name="roSw4"'));
-
-  // Não são enviados para a rota /api/ros
-  assert.ok(!empresasJs.includes('/api/ros/legado'));
+  assert.ok(!empresasJs.includes('Registros de Oportunidade (R.O.) — Dados legados'));
+  assert.ok(!empresasJs.includes('name="roInfra"'));
+  assert.ok(!empresasJs.includes('name="roSw1"'));
+  assert.ok(!empresasJs.includes('name="roSw2"'));
+  assert.ok(!empresasJs.includes('name="roSw3"'));
+  assert.ok(!empresasJs.includes('name="roSw4"'));
 });
 
 test('App não acessa showToast em zona morta temporal ao inicializar callbacks de R.O.', () => {
