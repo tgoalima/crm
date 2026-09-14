@@ -326,7 +326,7 @@ test('painel ordena eventos recentes primeiro e separa vigência, ciclo e açõe
   assert.deepEqual(Array.from(obterAcoesPermitidasRo('Encerrada')), []);
 });
 
-test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cenário e responsável opcionais', () => {
+test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com descrição e responsável opcionais', () => {
   const { validarPayloadCriacaoRo } = carregarDominioRos();
 
   // Bloqueio sem oportunidade
@@ -351,7 +351,7 @@ test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cen
     /categoria/i
   );
 
-  // Sucesso com campos mínimos obrigatórios (cenário e responsável opcionais)
+  // Sucesso com campos mínimos obrigatórios (responsável opcional)
   const limpoMinimo = validarPayloadCriacaoRo({
     negocio_id: 'neg-1',
     fabricante_id: 'fab-1',
@@ -360,7 +360,6 @@ test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cen
   assert.equal(limpoMinimo.negocio_id, 'neg-1');
   assert.equal(limpoMinimo.fabricante_id, 'fab-1');
   assert.equal(limpoMinimo.categoria, 'Infraestrutura');
-  assert.equal(limpoMinimo.cenario, null);
   assert.equal(limpoMinimo.responsavel_operacional_clickup_id, null);
   assert.equal(limpoMinimo.titulo, null);
   assert.equal(limpoMinimo.descricao, null);
@@ -372,13 +371,11 @@ test('validarPayloadCriacaoRo exige oportunidade, fabricante e categoria com cen
     categoria: 'Nuvem',
     titulo: 'Expansão Datacenter',
     descricao: 'Contato: Ana\nItens: servidores\nValor: R$ 50.000',
-    cenario: 'Migração de servidores legados',
     responsavel_operacional_clickup_id: '90848927',
     request_id: 'req-stable-1',
   });
   assert.equal(limpoCompleto.titulo, 'Expansão Datacenter');
   assert.match(limpoCompleto.descricao, /Valor/);
-  assert.equal(limpoCompleto.cenario, 'Migração de servidores legados');
   assert.equal(limpoCompleto.responsavel_operacional_clickup_id, '90848927');
   assert.equal(limpoCompleto.request_id, 'req-stable-1');
 });
@@ -1714,6 +1711,15 @@ test('cadastro e painel lateral oferecem descrição operacional editável da R.
   assert.match(drawer, /Descrição operacional/);
   assert.match(drawer, /Salvar descrição/);
   assert.match(drawer, /'descricao'/);
+});
+
+test('cadastro de R.O. não exibe nem envia o campo cenário', () => {
+  const appJs = fs.readFileSync(path.resolve('app.js'), 'utf8');
+  const modalInicio = appJs.indexOf('function NovaRoModal');
+  const modalFim = appJs.indexOf('function RegistrosOportunidadeView', modalInicio);
+  const modal = appJs.slice(modalInicio, modalFim);
+  assert.doesNotMatch(modal, /Cenário \(opcional\)/);
+  assert.doesNotMatch(modal, /cenario:\s*cenario/);
 });
 
 test('fechamento perdido não exige proposta, mas ganho continua exigindo proposta selecionada', () => {

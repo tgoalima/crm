@@ -24,6 +24,7 @@ test('criação exige oportunidade, fabricante e categoria', () => {
         p_categoria: 'Infraestrutura',
         p_titulo: 'Datacenter',
         p_descricao: null,
+        // A RPC histórica ainda recebe o argumento, mas a interface não o expõe.
         p_cenario: null,
         p_responsavel_operacional_clickup_id: null,
         p_request_id: null,
@@ -31,6 +32,15 @@ test('criação exige oportunidade, fabricante e categoria', () => {
     },
   );
   assert.throws(() => interpretarComando('POST', '', { fabricante_id: uuid, categoria: 'Infra' }), /oportunidade/i);
+});
+
+test('criação estruturada não aceita mais cenário separado da descrição operacional', () => {
+  assert.throws(() => interpretarComando('POST', '', {
+    negocio_id: uuid,
+    fabricante_id: uuid,
+    categoria: 'Infraestrutura',
+    cenario: 'Alternativo',
+  }), /campo.*não permitido|inesperado/i);
 });
 
 test('descrição operacional é enviada na criação, possui limite e pode ser atualizada', () => {

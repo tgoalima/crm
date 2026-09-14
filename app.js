@@ -2953,7 +2953,6 @@ function NovaRoModal({
   const [categoria, setCategoria] = useState("");
   const [titulo, setTitulo] = useState("");
   const [descricao, setDescricao] = useState("");
-  const [cenario, setCenario] = useState("");
   const [responsavelId, setResponsavelId] = useState("");
 
   const [salvando, setSalvando] = useState(false);
@@ -3086,7 +3085,6 @@ function NovaRoModal({
       categoria: categoria,
       titulo: titulo,
       descricao: descricao,
-      cenario: cenario,
       responsavel_operacional_clickup_id: responsavelId,
       request_id: requestIdRef.current,
     };
@@ -3363,21 +3361,7 @@ function NovaRoModal({
             <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Este é o contexto da R.O. para o fabricante; ele não substitui as atualizações comerciais da oportunidade.</p>
           </div>
 
-          {/* Cenário e Responsável Operacional (Opcionais) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Cenário (opcional)
-              </label>
-              <input
-                type="text"
-                value={cenario}
-                onChange={(e) => setCenario(e.target.value)}
-                placeholder="Ex: Principal, Alternativo Fortinet"
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
-              />
-            </div>
-
+          <div>
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Responsável Operacional (opcional)
@@ -4386,7 +4370,7 @@ function RegistrosOportunidadeView({
                               )}
                             </div>
                             <span className="text-[11px] text-slate-400 dark:text-slate-500 line-clamp-1 mt-0.5">
-                              {categoriaExibida} {ro.cenario ? `· ${ro.cenario}` : ''}
+                              {categoriaExibida}
                             </span>
                           </div>
                         </td>

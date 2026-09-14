@@ -450,7 +450,6 @@
       categoria,
       titulo: payload.titulo ? String(payload.titulo).trim() : null,
       descricao,
-      cenario: payload.cenario ? String(payload.cenario).trim() : null,
       responsavel_operacional_clickup_id: payload.responsavel_operacional_clickup_id ? String(payload.responsavel_operacional_clickup_id).trim() : null,
       request_id: payload.request_id ? String(payload.request_id).trim() : null,
     };

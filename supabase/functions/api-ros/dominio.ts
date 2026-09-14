@@ -204,7 +204,7 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
   const rota = path.replace(/^\/+|\/+$/g, '');
   if (!rota) {
     somente(corpo, [
-      'negocio_id', 'fabricante_id', 'categoria', 'titulo', 'descricao', 'cenario',
+      'negocio_id', 'fabricante_id', 'categoria', 'titulo', 'descricao',
       'responsavel_operacional_clickup_id', 'request_id',
     ]);
     return {
@@ -215,7 +215,8 @@ export function interpretarComando(method: string, path: string, corpo: Corpo): 
         p_categoria: texto(corpo.categoria, 'A categoria', true),
         p_titulo: texto(corpo.titulo, 'O título'),
         p_descricao: textoDescricao(corpo.descricao),
-        p_cenario: texto(corpo.cenario, 'O cenário'),
+        // Mantido como null para compatibilidade com a assinatura histórica da RPC.
+        p_cenario: null,
         p_responsavel_operacional_clickup_id: texto(corpo.responsavel_operacional_clickup_id, 'O responsável'),
         p_request_id: texto(corpo.request_id, 'O request_id'),
       },
