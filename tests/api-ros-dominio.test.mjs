@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const lerArquivo = (caminho) => fs.readFileSync(new URL('../' + caminho, import.meta.url), 'utf8');
-import { interpretarComando, interpretarConsulta, interpretarConsultaEvidencias, enriquecerRosComEvidencias, calcularResumoAgregadoDominio, predicadoIlikePostgrest, classificarErroRpcRo } from '../supabase/functions/api-ros/dominio.ts';
+import { interpretarComando, interpretarConsulta, interpretarConsultaEvidencias, enriquecerRosComEvidencias, calcularResumoAgregadoDominio, predicadoIlikePostgrest, classificarErroRpcRo, estagioPermiteCriarRo } from '../supabase/functions/api-ros/dominio.ts';
 import { selecionarEvidenciasHumanas } from '../supabase/functions/mcp-brain/evidencias-humanas.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -30,6 +30,13 @@ test('criação exige oportunidade, fabricante e categoria', () => {
     },
   );
   assert.throws(() => interpretarComando('POST', '', { fabricante_id: uuid, categoria: 'Infra' }), /oportunidade/i);
+});
+
+test('estágio Ganho ou Perdido não permite criar R.O., mas etapas ativas e Congelado permitem', () => {
+  assert.equal(estagioPermiteCriarRo('Qualificação'), true);
+  assert.equal(estagioPermiteCriarRo('Congelado'), true);
+  assert.equal(estagioPermiteCriarRo('Ganho'), false);
+  assert.equal(estagioPermiteCriarRo('Perdido'), false);
 });
 
 test('aprovação exige número, aprovação e vencimento confirmados', () => {
@@ -209,6 +216,19 @@ test('consulta de R.O. usa somente colunas existentes de contas', () => {
   const api = lerArquivo('supabase/functions/api-ros/index.ts');
   assert.doesNotMatch(migration, /nome_fantasia/);
   assert.doesNotMatch(api, /nome_fantasia/);
+});
+
+test('lista de R.Os usa RPC paginada para busca ampla, sem compor URL com todos os IDs de oportunidades', () => {
+  const api = lerArquivo('supabase/functions/api-ros/index.ts');
+  const migration = lerArquivo('supabase/migrations/20260914a_ro_listagem_filtrada.sql');
+  assert.match(api, /rpc\("ro_listar_ids_filtrados"/);
+  const inicioListagem = api.indexOf('const selectRos = () =>');
+  const fimListagem = api.indexOf('const body = await req.json()', inicioListagem);
+  assert.ok(inicioListagem >= 0 && fimListagem > inicioListagem);
+  assert.doesNotMatch(api.slice(inicioListagem, fimListagem), /negIds\.join/);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION public\.ro_listar_ids_filtrados/);
+  assert.match(migration, /p_busca text DEFAULT NULL/);
+  assert.match(migration, /JOIN public\.negocios n/);
 });
 
 test('teste SQL do resumo começa uma transação antes de executar inserções e sempre faz rollback', () => {
@@ -816,14 +836,15 @@ test('interpretarConsulta aceita conta_id válido como UUID e rejeita UUID invá
   assert.throws(() => interpretarConsulta(pInvalido), /conta.*inválid/i);
 });
 
-test('api-ros index.ts resolve oportunidades da conta por conta_id sem atalho textual nem ambiguidade (Ficha 360º)', () => {
+test('api-ros repassa conta_id para a listagem oficial no banco sem atalho textual nem ambiguidade (Ficha 360º)', () => {
   const indexTs = lerArquivo('supabase/functions/api-ros/index.ts');
+  const migration = lerArquivo('supabase/migrations/20260914a_ro_listagem_filtrada.sql');
 
-  // Verifica que index.ts filtra por conta_id buscando na tabela negocios
+  // A lista paginada usa a RPC; a regra de conta fica no JOIN com negocios.
   assert.ok(indexTs.includes('consulta.conta_id'));
-  assert.ok(indexTs.includes('.from("negocios")'));
-  assert.ok(indexTs.includes('.eq("conta_id", consulta.conta_id)'));
-  assert.ok(indexTs.includes('query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO])'));
+  assert.ok(indexTs.includes('p_conta_id: consulta.conta_id'));
+  assert.match(migration, /JOIN public\.negocios n/);
+  assert.match(migration, /n\.conta_id = p_conta_id/);
 
   // Não usa busca textual de cliente para resolver conta_id
   assert.ok(!indexTs.includes('buscarIdsContas(supabase, consulta.conta_id)'));

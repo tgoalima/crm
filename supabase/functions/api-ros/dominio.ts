@@ -22,6 +22,11 @@ export function classificarErroRpcRo(codigo: string | undefined, mensagem: strin
   return null;
 }
 
+export function estagioPermiteCriarRo(estagio: unknown): boolean {
+  const valor = typeof estagio === "string" ? estagio.trim().toLocaleLowerCase("pt-BR") : "";
+  return !valor.includes("ganho") && !valor.includes("perdido");
+}
+
 type Corpo = Record<string, unknown>;
 type Comando = { rpc: string; params: Record<string, unknown> };
 

@@ -9,6 +9,7 @@ import {
   predicadoIlikePostgrest,
   ErroComando,
   classificarErroRpcRo,
+  estagioPermiteCriarRo,
 } from "./dominio.ts";
 import { coletarEvidenciasHumanas, lerClassificacaoAutores } from "../mcp-brain/evidencias-humanas.ts";
 import { coletarComentariosClickUp } from "../mcp-brain/comentarios.ts";
@@ -249,65 +250,52 @@ Deno.serve(async (req) => {
         return json(resumoRpc);
       }
 
-      let query = supabase.from("registros_oportunidade").select(`
+      const selectRos = () => supabase.from("registros_oportunidade").select(`
         *, fabricantes_ro(id,nome,prazo_inicial_sugerido_dias,limite_renovacoes),
         negocios(id,nome,conta_id,clickup_negocio_id,contas(id,nome,razao_social)),
         renovacoes_ro(*), eventos_ro(*)
       `, { count: "exact" });
-      if (tail) query = query.eq("id", tail);
-      if (consulta.conta_id) {
-        const { data: negsConta, error: errNegsConta } = await supabase
-          .from("negocios")
-          .select("id")
-          .eq("conta_id", consulta.conta_id);
-        if (errNegsConta) {
-          throw new ErroComando(500, `Falha ao consultar oportunidades da conta: ${errNegsConta.message}`);
-        }
-        const negIds = idsUnicos(negsConta);
-        query = query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
-      }
-      if (consulta.negocio_id) query = query.eq("negocio_id", consulta.negocio_id);
-      if (consulta.fabricante_id) query = query.eq("fabricante_id", consulta.fabricante_id);
-      if (consulta.situacao) query = query.eq("situacao", consulta.situacao);
-      if (consulta.responsavel) query = query.eq("responsavel_operacional_clickup_id", consulta.responsavel);
-      if (consulta.vence_ate) query = query.lte("data_vencimento", consulta.vence_ate);
-      if (consulta.numero_ro) query = query.ilike("numero_ro", `%${consulta.numero_ro}%`);
 
-      if (consulta.cliente) {
-        const contaIds = await buscarIdsContas(supabase, consulta.cliente);
-        const { data: negsMatch } = await supabase
-          .from("negocios")
-          .select("id")
-          .in("conta_id", contaIds.length > 0 ? contaIds : [UUID_NULO]);
-        const negIds = idsUnicos(negsMatch);
-        query = query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
+      if (tail) {
+        const { data, error, count } = await selectRos().eq("id", tail);
+        if (error) throw new Error(`Falha ao consultar R.O.: ${error.message}`);
+        return json({ data, total: count || 0, pagina: 1, limite: 1, total_paginas: count ? 1 : 0 });
       }
 
-      if (consulta.oportunidade) {
-        const negIds = await buscarIdsNegocios(supabase, consulta.oportunidade, false);
-        query = query.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
+      const { data: linhas, error: erroIds } = await supabase.rpc("ro_listar_ids_filtrados", {
+        p_conta_id: consulta.conta_id,
+        p_negocio_id: consulta.negocio_id,
+        p_fabricante_id: consulta.fabricante_id,
+        p_situacao: consulta.situacao,
+        p_responsavel: consulta.responsavel,
+        p_vence_ate: consulta.vence_ate,
+        p_cliente: consulta.cliente,
+        p_oportunidade: consulta.oportunidade,
+        p_numero_ro: consulta.numero_ro,
+        p_busca: consulta.busca,
+        p_pagina: consulta.pagina,
+        p_limite: consulta.limite,
+      });
+      if (erroIds) throw new Error(`Falha ao pesquisar oportunidades: ${erroIds.message}`);
+
+      const ids = (linhas || []).map((linha: { id: string }) => linha.id);
+      const total = linhas?.[0]?.total || 0;
+      if (ids.length === 0) {
+        return json({ data: [], total, pagina: consulta.pagina, limite: consulta.limite, total_paginas: 0 });
       }
 
-      if (consulta.busca) {
-        const negIds = await buscarIdsNegocios(supabase, consulta.busca, true);
-
-        if (negIds.length > 0) {
-          query = query.or(`${predicadoIlikePostgrest("numero_ro", consulta.busca)},negocio_id.in.(${negIds.join(",")})`);
-        } else {
-          query = query.ilike("numero_ro", `%${consulta.busca}%`);
-        }
-      }
-
-      const offset = (consulta.pagina - 1) * consulta.limite;
-      const { data, error, count } = await query.order("data_vencimento", { ascending: true, nullsFirst: false })
-        .range(offset, offset + consulta.limite - 1);
+      const { data: dadosRos, error } = await selectRos().in("id", ids);
       if (error) throw new Error(`Falha ao consultar R.Os: ${error.message}`);
+      const ordem = new Map(ids.map((id: string, indice: number) => [id, indice]));
+      const data = (dadosRos || []).sort((a: { id: string }, b: { id: string }) => (
+        (ordem.get(a.id) || 0) - (ordem.get(b.id) || 0)
+      ));
       return json({
         data,
-        total: count || 0,
+        total,
         pagina: consulta.pagina,
         limite: consulta.limite,
-        total_paginas: Math.ceil((count || 0) / consulta.limite),
+        total_paginas: Math.ceil(total / consulta.limite),
       });
     }
 
@@ -317,6 +305,19 @@ Deno.serve(async (req) => {
       body.request_id = requestIdHeader;
     }
     const comando = interpretarComando(req.method, tail, body);
+    if (comando.rpc === "ro_criar") {
+      const { data: negocio, error: erroNegocio } = await supabase
+        .from("negocios")
+        .select("id,estagio")
+        .eq("id", comando.params.p_negocio_id)
+        .maybeSingle();
+      if (erroNegocio || !negocio) {
+        throw new ErroComando(422, "A oportunidade informada não está disponível para criar a R.O.");
+      }
+      if (!estagioPermiteCriarRo(negocio.estagio)) {
+        throw new ErroComando(422, "Não é possível criar R.O. para oportunidade em Ganho ou Perdido.");
+      }
+    }
     const { data, error } = await supabase.rpc(comando.rpc, {
       ...comando.params,
       p_autor_clickup_id: autor.id,

@@ -19,6 +19,15 @@ test('o navegador e os testes carregam o mesmo domínio de R.Os', () => {
   assert.equal(typeof dominio?.montarQueryRos, 'function');
   assert.equal(typeof dominio?.traduzirErroApiRos, 'function');
   assert.equal(typeof dominio?.fetchRegistrosOportunidade, 'function');
+  assert.equal(typeof dominio?.estaOportunidadeElegivelParaRo, 'function');
+});
+
+test('seleção de oportunidade para R.O. aceita etapas ativas e congeladas, mas exclui Ganho e Perdido', () => {
+  const { estaOportunidadeElegivelParaRo } = carregarDominioRos();
+  assert.equal(estaOportunidadeElegivelParaRo({ estagio: 'Qualificação' }), true);
+  assert.equal(estaOportunidadeElegivelParaRo({ estagio: 'Congelado' }), true);
+  assert.equal(estaOportunidadeElegivelParaRo({ estagio: 'Ganho' }), false);
+  assert.equal(estaOportunidadeElegivelParaRo({ estagio: 'Perdido' }), false);
 });
 
 test('montarQueryRos serializa paginação e filtros omitindo campos vazios', () => {

@@ -103,6 +103,11 @@
     return limpo || '—';
   };
 
+  const estaOportunidadeElegivelParaRo = (oportunidade) => {
+    const estagio = String(oportunidade?.estagio || '').trim().toLocaleLowerCase('pt-BR');
+    return !estagio.includes('ganho') && !estagio.includes('perdido');
+  };
+
   const obterLinkOportunidade = (negocio) => {
     if (!negocio || typeof negocio !== 'object') {
       return { temLink: false, url: null, label: '—', rel: null, target: null };
@@ -780,6 +785,7 @@
     obterHojeSaoPaulo,
     formatarDataCivil,
     formatarCategoriaRo,
+    estaOportunidadeElegivelParaRo,
     obterLinkOportunidade,
     tratarEstadoResumo,
     calcularVigenciaRo,

@@ -412,6 +412,7 @@ const {
   fetchResumoRos,
   formatarDataCivil,
   formatarCategoriaRo,
+  estaOportunidadeElegivelParaRo,
   obterLinkOportunidade,
   tratarEstadoResumo,
   obterHojeSaoPaulo,
@@ -2944,14 +2945,18 @@ function NovaRoModal({
         if (!termo) {
           const { data } = await supabaseClient
             .from("negocios")
-            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .select("id, nome, estagio, conta_id, contas(id, nome, razao_social)")
+            .not("estagio", "ilike", "%ganho%")
+            .not("estagio", "ilike", "%perdido%")
             .order("nome")
             .limit(20);
           if (!cancelado) setSugestoesOportunidades(data || []);
         } else {
           const { data: negsPorNome } = await supabaseClient
             .from("negocios")
-            .select("id, nome, conta_id, contas(id, nome, razao_social)")
+            .select("id, nome, estagio, conta_id, contas(id, nome, razao_social)")
+            .not("estagio", "ilike", "%ganho%")
+            .not("estagio", "ilike", "%perdido%")
             .ilike("nome", "%" + termo + "%")
             .limit(20);
 
@@ -2970,7 +2975,9 @@ function NovaRoModal({
           if (contaIds.length > 0) {
             const { data: negs } = await supabaseClient
               .from("negocios")
-              .select("id, nome, conta_id, contas(id, nome, razao_social)")
+              .select("id, nome, estagio, conta_id, contas(id, nome, razao_social)")
+              .not("estagio", "ilike", "%ganho%")
+              .not("estagio", "ilike", "%perdido%")
               .in("conta_id", contaIds)
               .limit(20);
             negsPorConta = negs || [];
@@ -2980,7 +2987,10 @@ function NovaRoModal({
             const mapa = new Map();
             (negsPorNome || []).forEach((n) => mapa.set(n.id, n));
             negsPorConta.forEach((n) => mapa.set(n.id, n));
-            setSugestoesOportunidades(Array.from(mapa.values()));
+            const candidatas = Array.from(mapa.values());
+            setSugestoesOportunidades(candidatas.filter((op) => (
+              estaOportunidadeElegivelParaRo ? estaOportunidadeElegivelParaRo(op) : true
+            )));
           }
         }
       } catch (e) {
@@ -3097,7 +3107,7 @@ function NovaRoModal({
         </div>
 
         {/* Formulário */}
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-4">
+        <form noValidate onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-4">
           {erro && (
             <div className="p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-start gap-2">
               <span className="shrink-0 text-base">⚠️</span>
