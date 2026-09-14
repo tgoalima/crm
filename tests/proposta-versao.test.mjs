@@ -7,7 +7,9 @@ const edge = fs.readFileSync('supabase/functions/sync-proposta-tecnica-clickup/i
 const app = fs.readFileSync('app.js', 'utf8');
 
 test('a RPC cria a sucessora da maior versão, não da proposta aberta', () => {
-  assert.match(migration, /ORDER BY public\.proposta_versao_rank\(versao\) DESC/);
+  assert.match(migration, /ORDER BY public\.proposta_versao_rank\(p\.versao\) DESC/);
+  assert.match(migration, /FROM public\.propostas AS p/);
+  assert.match(migration, /p\.created_at DESC, p\.id DESC/);
   assert.match(migration, /v_nova_versao := public\.increment_version_code\(v_base\.versao\)/);
   assert.match(migration, /pg_advisory_xact_lock/);
   assert.match(app, /rpc\('gerar_proxima_versao_proposta'/);

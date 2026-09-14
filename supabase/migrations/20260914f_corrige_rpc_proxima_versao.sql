@@ -1,25 +1,5 @@
--- Criação atômica de versões de propostas.
--- A versão aberta no navegador não pode decidir a próxima letra.
-
-CREATE OR REPLACE FUNCTION public.proposta_versao_rank(p_versao text)
-RETURNS integer
-LANGUAGE plpgsql
-IMMUTABLE
-AS $function$
-DECLARE
-  v_letras text := upper(regexp_replace(coalesce(p_versao, ''), '^v', '', 'i'));
-  v_resultado integer := 0;
-  v_caractere text;
-BEGIN
-  IF v_letras !~ '^[A-Z]+$' THEN
-    RETURN 0;
-  END IF;
-  FOR v_caractere IN SELECT unnest(string_to_array(v_letras, NULL)) LOOP
-    v_resultado := (v_resultado * 26) + (ascii(v_caractere) - ascii('A') + 1);
-  END LOOP;
-  RETURN v_resultado;
-END;
-$function$;
+-- Corrige ambiguidade entre a coluna propostas.id e o campo de saída id da RPC.
+-- Necessária para bancos que já receberam a migration 20260914e.
 
 CREATE OR REPLACE FUNCTION public.gerar_proxima_versao_proposta(
   p_clickup_negocio_id text,
@@ -41,7 +21,6 @@ BEGIN
   END IF;
   v_id_com_hash := '#' || v_id_sem_hash;
 
-  -- Serializa a criação por oportunidade durante toda a transação.
   PERFORM pg_advisory_xact_lock(hashtext(v_id_sem_hash));
 
   SELECT p.* INTO v_base
