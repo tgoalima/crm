@@ -132,19 +132,39 @@ Deno.serve(async (req) => {
           queryEvidencias = queryEvidencias.in("negocio_id", negIds.length > 0 ? negIds : [UUID_NULO]);
         }
 
+        // A busca ampla pode encontrar centenas de oportunidades. Nunca monte
+        // uma expressão PostgREST com todos esses UUIDs: a URL ultrapassa o
+        // limite do proxy. A RPC pagina os IDs diretamente no banco.
+        let idsPaginados: string[] | null = null;
+        let totalPaginado: number | null = null;
         if (consultaEvidencias.busca) {
-          const negIds = await buscarIdsNegocios(supabase, consultaEvidencias.busca, true);
-          if (negIds.length > 0) {
-            queryEvidencias = queryEvidencias.or(`${predicadoIlikePostgrest("numero_ro", consultaEvidencias.busca)},negocio_id.in.(${negIds.join(",")})`);
-          } else {
-            queryEvidencias = queryEvidencias.ilike("numero_ro", `%${consultaEvidencias.busca}%`);
-          }
+          const situacoesEvidencias = consultaEvidencias.situacao
+            ? [consultaEvidencias.situacao]
+            : ["Backoffice", "Aguardando aprovação", "Aprovada"];
+          const { data: linhas, error: erroIds } = await supabase.rpc("ro_listar_ids_evidencias_filtrados", {
+            p_negocio_id: consultaEvidencias.negocio_id,
+            p_fabricante_id: consultaEvidencias.fabricante_id,
+            p_fabricante: consultaEvidencias.fabricante,
+            p_situacoes: situacoesEvidencias,
+            p_responsavel: consultaEvidencias.responsavel,
+            p_cliente: consultaEvidencias.cliente,
+            p_oportunidade: consultaEvidencias.oportunidade,
+            p_numero_ro: consultaEvidencias.numero_ro,
+            p_busca: consultaEvidencias.busca,
+            p_pagina: consultaEvidencias.pagina,
+            p_limite: consultaEvidencias.limite,
+          });
+          if (erroIds) throw new Error(`Falha ao pesquisar R.Os para evidências: ${erroIds.message}`);
+          idsPaginados = (linhas || []).map((linha: { id: string }) => linha.id);
+          totalPaginado = Number(linhas?.[0]?.total || 0);
+          queryEvidencias = queryEvidencias.in("id", idsPaginados.length > 0 ? idsPaginados : [UUID_NULO]);
         }
 
         const offsetEvid = (consultaEvidencias.pagina - 1) * consultaEvidencias.limite;
-        const { data: rosBrutas, error: erroRos, count: totalCount } = await queryEvidencias
-          .order("data_vencimento", { ascending: true, nullsFirst: false })
-          .range(offsetEvid, offsetEvid + consultaEvidencias.limite - 1);
+        const consultaOrdenada = queryEvidencias.order("data_vencimento", { ascending: true, nullsFirst: false });
+        const { data: rosBrutas, error: erroRos, count: totalCount } = idsPaginados
+          ? await consultaOrdenada
+          : await consultaOrdenada.range(offsetEvid, offsetEvid + consultaEvidencias.limite - 1);
 
         if (erroRos) throw new Error(`Falha ao consultar R.Os para evidências: ${erroRos.message}`);
 
@@ -200,8 +220,12 @@ Deno.serve(async (req) => {
           }));
         }
 
+        const ordemPaginada = idsPaginados ? new Map(idsPaginados.map((id, indice) => [id, indice])) : null;
+        const rosOrdenadas = ordemPaginada
+          ? (rosBrutas || []).sort((a: { id: string }, b: { id: string }) => (ordemPaginada.get(a.id)! - ordemPaginada.get(b.id)!))
+          : (rosBrutas || []);
         const resultadoEnriquecido = enriquecerRosComEvidencias(
-          rosBrutas || [],
+          rosOrdenadas,
           mapaEvidencias,
           consultaEvidencias.data_inicio,
           consultaEvidencias.data_fim,
@@ -210,7 +234,7 @@ Deno.serve(async (req) => {
 
         return json({
           data: resultadoEnriquecido.ros,
-          total: totalCount || 0,
+          total: totalPaginado ?? totalCount ?? 0,
           total_sem_atualizacao_confirmada: resultadoEnriquecido.total_sem_atualizacao_confirmada,
           total_cobertura_desconhecida: resultadoEnriquecido.total_cobertura_desconhecida,
           total_com_atualizacao: resultadoEnriquecido.total_com_atualizacao,
@@ -220,7 +244,7 @@ Deno.serve(async (req) => {
           data_fim: consultaEvidencias.data_fim,
           pagina: consultaEvidencias.pagina,
           limite: consultaEvidencias.limite,
-          total_paginas: Math.ceil((totalCount || 0) / consultaEvidencias.limite),
+          total_paginas: Math.ceil((totalPaginado ?? totalCount ?? 0) / consultaEvidencias.limite),
         });
       }
 

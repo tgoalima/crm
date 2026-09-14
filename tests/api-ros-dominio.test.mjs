@@ -246,6 +246,12 @@ test('migration da descrição limita conteúdo, usa SECURITY INVOKER e restring
   assert.match(migration, /registros_oportunidade_herdar_descricao_sucessora/);
 });
 
+test('fechamento de oportunidade sem proposta guarda motivo e data no negócio', () => {
+  const migration = lerArquivo('supabase/migrations/20260914c_negocio_fechamento_sem_proposta.sql');
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS data_fechamento DATE/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS motivo_perda TEXT/);
+});
+
 test('consulta de R.O. usa somente colunas existentes de contas', () => {
   const migration = lerArquivo('supabase/migrations/20260912c_ro_resumo_agregado.sql');
   const api = lerArquivo('supabase/functions/api-ros/index.ts');
@@ -264,6 +270,20 @@ test('lista de R.Os usa RPC paginada para busca ampla, sem compor URL com todos 
   assert.match(migration, /CREATE OR REPLACE FUNCTION public\.ro_listar_ids_filtrados/);
   assert.match(migration, /p_busca text DEFAULT NULL/);
   assert.match(migration, /JOIN public\.negocios n/);
+});
+
+test('evidências de R.O. usam RPC paginada com o mesmo conjunto de situações da tela', () => {
+  const api = lerArquivo('supabase/functions/api-ros/index.ts');
+  const migration = lerArquivo('supabase/migrations/20260914d_ro_evidencias_filtradas.sql');
+  const inicio = api.indexOf('if (tail === "evidencias")');
+  const fim = api.indexOf('// Rota de Lista e Resumo', inicio);
+  assert.ok(inicio >= 0 && fim > inicio);
+  const rotaEvidencias = api.slice(inicio, fim);
+  assert.match(rotaEvidencias, /rpc\("ro_listar_ids_evidencias_filtrados"/);
+  assert.match(rotaEvidencias, /p_situacoes/);
+  assert.doesNotMatch(rotaEvidencias, /negIds\.join/);
+  assert.match(migration, /p_situacoes text\[\] DEFAULT NULL/);
+  assert.match(migration, /ro\.situacao = ANY\(p_situacoes\)/);
 });
 
 test('teste SQL do resumo começa uma transação antes de executar inserções e sempre faz rollback', () => {

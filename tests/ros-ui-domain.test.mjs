@@ -1723,3 +1723,23 @@ test('cadastro e painel lateral oferecem descrição operacional editável da R.
   assert.match(drawer, /Salvar descrição/);
   assert.match(drawer, /'descricao'/);
 });
+
+test('fechamento perdido não exige proposta, mas ganho continua exigindo proposta selecionada', () => {
+  const appJs = fs.readFileSync(path.resolve('app.js'), 'utf8');
+  const inicio = appJs.indexOf('/* Botão Ganho');
+  const fim = appJs.indexOf('/* Barra de progresso total', inicio);
+  const botoesFinais = appJs.slice(inicio, fim);
+  assert.equal((botoesFinais.match(/disabled=\{!hasSelectedProposal\}/g) || []).length, 1);
+  assert.match(botoesFinais, /setShowCloseModal\('loss'\)/);
+  assert.match(appJs, /const podeFecharSemProposta = showCloseModal === 'loss';/);
+  assert.match(appJs, /if \(colName\.includes\('ganho'\) && !propostaSelecionada\) return;/);
+});
+
+test('falha HTTP ao gravar etapa no ClickUp é confirmada por leitura antes de ser tratada como erro', () => {
+  const appJs = fs.readFileSync(path.resolve('app.js'), 'utf8');
+  const inicio = appJs.indexOf('const updateTaskStage = async');
+  const fim = appJs.indexOf('const updateTaskClickupStatus', inicio);
+  const atualizarEtapa = appJs.slice(inicio, fim);
+  assert.match(atualizarEtapa, /verificarAtualizacaoCampoClickUp/);
+  assert.match(atualizarEtapa, /\/clickup-api\/task\/\$\{taskId\}/);
+});

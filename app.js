@@ -5726,6 +5726,17 @@ function App() {
     }
   }, [supabaseClient]);
 
+  const verificarAtualizacaoCampoClickUp = async (taskId, newOptionId) => {
+    const verificacao = await fetch(`/clickup-api/task/${taskId}`, {
+      headers: { ...getSupabaseHeaders() },
+    });
+    if (!verificacao.ok) return false;
+    const tarefa = await verificacao.json();
+    const campo = (tarefa.custom_fields || []).find((item) => item.id === 'c8d0abe2-c59f-4a9e-93ff-bd060659aa63');
+    const opcaoAtual = (campo?.type_config?.options || []).find((opcao) => String(opcao.orderindex) === String(campo?.value));
+    return opcaoAtual?.id === newOptionId;
+  };
+
   const updateTaskStage = async (taskId, newOptionId) => {
     const res = await fetch(`/clickup-api/task/${taskId}/field/c8d0abe2-c59f-4a9e-93ff-bd060659aa63`, {
       method: 'POST',
@@ -5735,7 +5746,7 @@ function App() {
       },
       body: JSON.stringify({ value: newOptionId })
     });
-    if (!res.ok) {
+    if (!res.ok && !(await verificarAtualizacaoCampoClickUp(taskId, newOptionId))) {
       throw new Error("Falha na atualização do estágio no ClickUp");
     }
   };
@@ -9536,7 +9547,8 @@ function App() {
   };
 
   const handleConfirmClose = async () => {
-    if (!currentProposta || !supabaseClient) return;
+    const podeFecharSemProposta = showCloseModal === 'loss';
+    if ((!currentProposta && !podeFecharSemProposta) || !supabaseClient) return;
     
     const dateVal = closeDate || new Date().toISOString().split('T')[0];
     if (showCloseModal === 'loss' && !selectedLossReason) {
@@ -9550,22 +9562,32 @@ function App() {
       const situacao = isWin ? 'Ganho' : 'Perdido';
       const motivo = isWin ? null : selectedLossReason;
 
-      // 1. Atualizar a proposta no Supabase
-      const { error } = await supabaseClient
-        .from('propostas')
-        .update({ 
-          situacao: situacao,
-          motivo_perda: motivo,
-          data_fechamento: dateVal,
-          total_proposta: realTimeGrandTotal
-        })
-        .eq('id', currentProposta.id);
-
-      if (error) throw error;
+      // 1. Registrar o fechamento na proposta existente. Perdas sem proposta
+      // também são válidas e ficam gravadas diretamente no negócio.
+      if (currentProposta) {
+        const { error } = await supabaseClient
+          .from('propostas')
+          .update({
+            situacao: situacao,
+            motivo_perda: motivo,
+            data_fechamento: dateVal,
+            total_proposta: realTimeGrandTotal
+          })
+          .eq('id', currentProposta.id);
+        if (error) throw error;
+      } else {
+        const idSemHash = String(clickupTaskId || selectedTask?.id || '').replace('#', '').trim();
+        if (!idSemHash) throw new Error('Não foi possível identificar a oportunidade para registrar a perda.');
+        const { error } = await supabaseClient
+          .from('negocios')
+          .update({ estagio: 'Perdido', motivo_perda: motivo, data_fechamento: dateVal })
+          .or(`clickup_negocio_id.eq.${idSemHash},clickup_negocio_id.eq.#${idSemHash}`);
+        if (error) throw error;
+      }
 
       // 2. Sincronizar ClickUp se aplicável
       if (clickupTaskId) {
-        await syncClickUpProposta(clickupTaskId, realTimeGrandTotal, situacao);
+        if (currentProposta) await syncClickUpProposta(clickupTaskId, realTimeGrandTotal, situacao);
         
         const targetOption = kanbanColumns.find(c => c.name.toLowerCase().includes(isWin ? 'ganho' : 'perdido'));
         if (targetOption) {
@@ -9573,10 +9595,10 @@ function App() {
         }
       }
 
-      showToast(`Proposta marcada como ${isWin ? 'GANHA' : 'PERDIDA'} com sucesso!`, 'success');
+      showToast(`${currentProposta ? 'Proposta' : 'Oportunidade'} marcada como ${isWin ? 'GANHA' : 'PERDIDA'} com sucesso!`, 'success');
       setShowCloseModal(false);
       setShowDrawer(false); // Fecha o Drawer conforme exigido no fluxo de sucesso
-      loadPropostas(currentProposta.id);
+      if (currentProposta) loadPropostas(currentProposta.id);
       await refreshSupabaseProposalsList();
       loadDashboardData();
       fetchKanbanData();
@@ -14239,16 +14261,17 @@ function App() {
                       const currentRawOption = rawOptions.find(c => c.id === currentRawOptionId);
                       const currentRawName = (currentRawOption?.name || selectedTask?.estagio || '').toLowerCase();
 
-                      // Verificar se há uma proposta selecionada ativada
-                      const selectedProp = propostas && propostas.length > 0
-                        ? (propostas.find(p => p.situacao === 'Selecionada') || propostas.find(p => p.versao === 'vA') || propostas[0])
-                        : null;
-                      const hasSelectedProposal = Boolean(selectedProp);
+                      // Ganho só pode usar uma proposta explicitamente selecionada.
+                      // Perdido pode ocorrer antes da primeira proposta; quando já
+                      // existe uma versão, ela recebe o fechamento para preservar o histórico.
+                      const propostaSelecionada = propostas?.find(p => p.situacao === 'Selecionada') || null;
+                      const propostaParaPerda = propostaSelecionada || propostas?.find(p => p.versao === 'vA') || propostas?.[0] || null;
+                      const hasSelectedProposal = Boolean(propostaSelecionada);
 
                       // Determinar se o negócio está Ganho, Perdido ou Congelado
                       const taskEstagio = (selectedTask?.estagio || '').toLowerCase();
-                      const isWon = (selectedProp && selectedProp.situacao === 'Ganho') || currentRawName.includes('ganho') || taskEstagio.includes('ganho');
-                      const isLost = (selectedProp && selectedProp.situacao === 'Perdido') || currentRawName.includes('perdido') || taskEstagio.includes('perdido');
+                      const isWon = (propostaParaPerda && propostaParaPerda.situacao === 'Ganho') || currentRawName.includes('ganho') || taskEstagio.includes('ganho');
+                      const isLost = (propostaParaPerda && propostaParaPerda.situacao === 'Perdido') || currentRawName.includes('perdido') || taskEstagio.includes('perdido');
                       const isFrozen = currentRawName.includes('congelad') || taskEstagio.includes('congelad');
                       const isInactiveState = isWon || isLost || isFrozen;
 
@@ -14272,11 +14295,13 @@ function App() {
                                     // data_fechamento/motivo_perda, deixando o negócio invisível
                                     // no relatório de faturamento.
                                     if (colName.includes('ganho') || colName.includes('perdido')) {
-                                      if (!currentProposta) return;
                                       setCloseDate(new Date().toISOString().split('T')[0]);
                                       if (colName.includes('ganho')) {
+                                        if (colName.includes('ganho') && !propostaSelecionada) return;
+                                        setCurrentProposta(propostaSelecionada);
                                         setShowCloseModal('win');
                                       } else {
+                                        setCurrentProposta(propostaParaPerda);
                                         setSelectedLossReason('');
                                         setShowCloseModal('loss');
                                       }
@@ -14327,8 +14352,8 @@ function App() {
                             <button
                               disabled={!hasSelectedProposal}
                               onClick={() => {
-                                if (selectedProp) {
-                                  setCurrentProposta(selectedProp);
+                                if (propostaSelecionada) {
+                                  setCurrentProposta(propostaSelecionada);
                                   setCloseDate(new Date().toISOString().split('T')[0]);
                                   setShowCloseModal('win');
                                 }
@@ -14351,22 +14376,17 @@ function App() {
 
                             {/* Botão Perdido (Acende se for Perdido, senão fica apagado) */}
                             <button
-                              disabled={!hasSelectedProposal}
                               onClick={() => {
-                                if (selectedProp) {
-                                  setCurrentProposta(selectedProp);
-                                  setCloseDate(new Date().toISOString().split('T')[0]);
-                                  setSelectedLossReason('');
-                                  setShowCloseModal('loss');
-                                }
+                                setCurrentProposta(propostaParaPerda);
+                                setCloseDate(new Date().toISOString().split('T')[0]);
+                                setSelectedLossReason('');
+                                setShowCloseModal('loss');
                               }}
-                              title={hasSelectedProposal ? "Marcar oportunidade como Perdida 😞" : "Requer uma proposta Selecionada para fechar como Perdido"}
+                              title="Marcar oportunidade como Perdida 😞"
                               className={`relative flex flex-col items-center justify-center py-2.5 px-1 rounded-xl transition-all duration-300 ${
                                 isLost
                                   ? 'bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/30 scale-[1.03] ring-2 ring-rose-400 ring-offset-1 cursor-pointer'
-                                  : hasSelectedProposal
-                                  ? 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-700 dark:hover:text-rose-300 hover:border-rose-200 dark:hover:border-rose-800 border border-transparent cursor-pointer'
-                                  : 'bg-slate-100/50 dark:bg-slate-700/50 text-slate-300 dark:text-slate-600 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50'
+                                  : 'bg-slate-100/80 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-700 dark:hover:text-rose-300 hover:border-rose-200 dark:hover:border-rose-800 border border-transparent cursor-pointer'
                               }`}
                             >
                               <div className={`w-5 h-5 rounded-full flex items-center justify-center mb-1 ${isLost ? 'bg-white/25 dark:bg-slate-800/25' : 'bg-slate-200/60 dark:bg-slate-600/60'}`}>
