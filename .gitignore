@@ -19,3 +19,4 @@ venv/
 # regeneráveis via scripts/, não fazem parte do código-fonte
 cache/
 backups/
+reports/
