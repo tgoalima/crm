@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Script de Prévia de Migração das R.O.s Históricas do Agendor para o CRM Suprimática.
+Script de Prévia de Migração do Funil de R.O.s do Agendor para o CRM Suprimática.
 Fase 5: Migração Ensaiada (Somente Prévia / Dry-Run).
 
 Regras Mandatórias:
@@ -10,9 +10,9 @@ Regras Mandatórias:
    nem no ClickUp; sem deploys, migrations ou escritas.
 2. Uso EXCLUSIVO de CLICKUP_API_TOKEN. CLICKUP_TOKEN é explicitamente ignorado e não utilizado.
    Suporte a --env-file opcional para carregar credenciais da VPS ou arquivo específico.
-3. Registros históricos: os 73 negócios identificados no Agendor com campo de R.O. preenchido
-   são registros históricos em status Ganho (fechamento comercial). Preserva status, etapa
-   e datas originais, sem inferir situação atual, vigência, aprovação ou renovação.
+3. Fonte exclusiva: cada linha do funil "Registro de Oportunidades" é uma candidata.
+   A prévia preserva as 74 R.O.s, inclusive as que ainda não possuem número oficial.
+   Etapas de renovação nunca criam ciclos sem datas e evidências confirmadas.
 4. Regra de vínculo estrita:
    - status_vinculo = 'vinculado' SOMENTE se:
      a) Houver exatamente 1 tarefa ClickUp para o Agendor Deal ID; E
@@ -49,13 +49,159 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict, Counter
 from datetime import datetime
 
-SCRIPT_VERSION = "1.2.1"
+SCRIPT_VERSION = "2.0.0"
 
 # Constantes de integração
 CLICKUP_NEGOCIOS_LIST_ID = '901326185457'
 CF_AGENDOR_DEAL_ID = '94d84531-94e7-4f7c-b982-0ab8d9d87b2d'
-DEFAULT_PLANILHA_PATH = '_arquivo_historico/planilhas_agendor/606404-negocios-2026-08-07-21-57-34.xlsx'
+DEFAULT_PLANILHA_PATH = '_arquivo_historico/planilhas_agendor/Agendor_Funil_R.Os.xlsx'
 DEFAULT_OUTPUT_DIR = 'reports'
+FUNIL_RO_ESPERADO = 'registro de oportunidades'
+
+
+def desacentuar(txt):
+    """Normaliza rótulos do Agendor para comparação sem alterar o valor original."""
+    if txt is None:
+        return ''
+    return ''.join(
+        c for c in unicodedata.normalize('NFKD', str(txt))
+        if not unicodedata.combining(c)
+    ).lower().strip()
+
+
+def _valor_linha(linha, indice):
+    if indice is None or indice >= len(linha) or linha[indice] is None:
+        return ''
+    return str(linha[indice]).strip()
+
+
+def validar_exportacao_funil_ro(headers, linhas):
+    """Recusa qualquer exportação que não seja do funil dedicado de R.O.s."""
+    indices = {desacentuar(header): pos for pos, header in enumerate(headers) if header}
+    obrigatorias = ('codigo do negocio', 'funil', 'etapa', 'r.o i')
+    ausentes = [campo for campo in obrigatorias if campo not in indices]
+    if ausentes:
+        raise ValueError(
+            'Planilha incompatível: faltam colunas obrigatórias do funil Registro de Oportunidades: '
+            + ', '.join(ausentes)
+        )
+    valores_funil = {
+        desacentuar(_valor_linha(linha, indices['funil']))
+        for linha in linhas
+        if _valor_linha(linha, indices['codigo do negocio'])
+    }
+    if valores_funil != {FUNIL_RO_ESPERADO}:
+        recebido = ', '.join(sorted(valor or '(vazio)' for valor in valores_funil)) or '(sem linhas)'
+        raise ValueError(
+            'Planilha incompatível: a prévia aceita somente o funil "Registro de Oportunidades". '
+            f'Funil recebido: {recebido}'
+        )
+    return indices
+
+
+def gerar_source_id_funil_ro(deal_id):
+    """Uma linha do funil dedicado representa uma única R.O. de origem."""
+    return f'agendor-ro:{deal_id}'
+
+
+def mapear_etapa_agendor_ro(etapa):
+    """Sugere somente estados que a exportação confirma sem criar ciclos fictícios."""
+    etapa_norm = desacentuar(etapa)
+    if etapa_norm == 'backoffice':
+        return 'Backoffice', 'nao_informada', ''
+    if etapa_norm == 'aguardando aprovacao':
+        return 'Aguardando aprovação', 'nao_informada', ''
+    if etapa_norm == 'aprovado':
+        return 'Aprovada', 'nao_informada', ''
+    if etapa_norm in ('1o renovacao', '2o renovacao manual'):
+        return (
+            'Aprovada',
+            'revisao_humana_necessaria',
+            f'Etapa "{etapa}" indica renovação, mas a exportação não traz datas, ciclo nem evidências para criá-la automaticamente.'
+        )
+    return (
+        'revisao_humana_necessaria',
+        'revisao_humana_necessaria',
+        f'Etapa do Agendor não mapeada: "{etapa or "(vazia)"}".'
+    )
+
+
+def classificar_ro_funil(numero_raw, titulo, descricao):
+    """Prioriza o campo R.O I; usa título/descrição apenas para identificar o fabricante."""
+    numero = str(numero_raw or '').strip()
+    contexto = ' '.join(parte for parte in (titulo, descricao, numero) if parte)
+    fabricante = normalizar_nome_fabricante(contexto)
+    if numero:
+        classificacao = classificar_e_extrair_ro(numero)
+        numero_sugerido = numero.upper()
+        confianca_numero = 'alta'
+    else:
+        classificacao = None
+        numero_sugerido = ''
+        confianca_numero = 'desconhecida'
+
+    if fabricante:
+        fabricante_sugerido = fabricante
+        confianca_fabricante = 'alta'
+    elif classificacao and classificacao['fabricante_sugerido'] != 'DESCONHECIDO':
+        fabricante_sugerido = classificacao['fabricante_sugerido']
+        confianca_fabricante = classificacao['confianca_fabricante']
+    else:
+        fabricante_sugerido = 'DESCONHECIDO'
+        confianca_fabricante = 'desconhecida'
+
+    pendencias = []
+    if not numero_sugerido:
+        pendencias.append('Número oficial da R.O. não informado no Agendor.')
+    if fabricante_sugerido == 'DESCONHECIDO':
+        pendencias.append('Fabricante não identificado com segurança na exportação.')
+    return {
+        'valor_bruto': numero,
+        'fabricante_sugerido': fabricante_sugerido,
+        'confianca_fabricante': confianca_fabricante,
+        'numero_ro_sugerido': numero_sugerido,
+        'confianca_numero': confianca_numero,
+        'motivo_pendencia': ' '.join(pendencias),
+    }
+
+
+def extrair_candidatos_funil_ro(headers, linhas):
+    """Extrai uma candidata por linha da exportação exclusiva do funil de R.O.s."""
+    indices = validar_exportacao_funil_ro(headers, linhas)
+    def indice(*nomes):
+        return next((indices.get(desacentuar(nome)) for nome in nomes if desacentuar(nome) in indices), None)
+
+    candidatos = []
+    for linha in linhas:
+        deal_id = normalizar_codigo_agendor(_valor_linha(linha, indices['codigo do negocio']))
+        if not deal_id:
+            continue
+        titulo = _valor_linha(linha, indice('título do negócio', 'titulo do negocio'))
+        descricao = _valor_linha(linha, indice('descrição', 'descricao'))
+        etapa = _valor_linha(linha, indices['etapa'])
+        classificacao = classificar_ro_funil(_valor_linha(linha, indices['r.o i']), titulo, descricao)
+        situacao, renovacao, pendencia_etapa = mapear_etapa_agendor_ro(etapa)
+        pendencias = [classificacao['motivo_pendencia'], pendencia_etapa, 'Categoria da R.O. não exportada; validar com Fábio antes da migração.']
+        classificacao['motivo_pendencia'] = ' '.join(p for p in pendencias if p)
+        candidatos.append({
+            'source_id': gerar_source_id_funil_ro(deal_id),
+            'agendor_deal_id': deal_id,
+            'coluna_origem': 'R.O I',
+            'empresa_agendor': _valor_linha(linha, indice('empresa relacionada')),
+            'titulo_agendor': titulo,
+            'status_agendor': _valor_linha(linha, indice('status')),
+            'etapa_agendor': etapa,
+            'funil_agendor': _valor_linha(linha, indices['funil']),
+            'descricao_agendor': descricao,
+            'data_inicio_agendor': _valor_linha(linha, indice('data de início', 'data de inicio')),
+            'data_conclusao_agendor': _valor_linha(linha, indice('data de conclusão', 'data de conclusao')),
+            'data_cadastro_agendor': _valor_linha(linha, indice('data de cadastro')),
+            'validade_confirmada': 'nao_informada',
+            'renovacao_confirmada': renovacao,
+            'situacao_operacional_sugerida': situacao,
+            **classificacao,
+        })
+    return candidatos, {'total_linhas_ro_fonte': len(linhas), 'total_ros_fonte': len(candidatos)}
 
 
 def calcular_hash_script():
@@ -276,6 +422,22 @@ def normalizar_nome_fabricante(nome):
         return 'BROADCOM'
     if 'RED HAT' in norm or 'REDHAT' in norm or 'RHEL' in norm:
         return 'RED HAT'
+    if 'SANGFOR' in norm:
+        return 'SANGFOR'
+    if 'NUTANIX' in norm:
+        return 'NUTANIX'
+    if 'ORACLE' in norm or 'OCI' in norm:
+        return 'ORACLE'
+    if 'LENOVO' in norm:
+        return 'LENOVO'
+    if 'GOOGLE CLOUD' in norm or ' GCP' in f' {norm}':
+        return 'GOOGLE CLOUD'
+    if 'POSITIVO' in norm:
+        return 'POSITIVO'
+    if 'SUPERMICRO' in norm:
+        return 'SUPERMICRO'
+    if 'OMNISSA' in norm:
+        return 'OMNISSA'
 
     return None
 
@@ -890,13 +1052,14 @@ def executar_conciliacao(candidatos, agendor_id_to_tasks, crm_negocios_map, crm_
             'titulo_agendor': c['titulo_agendor'],
             'status_agendor': c['status_agendor'],
             'etapa_agendor': c['etapa_agendor'],
+            'funil_agendor': c.get('funil_agendor', ''),
             'descricao_agendor': c['descricao_agendor'],
             'data_inicio_agendor': c['data_inicio_agendor'],
             'data_conclusao_agendor': c['data_conclusao_agendor'],
             'data_cadastro_agendor': c['data_cadastro_agendor'],
-            'validade_confirmada': "nao_informada",
-            'renovacao_confirmada': "nao_informada",
-            'situacao_operacional_sugerida': "historico_sem_situacao_confirmada",
+            'validade_confirmada': c.get('validade_confirmada', 'nao_informada'),
+            'renovacao_confirmada': c.get('renovacao_confirmada', 'nao_informada'),
+            'situacao_operacional_sugerida': c.get('situacao_operacional_sugerida', 'revisao_humana_necessaria'),
             'motivo_pendencia': motivo_pendencia,
         }
         registros_conciliados.append(reg)
@@ -927,6 +1090,7 @@ CSV_FIELDNAMES = [
     'titulo_agendor',
     'status_agendor',
     'etapa_agendor',
+    'funil_agendor',
     'descricao_agendor',
     'data_inicio_agendor',
     'data_conclusao_agendor',
@@ -1004,7 +1168,7 @@ def executar_previa(planilha_path=DEFAULT_PLANILHA_PATH, clickup_cache=None, lim
     carregar_env_local(env_file)
 
     print("=" * 70)
-    print("SIMULAÇÃO DE MIGRAÇÃO DE R.O.s HISTÓRICAS DO AGENDOR (DRY-RUN)")
+    print("SIMULAÇÃO DE MIGRAÇÃO DO FUNIL DE R.O.s DO AGENDOR (DRY-RUN)")
     print("=" * 70)
     print(f"Ambiente: {identificar_ambiente()}")
     print(f"Versão do script: {SCRIPT_VERSION} (hash: {calcular_hash_script()[:12]}...)")
@@ -1016,131 +1180,13 @@ def executar_previa(planilha_path=DEFAULT_PLANILHA_PATH, clickup_cache=None, lim
         raise RuntimeError("Planilha vazia ou sem linhas legíveis.")
 
     headers = rows[0]
-
-    def desacentuar(txt):
-        if not txt:
-            return ""
-        return "".join(c for c in unicodedata.normalize('NFKD', str(txt)) if not unicodedata.combining(c)).lower().strip()
-
-    col_indices = {}
-    ro_col_indices = []
-
-    for idx, h in enumerate(headers):
-        if not h:
-            continue
-        h_str = str(h).strip()
-        h_norm = desacentuar(h_str)
-        col_indices[h_norm] = idx
-        if 'r.o' in h_norm or 'ro' in h_norm.split():
-            ro_col_indices.append((idx, h_str))
-
-    def buscar_idx(*nomes):
-        for n in nomes:
-            norm = desacentuar(n)
-            if norm in col_indices:
-                return col_indices[norm]
-        return None
-
-    deal_col_idx = buscar_idx('código do negócio', 'codigo do negocio')
-    if deal_col_idx is None:
-        raise RuntimeError("Coluna 'Código do Negócio' não encontrada no cabeçalho da planilha.")
-
-    empresa_col_idx = buscar_idx('empresa relacionada')
-    titulo_col_idx = buscar_idx('título do negócio', 'titulo do negocio')
-    status_col_idx = buscar_idx('status')
-    etapa_col_idx = buscar_idx('etapa')
-    desc_col_idx = buscar_idx('descrição', 'descricao')
-    dt_inicio_col_idx = buscar_idx('data de início', 'data de inicio')
-    dt_conclusao_col_idx = buscar_idx('data de conclusão', 'data de conclusao')
-    dt_cadastro_col_idx = buscar_idx('data de cadastro')
-
-    print(f"Linhas totais na planilha: {len(rows)}")
-    print(f"Colunas de R.O. detectadas: {[c[1] for c in ro_col_indices]}")
-
-    # 2. Agrupa por negócio para deduplicação de produtos repetidos
-    deals = {}
-    total_linhas_processadas = 0
-
-    for r in rows[1:]:
-        total_linhas_processadas += 1
-        raw_deal_id = r[deal_col_idx] if deal_col_idx < len(r) else None
-        deal_id = normalizar_codigo_agendor(raw_deal_id)
-        if not deal_id:
-            continue
-
-        if deal_id not in deals:
-            deals[deal_id] = {
-                'deal_id': deal_id,
-                'empresa': str(r[empresa_col_idx]).strip() if empresa_col_idx and empresa_col_idx < len(r) and r[empresa_col_idx] else "",
-                'titulo': str(r[titulo_col_idx]).strip() if titulo_col_idx and titulo_col_idx < len(r) and r[titulo_col_idx] else "",
-                'status': str(r[status_col_idx]).strip() if status_col_idx and status_col_idx < len(r) and r[status_col_idx] else "",
-                'etapa': str(r[etapa_col_idx]).strip() if etapa_col_idx and etapa_col_idx < len(r) and r[etapa_col_idx] else "",
-                'descricao': str(r[desc_col_idx]).strip() if desc_col_idx and desc_col_idx < len(r) and r[desc_col_idx] else "",
-                'data_inicio': str(r[dt_inicio_col_idx]).strip() if dt_inicio_col_idx and dt_inicio_col_idx < len(r) and r[dt_inicio_col_idx] else "",
-                'data_conclusao': str(r[dt_conclusao_col_idx]).strip() if dt_conclusao_col_idx and dt_conclusao_col_idx < len(r) and r[dt_conclusao_col_idx] else "",
-                'data_cadastro': str(r[dt_cadastro_col_idx]).strip() if dt_cadastro_col_idx and dt_cadastro_col_idx < len(r) and r[dt_cadastro_col_idx] else "",
-                'ros_raw': {}
-            }
-
-        # Coleta campos de R.O. da linha
-        for col_idx, col_name in ro_col_indices:
-            if col_idx < len(r) and r[col_idx] is not None:
-                val = str(r[col_idx]).strip()
-                if val and col_name not in deals[deal_id]['ros_raw']:
-                    deals[deal_id]['ros_raw'][col_name] = val
-
-    print(f"Negócios únicos identificados: {len(deals)}")
-
-    # Regra 4: Contagem estrita na fonte de negócios com algum campo de R.O. preenchido
-    negocios_com_campo_ro_fonte = [
-        d for d in deals.values()
-        if any(bool(v and str(v).strip()) for v in d['ros_raw'].values())
-    ]
-    total_negocios_com_campo_ro_fonte_count = len(negocios_com_campo_ro_fonte)
-
-    # 3. Extrai candidatos e classifica
-    candidatos_validos = []
-    candidatos_invalidos_descartados = 0
-    total_campos_ro_preenchidos = 0
-    negocios_com_candidato_valido_set = set()
-
-    deal_items = list(deals.values())
+    linhas_fonte = rows[1:]
+    candidatos_validos, estatisticas_fonte = extrair_candidatos_funil_ro(headers, linhas_fonte)
     if limit:
-        deal_items = deal_items[:limit]
-        print(f"Limite aplicado: processando primeiros {limit} negócios.")
-
-    for d in deal_items:
-        for col_name, raw_val in d['ros_raw'].items():
-            total_campos_ro_preenchidos += 1
-            classificacao = classificar_e_extrair_ro(raw_val, deal_context=d)
-            if classificacao is None:
-                candidatos_invalidos_descartados += 1
-                continue
-
-            negocios_com_candidato_valido_set.add(d['deal_id'])
-            candidato = {
-                'source_id': gerar_source_id(d['deal_id'], col_name),
-                'agendor_deal_id': d['deal_id'],
-                'coluna_origem': col_name,
-                'empresa_agendor': d['empresa'],
-                'titulo_agendor': d['titulo'],
-                'status_agendor': d['status'],
-                'etapa_agendor': d['etapa'],
-                'descricao_agendor': d['descricao'],
-                'data_inicio_agendor': d['data_inicio'],
-                'data_conclusao_agendor': d['data_conclusao'],
-                'data_cadastro_agendor': d['data_cadastro'],
-                **classificacao
-            }
-            candidatos_validos.append(candidato)
-
-    total_negocios_com_valido_pos_descarte_count = len(negocios_com_candidato_valido_set)
-
-    print(f"Negócios com algum campo de R.O. preenchido na fonte: {total_negocios_com_campo_ro_fonte_count}")
-    print(f"Negócios com candidato válido após descarte: {total_negocios_com_valido_pos_descarte_count}")
-    print(f"Total de campos de R.O. preenchidos na fonte: {total_campos_ro_preenchidos}")
-    print(f"Candidatos inválidos/descartados ('SEM RO', apóstrofos, etc.): {candidatos_invalidos_descartados}")
-    print(f"Candidatos válidos para conciliação: {len(candidatos_validos)}")
+        candidatos_validos = candidatos_validos[:limit]
+        print(f"Limite aplicado: processando as primeiras {limit} R.O.s.")
+    print(f"Linhas de R.O. na planilha: {estatisticas_fonte['total_linhas_ro_fonte']}")
+    print(f"R.O.s candidatas do funil dedicado: {len(candidatos_validos)}")
 
     # 4. Carrega mapas externos (ClickUp e Supabase)
     agendor_id_to_tasks, _, info_coleta = carregar_mapa_clickup(cache_path=clickup_cache)
@@ -1165,12 +1211,9 @@ def executar_previa(planilha_path=DEFAULT_PLANILHA_PATH, clickup_cache=None, lim
 
     estatisticas = {
         'planilha_origem': planilha_path,
+        'funil_origem_validado': 'Registro de Oportunidades',
         'total_linhas_planilha': len(rows),
-        'total_negocios_unicos': len(deals),
-        'total_negocios_com_campo_ro_preenchido_na_fonte': total_negocios_com_campo_ro_fonte_count,
-        'total_negocios_com_candidato_valido_pos_descarte': total_negocios_com_valido_pos_descarte_count,
-        'total_campos_ro_preenchidos_na_fonte': total_campos_ro_preenchidos,
-        'total_candidatos_invalidos_descartados': candidatos_invalidos_descartados,
+        **estatisticas_fonte,
         'total_candidatos_validos_processados': len(registros_conciliados),
         'total_vinculados_a_oportunidade': total_vinculados,
         'total_pendentes_vinculo': total_pendentes_vinculo,
@@ -1193,9 +1236,8 @@ def executar_previa(planilha_path=DEFAULT_PLANILHA_PATH, clickup_cache=None, lim
 
     print("=" * 70)
     print("RESUMO EXECUTIVO DA PRÉVIA:")
-    print(f"  • Negócios com R.O. preenchida na fonte:  {total_negocios_com_campo_ro_fonte_count}")
-    print(f"  • Negócios com candidatos válidos:       {total_negocios_com_valido_pos_descarte_count}")
-    print(f"  • Total candidatos válidos processados:  {len(registros_conciliados)}")
+    print(f"  • R.O.s na fonte dedicada:               {estatisticas_fonte['total_ros_fonte']}")
+    print(f"  • Total de R.O.s processadas:            {len(registros_conciliados)}")
     print(f"  • Vinculados a oportunidades:            {total_vinculados}")
     print(f"  • Pendentes de vínculo:                  {total_pendentes_vinculo}")
     print(f"  • Com possível duplicidade:              {total_com_duplicata}")

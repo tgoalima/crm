@@ -24,11 +24,60 @@ from scripts.migracao_ros_agendor import (
     carregar_mapa_clickup,
     ler_planilha_xlsx,
     carregar_env_local,
-    DEFAULT_PLANILHA_PATH
+    DEFAULT_PLANILHA_PATH,
+    validar_exportacao_funil_ro,
+    extrair_candidatos_funil_ro,
 )
 
 
 class TestMigracaoRosAgendor(unittest.TestCase):
+
+    def test_rejeita_planilha_fora_do_funil_dedicado_de_ros(self):
+        """A prévia aceita somente uma exportação do funil Registro de Oportunidades."""
+        headers = ['Código do Negócio', 'Funil', 'Etapa', 'R.O I']
+        with self.assertRaisesRegex(ValueError, 'Registro de Oportunidades'):
+            validar_exportacao_funil_ro(headers, [['101', 'Funil de Vendas', 'Ganho', '123']])
+
+    def test_extrai_todas_as_ros_do_funil_inclusive_sem_numero(self):
+        """Cada linha do funil dedicado vira uma candidata, mesmo sem número oficial."""
+        headers = [
+            'Código do Negócio', 'Empresa relacionada', 'Título do negócio',
+            'Status', 'Funil', 'Etapa', 'Descrição', 'R.O I',
+        ]
+        rows = [
+            ['101', 'Cliente A', 'Projeto Dell', 'Em andamento', 'Registro de Oportunidades', 'Aprovado', '', '12345678'],
+            ['102', 'Cliente B', 'Firewall Fortinet', 'Em andamento', 'Registro de Oportunidades', 'Aguardando Aprovação', '', None],
+        ]
+
+        candidatos, estatisticas = extrair_candidatos_funil_ro(headers, rows)
+
+        self.assertEqual(len(candidatos), 2)
+        self.assertEqual(estatisticas['total_ros_fonte'], 2)
+        self.assertEqual(candidatos[0]['source_id'], 'agendor-ro:101')
+        self.assertEqual(candidatos[0]['fabricante_sugerido'], 'DELL')
+        self.assertEqual(candidatos[0]['numero_ro_sugerido'], '12345678')
+        self.assertEqual(candidatos[0]['situacao_operacional_sugerida'], 'Aprovada')
+        self.assertEqual(candidatos[1]['fabricante_sugerido'], 'FORTINET')
+        self.assertEqual(candidatos[1]['numero_ro_sugerido'], '')
+        self.assertEqual(candidatos[1]['confianca_numero'], 'desconhecida')
+        self.assertIn('Número oficial', candidatos[1]['motivo_pendencia'])
+
+    def test_renovacao_do_agendor_vira_pendencia_sem_inventar_ciclo(self):
+        """Etapa de renovação não cria nem confirma ciclo sem datas e evidências."""
+        headers = [
+            'Código do Negócio', 'Empresa relacionada', 'Título do negócio',
+            'Status', 'Funil', 'Etapa', 'Descrição', 'R.O I',
+        ]
+        rows = [[
+            '103', 'Cliente C', 'Backup Veeam', 'Em andamento',
+            'Registro de Oportunidades', '1º Renovação', '', 'DRG-067623-747828920861-S-VDP5',
+        ]]
+
+        candidatos, _ = extrair_candidatos_funil_ro(headers, rows)
+
+        self.assertEqual(candidatos[0]['situacao_operacional_sugerida'], 'Aprovada')
+        self.assertEqual(candidatos[0]['renovacao_confirmada'], 'revisao_humana_necessaria')
+        self.assertIn('renovação', candidatos[0]['motivo_pendencia'].lower())
 
     def test_normalizar_codigo_agendor(self):
         """Valida normalização robusta de identificadores numéricos do Agendor."""
